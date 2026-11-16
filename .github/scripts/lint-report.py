@@ -133,6 +133,16 @@ def main():
             annotate("lint", "ошибок нет")
         return 1 if only_errors else 0
 
+    # Топ типов предупреждений — чтобы было видно, что именно осталось,
+    # не выкачивая артефакт (он в некоторых окружениях недоступен).
+    by_id = {}
+    for it in issues:
+        if it["severity"] == "Warning":
+            by_id[it["id"]] = by_id.get(it["id"], 0) + 1
+    top = sorted(by_id.items(), key=lambda kv: -kv[1])[:10]
+    if top:
+        annotate("lint-топ-предупреждений", ", ".join(f"{k}={v}" for k, v in top))
+
     annotate(
         "lint-итог",
         f"ошибок={errors}, предупреждений={warnings}, информационных={infos}; "
