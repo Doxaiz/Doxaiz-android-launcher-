@@ -46,6 +46,19 @@ else
 fi
 endlog
 
+log "Разблокировка экрана"
+# Эмулятор стартует с экраном блокировки. Пока он висит, все замеры и дампы
+# относятся к keyguard, а не к лаунчеру — в прошлом прогоне из-за этого
+# получилось «Total frames rendered: 0» и пустой дамп интерфейса.
+adb shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true
+adb shell wm dismiss-keyguard >/dev/null 2>&1 || true
+sleep 2
+adb shell dumpsys window 2>/dev/null | grep -E "mCurrentFocus|mFocusedApp" | tee "$OUT/keyguard.txt"
+if grep -q "Keyguard" "$OUT/keyguard.txt"; then
+    report_fail "Экран блокировки не снят — замеры недостоверны"
+fi
+endlog
+
 log "Запуск активности"
 adb shell am start -W -n "$PKG/.MainActivity" 2>&1 | tee "$OUT/start.txt"
 endlog
@@ -63,7 +76,7 @@ else
 fi
 endlog
 
-log "Скриншот рабочего стола"
+log "Скриншоты"
 adb exec-out screencap -p > "$OUT/screen-1-home.png" 2>/dev/null || report_fail "screencap не сработал"
 ls -l "$OUT"
 endlog
@@ -79,7 +92,16 @@ else
 fi
 endlog
 
-log "AI-подсказки из view-дерева (доказательство, что интерфейс построен)"
+log "Фокус перед замерами"
+FOCUS="$(adb shell dumpsys window 2>/dev/null | grep -E 'mCurrentFocus' | head -1)"
+echo "$FOCUS" | tee "$OUT/focus.txt"
+if ! echo "$FOCUS" | grep -q "$PKG"; then
+    report_fail "В фокусе не лаунчер: $FOCUS"
+fi
+note "focus" "$FOCUS"
+endlog
+
+log "Текст с экрана (доказательство, что интерфейс построен)"
 # Скриншот из этой среды не посмотреть (артефакты не скачиваются), поэтому
 # снимаем текст с экрана: он показывает, что реально отрисовано.
 adb shell uiautomator dump /sdcard/ui-home.xml >/dev/null 2>&1 || true
@@ -88,11 +110,13 @@ python3 - "$OUT/ui-home.xml" > "$OUT/ui-home.txt" 2>/dev/null <<'PYEOF' || true
 import re, sys
 xml = open(sys.argv[1], encoding='utf-8', errors='replace').read()
 items = []
-for m in re.finditer(r'text="([^"]{1,40})"', xml):
+for m in re.finditer(r'(?:text|content-desc)="([^"]{1,40})"', xml):
     t = m.group(1).strip()
     if t and t not in items:
         items.append(t)
+count = len(re.findall(r'<node ', xml))
 print(" | ".join(items[:40]) or "(текста на экране нет)")
+print(f"--- узлов в дереве: {count}")
 PYEOF
 cat "$OUT/ui-home.txt" 2>/dev/null || echo "(дамп не получен)"
 endlog
