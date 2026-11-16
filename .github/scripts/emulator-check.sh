@@ -20,6 +20,42 @@ APK="$(find "${APK_PATH:-apk}" -name '*.apk' | head -1)"
 log() { echo "::group::$*"; }
 endlog() { echo "::endgroup::"; }
 
+dump_ui() {  # $1 = префикс файла, $2 = заголовок аннотации
+    adb shell uiautomator dump "/sdcard/ui-$1.xml" >/dev/null 2>&1 || true
+    adb shell cat "/sdcard/ui-$1.xml" > "$OUT/ui-$1.xml" 2>/dev/null || true
+    python3 - "$OUT/ui-$1.xml" "$2" > "$OUT/ui-$1.txt" 2>/dev/null <<'PYEOF' || true
+import re, sys
+path, title = sys.argv[1], sys.argv[2]
+try:
+    xml = open(path, encoding='utf-8', errors='replace').read()
+except OSError:
+    print(f"::error title={title}::дамп не получен"); raise SystemExit
+nodes = re.findall(r'<node [^>]*>', xml)
+rows = []
+for nd in nodes:
+    cls = re.search(r'class="([^"]*)"', nd)
+    txt = re.search(r'text="([^"]*)"', nd)
+    dsc = re.search(r'content-desc="([^"]*)"', nd)
+    bnd = re.search(r'bounds="([^"]*)"', nd)
+    cls = (cls.group(1).split('.')[-1] if cls else '?')
+    label = ((txt.group(1) if txt else '') or (dsc.group(1) if dsc else '')).strip()
+    rows.append(f"{cls}[{label}]{bnd.group(1) if bnd else ''}")
+print(f"узлов={len(nodes)}")
+chunks, cur = [], ''
+for r in rows:
+    if len(cur) + len(r) > 700:
+        chunks.append(cur); cur = ''
+    cur += r + ' ; '
+if cur:
+    chunks.append(cur)
+for i, ch in enumerate(chunks[:6]):
+    print(f"::notice title={title} #{i+1}::{ch}")
+if len(rows) == 0:
+    print(f"::error title={title}::дерево пустое — на экране нет UI")
+PYEOF
+    cat "$OUT/ui-$1.txt"
+}
+
 report_fail() {
     echo "$*" | tee -a "$OUT/failures.txt"
 }
@@ -101,24 +137,17 @@ fi
 note "focus" "$FOCUS"
 endlog
 
-log "Текст с экрана (доказательство, что интерфейс построен)"
-# Скриншот из этой среды не посмотреть (артефакты не скачиваются), поэтому
-# снимаем текст с экрана: он показывает, что реально отрисовано.
-adb shell uiautomator dump /sdcard/ui-home.xml >/dev/null 2>&1 || true
-adb shell cat /sdcard/ui-home.xml > "$OUT/ui-home.xml" 2>/dev/null || true
-python3 - "$OUT/ui-home.xml" > "$OUT/ui-home.txt" 2>/dev/null <<'PYEOF' || true
-import re, sys
-xml = open(sys.argv[1], encoding='utf-8', errors='replace').read()
-items = []
-for m in re.finditer(r'(?:text|content-desc)="([^"]{1,40})"', xml):
-    t = m.group(1).strip()
-    if t and t not in items:
-        items.append(t)
-count = len(re.findall(r'<node ', xml))
-print(" | ".join(items[:40]) or "(текста на экране нет)")
-print(f"--- узлов в дереве: {count}")
-PYEOF
-cat "$OUT/ui-home.txt" 2>/dev/null || echo "(дамп не получен)"
+log "Дерево интерфейса рабочего стола"
+
+# Артефакты из этой среды не скачиваются, поэтому снимаем компактный дамп
+# узлов и печатаем частями: видно, что реально на экране.
+dump_ui home "ui-home"
+
+# Подписи приложений в узлах: если их нет, рабочий стол действительно пуст,
+# а не «не прочитался» дампом.
+if ! grep -q "[A-Za-zА-Яа-я].*[A-Za-zА-Яа-я].*[A-Za-zА-Яа-я]" "$OUT/ui-home.txt" 2>/dev/null; then
+    note "ui-home-empty" "на рабочем столе нет ни одной подписи приложения"
+fi
 endlog
 
 log "Кадровые метрики"
@@ -153,6 +182,7 @@ grep -E "Total frames rendered|Janky frames|50th percentile|90th percentile|95th
     "$OUT/gfxinfo-drawer.txt" | tee "$OUT/gfxinfo-summary.txt"
 
 adb exec-out screencap -p > "$OUT/screen-2-drawer.png" 2>/dev/null || true
+dump_ui drawer "ui-drawer"
 adb shell input keyevent KEYCODE_BACK
 sleep 2
 endlog
