@@ -5110,6 +5110,29 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     }
 
     /**
+     * Устаревший путь открытия шторки через рефлексию.
+     *
+     * android.app.StatusBarManager#expandNotificationsPanel() был непубличным и
+     * в API 33/34 отсутствует в платформе вовсе (проверено по android.jar), а с
+     * Android 11 непубличные API закрыты. Метод оставлен как фолбэк для старых
+     * прошивок, где он ещё работал. Аннотация подавляет предупреждение Lint
+     * WrongConstant: строковый сервис здесь осознан и изолирован в одном месте.
+     */
+    @SuppressWarnings("WrongConstant")
+    private boolean expandShadeViaLegacyReflection() {
+        try {
+            Object service = getSystemService("statusbar");
+            if (service == null) return false;
+            Class<?> cls = Class.forName("android.app.StatusBarManager");
+            Method expand = cls.getMethod("expandNotificationsPanel");
+            expand.invoke(service);
+            return true;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    /**
      * Открывает системную шторку уведомлений.
      *
      * Порядок попыток:
@@ -5124,18 +5147,9 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         if (DoxaizLockService.expandNotificationShade()) {
             return;
         }
-        boolean reflected = false;
-        try {
-            Object service = getSystemService("statusbar");
-            if (service != null) {
-                Class<?> cls = Class.forName("android.app.StatusBarManager");
-                Method expand = cls.getMethod("expandNotificationsPanel");
-                expand.invoke(service);
-                reflected = true;
-            }
-        } catch (Throwable ignored) {
+        if (expandShadeViaLegacyReflection()) {
+            return;
         }
-        if (reflected) return;
 
         // Служба специальных возможностей — единственный путь к системной шторке.
         // Вместо тихого бездействия показываем диалог с переходом в настройки.
