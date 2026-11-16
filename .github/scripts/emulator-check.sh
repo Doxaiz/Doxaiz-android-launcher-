@@ -183,6 +183,22 @@ grep -E "Total frames rendered|Janky frames|50th percentile|90th percentile|95th
 
 adb exec-out screencap -p > "$OUT/screen-2-drawer.png" 2>/dev/null || true
 dump_ui drawer "ui-drawer"
+
+# Свайп вверх может не открыть каталог (жест зависит от настроек), поэтому
+# дополнительно пробуем кнопку в доке. Пустой каталог — это факт, а не сбой
+# скрипта, и он должен быть виден в отчёте.
+DRAWER_NODES="$(sed -n 's/^узлов=//p' "$OUT/ui-drawer.txt" 2>/dev/null | head -1)"
+if [ "${DRAWER_NODES:-0}" -lt 20 ]; then
+    note "drawer-retry" "после свайпа узлов=${DRAWER_NODES:-0}, пробую кнопку каталога в доке"
+    adb shell input tap 131 2255
+    sleep 3
+    dump_ui drawer2 "ui-drawer2"
+    DRAWER_NODES="$(sed -n 's/^узлов=//p' "$OUT/ui-drawer2.txt" 2>/dev/null | head -1)"
+fi
+note "drawer" "узлов в каталоге=${DRAWER_NODES:-0}"
+if [ "${DRAWER_NODES:-0}" -lt 20 ]; then
+    report_fail "Каталог приложений не открылся или пуст (узлов=${DRAWER_NODES:-0})"
+fi
 adb shell input keyevent KEYCODE_BACK
 sleep 2
 endlog
