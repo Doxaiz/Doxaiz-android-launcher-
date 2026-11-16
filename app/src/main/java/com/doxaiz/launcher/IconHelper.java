@@ -39,9 +39,14 @@ public final class IconHelper {
     // 4% отступа с каждой стороны -> ровно 92% оптического заполнения для всех иконок и папок
     static final float ICON_MARGIN_RATIO = 0.04f;
 
-    // Кэш готовой SRC_IN маски Squircle по sizePx (экономит >100 аллокаций Bitmap при прогреве иконок)
+    // Кэш готовой SRC_IN маски Squircle по sizePx (экономит >100 аллокаций Bitmap
+    // при прогреве иконок). Ссылка статическая, но это не утечка контекста:
+    // хранится ровно один битмап размера иконки, он пересоздаётся при смене
+    // размера (прежний при этом освобождается) и сбрасывается clearMaskCache().
+    // Lint StaticFieldLeak видит статический Bitmap и требует подавления.
     private static final Object MASK_LOCK = new Object();
     private static int cachedMaskSize = -1;
+    @SuppressWarnings("StaticFieldLeak")
     private static Bitmap cachedMaskBitmap = null;
 
     private IconHelper() {}
@@ -50,6 +55,17 @@ public final class IconHelper {
         synchronized (MASK_LOCK) {
             if (cachedMaskSize == sizePx && cachedMaskBitmap != null && !cachedMaskBitmap.isRecycled()) {
                 return cachedMaskBitmap;
+            }
+            // Прежняя маска другого размера больше не нужна: без recycle() её
+            // память держится до сборки мусора, а при смене размера иконок
+            // таких «осиротевших» битмапов может накопиться несколько.
+            // Ссылку обнуляем до recycle(), чтобы другой поток не взял
+            // переработанный объект.
+            Bitmap previous = cachedMaskBitmap;
+            cachedMaskBitmap = null;
+            cachedMaskSize = -1;
+            if (previous != null && !previous.isRecycled()) {
+                try { previous.recycle(); } catch (Throwable ignored) { }
             }
             Bitmap mask = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888);
             Canvas mc = new Canvas(mask);
@@ -146,7 +162,9 @@ public final class IconHelper {
         Bitmap content = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888);
         Canvas c = new Canvas(content);
 
-        if (Build.VERSION.SDK_INT >= 26 && raw instanceof AdaptiveIconDrawable) {
+        // minSdk 26 — AdaptiveIconDrawable существует на всех поддерживаемых
+        // версиях, проверка версии была лишней (Lint ObsoleteSdkInt).
+        if (raw instanceof AdaptiveIconDrawable) {
             drawAdaptiveLayers(c, (AdaptiveIconDrawable) raw, inner, sizePx);
         } else {
             drawNormalizedLegacy(c, raw, inner, sizePx);
