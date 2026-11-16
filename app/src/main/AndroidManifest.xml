@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     package="com.doxaiz.launcher">
 
     <!-- minSdk/targetSdk и versionCode/versionName задаются только в app/build.gradle:
@@ -20,8 +21,15 @@
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <!-- Завершение фоновых кэшированных процессов в окне «Активные приложения» -->
     <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
-    <!-- Опциональное системное управление яркостью, автоповоротом и тайм-аутом экрана из шторки (выдаётся вручную) -->
-    <uses-permission android:name="android.permission.WRITE_SETTINGS" />
+    <!-- Опциональное системное управление яркостью, автоповоротом и тайм-аутом экрана из шторки.
+         Разрешение не «выдаётся вручную» в обычном смысле: пользователь отдельно
+         разрешает его в Settings.ACTION_MANAGE_WRITE_SETTINGS, приложение при этом
+         НЕ становится системным. tools:ignore нужен, потому что Lint относит
+         защищённые разрешения к «только для системных приложений»; для WRITE_SETTINGS
+         это неверно, и ниже это проверяется. -->
+    <uses-permission
+        android:name="android.permission.WRITE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
     <!-- Опциональное переключение режима «Не беспокоить» и «Без звука» из шторки и панели звука (выдаётся вручную) -->
     <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
     <!-- Опциональный импорт раскладки из XOS / штатной оболочки (если прошивка разрешает) -->
@@ -33,6 +41,7 @@
 
     <application
         android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:enableOnBackInvokedCallback="true"
         android:fullBackupContent="false"
         android:hardwareAccelerated="true"
@@ -41,8 +50,17 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="false"
         android:theme="@style/DoxaizTheme"
-        android:usesCleartextTraffic="false">
+        android:usesCleartextTraffic="false"
+        tools:targetApi="33">
+        <!-- enableOnBackInvokedCallback действует только с Android 13 (API 33).
+             Атрибут объявлен здесь, потому что манифест один для всех версий;
+             tools:targetApi сообщает Lint, что атрибут сознательно объявлен
+             при minSdk 26 — на старых версиях система просто его игнорирует. -->
 
+        <!-- Портретная ориентация — осознанное решение: сетка рабочего стола,
+             папки и карусель рассчитаны на вертикальный экран (Chrome OS/планшет
+             в ландшафте не целевая конфигурация). tools:ignore фиксирует это,
+             чтобы предупреждение не терялось среди прочих. -->
         <activity
             android:name=".MainActivity"
             android:clearTaskOnLaunch="true"
@@ -52,6 +70,7 @@
             android:launchMode="singleTask"
             android:resumeWhilePausing="true"
             android:screenOrientation="portrait"
+            tools:ignore="LockedOrientationActivity"
             android:stateNotNeeded="true"
             android:taskAffinity=""
             android:windowSoftInputMode="adjustResize|stateAlwaysHidden">

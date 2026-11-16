@@ -298,16 +298,18 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     /**
      * Регистрация динамического ресивера только для системных броадкастов.
      *
-     * На API 33+ есть RECEIVER_NOT_EXPORTED. На 26–32 эквивалента нет, но флаг
-     * RECEIVER_EXPORTED подавляет предупреждение платформы о неявном экспорте,
-     * а сами фильтры (ACTION_BATTERY_CHANGED, RINGER_MODE_CHANGED, USER_PRESENT)
-     * отправляет только система, поэтому отличается только видимость намерения.
+     * На API 33+ используется RECEIVER_NOT_EXPORTED. На 26–32 такого флага нет
+     * (он появился в 33 вместе с самим механизмом), поэтому там регистрация
+     * обычная: фильтры (ACTION_BATTERY_CHANGED, RINGER_MODE_CHANGED, USER_PRESENT)
+     * отправляет только система, так что неявный экспорт не создаёт угрозы.
      */
     private void registerSystemReceiver(BroadcastReceiver receiver, IntentFilter filter) {
+        // RECEIVER_NOT_EXPORTED появился только в API 33. Раньше на ветке «26–32»
+        // стоял Context.RECEIVER_EXPORTED, которого до 33 не существует: обращение
+        // к полю дало бы NoSuchFieldError на Android 8–12. Для этих версий
+        // корректный вызов — обычный двухаргументный registerReceiver.
         if (Build.VERSION.SDK_INT >= 33) {
             registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED);
-        } else if (Build.VERSION.SDK_INT >= 26) {
-            registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED);
         } else {
             registerReceiver(receiver, filter);
         }
@@ -5107,16 +5109,57 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         );
     }
 
-    private void expandNotificationShade() {
+    /**
+     * Устаревший путь открытия шторки через рефлексию.
+     *
+     * android.app.StatusBarManager#expandNotificationsPanel() был непубличным и
+     * в API 33/34 отсутствует в платформе вовсе (проверено по android.jar), а с
+     * Android 11 непубличные API закрыты. Метод оставлен как фолбэк для старых
+     * прошивок, где он ещё работал. Аннотация подавляет предупреждение Lint
+     * WrongConstant: строковый сервис здесь осознан и изолирован в одном месте.
+     */
+    @SuppressWarnings("WrongConstant")
+    private boolean expandShadeViaLegacyReflection() {
         try {
             Object service = getSystemService("statusbar");
-            if (service != null) {
-                Class<?> cls = Class.forName("android.app.StatusBarManager");
-                Method expand = cls.getMethod("expandNotificationsPanel");
-                expand.invoke(service);
-            }
+            if (service == null) return false;
+            Class<?> cls = Class.forName("android.app.StatusBarManager");
+            Method expand = cls.getMethod("expandNotificationsPanel");
+            expand.invoke(service);
+            return true;
         } catch (Throwable ignored) {
+            return false;
         }
+    }
+
+    /**
+     * Открывает системную шторку уведомлений.
+     *
+     * Порядок попыток:
+     * 1) GLOBAL_ACTION_NOTIFICATIONS через нашу службу специальных возможностей —
+     *    единственный поддерживаемый стороннему лаунчеру путь;
+     * 2) прежняя рефлексия по StatusBarManager#expandNotificationsPanel — она
+     *    срабатывает только на старых прошивках, где метод ещё существовал;
+     * 3) если не вышло ни то, ни другое — объясняем причину и предлагаем
+     *    включить службу, вместо прежнего «жест есть, реакции нет».
+     */
+    private void expandNotificationShade() {
+        if (DoxaizLockService.expandNotificationShade()) {
+            return;
+        }
+        if (expandShadeViaLegacyReflection()) {
+            return;
+        }
+
+        // Служба специальных возможностей — единственный путь к системной шторке.
+        // Вместо тихого бездействия показываем диалог с переходом в настройки.
+        showConfirmModal(
+                "Нужна служба Doxaiz",
+                "Чтобы открывать системную шторку уведомлений жестом, включите "
+                        + "«Doxaiz — Панель ОЗУ и блокировка» в Специальных возможностях Android. "
+                        + "Альтернатива — собственная шторка Doxaiz в настройках.",
+                this::openAccessibilitySettings
+        );
     }
 
     // =========================================================================
@@ -9600,6 +9643,21 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                 () -> pendingPrivateSpaceAction = null);
     }
 
+    /**
+     * Открывает поток на запись для экспорта копии.
+     *
+     * «wt» (truncate) поддерживается не всеми провайдерами SAF, поэтому при
+     * ошибке используется обычный режим. Возвращается один поток — закрывать
+     * его обязан вызывающий (try-with-resources).
+     */
+    private OutputStream openBackupOutputStream(Uri uri) throws java.io.FileNotFoundException {
+        try {
+            return getContentResolver().openOutputStream(uri, "wt");
+        } catch (Exception first) {
+            return getContentResolver().openOutputStream(uri);
+        }
+    }
+
     private void launchExportBackupPicker() {
         try {
             Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
@@ -9689,15 +9747,14 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             try {
                 backupIo.execute(() -> {
                     boolean ok = false;
-                    try {
-                        OutputStream stream;
-                        try { stream = getContentResolver().openOutputStream(uri, "wt"); }
-                        catch (Exception e) { stream = getContentResolver().openOutputStream(uri); }
-                        if (stream != null) {
-                            try (OutputStream out = stream) {
-                                out.write(encoded);
-                                out.flush();
-                            }
+                    // ВАЖНО: try-with-resources, а не ручной поток. Если первый
+                    // openOutputStream(uri, "wt") открылся, но второй вызов из
+                    // catch открыл ЕЩЁ один поток, старое значение терялось и
+                    // файловый дескриптор не закрывался (утечка, отмечена Android Lint).
+                    try (OutputStream out = openBackupOutputStream(uri)) {
+                        if (out != null) {
+                            out.write(encoded);
+                            out.flush();
                             ok = true;
                         }
                     } catch (Exception ignored) { }
