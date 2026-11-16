@@ -46,6 +46,7 @@ def annotate(title, message):
 
 
 def main():
+    errors_only = "--errors-only" in sys.argv
     path = find_report()
     if not path:
         print("::warning title=lint::отчёт lint-results-debug.xml не найден")
@@ -110,6 +111,27 @@ def main():
     only_errors = [i for i in issues if i["severity"] in ("Error", "Fatal")]
     if only_errors:
         annotate("lint-error-ids", ", ".join(f"{i['id']}@{i['file'].split('/')[-1]}:{i['line']}" for i in only_errors))
+
+    # GitHub показывает не больше ~10 аннотаций на шаг, поэтому «тяжёлые»
+    # списки уходят в отчёт шага и файл, а аннотациями печатается только то,
+    # что действительно нужно видеть в PR (режим --errors-only — одни ошибки).
+    if os.environ.get("GITHUB_STEP_SUMMARY") and not errors_only:
+        try:
+            with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
+                fh.write("\n### Android Lint\n\n" + summary + "\n\n")
+                for it in sorted(issues, key=lambda x: (x["severity"] != "Error", x["category"])):
+                    where = it["file"].split("java/com/doxaiz/launcher/")[-1] if it["file"] else "-"
+                    fh.write(f"- **{it['severity']}** `{it['id']}` {where}:{it['line']} — {it['message']}\n")
+        except OSError:
+            pass
+
+    if errors_only:
+        for it in only_errors[:8]:
+            where = it["file"].split("java/com/doxaiz/launcher/")[-1] if it["file"] else "-"
+            annotate(f"lint ERROR {it['id']}", f"{where}:{it['line']} — {it['message']}")
+        if not only_errors:
+            annotate("lint", "ошибок нет")
+        return 1 if only_errors else 0
 
     annotate(
         "lint-итог",

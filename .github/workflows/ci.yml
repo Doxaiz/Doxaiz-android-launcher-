@@ -110,9 +110,15 @@ jobs:
         if: failure()
         run: bash .github/scripts/gradle-failure.sh gradle-lint.log
 
-      - name: Разбор отчёта Lint
+      - name: Разбор отчёта Lint (сводка и предупреждения)
         if: always()
         run: python3 .github/scripts/lint-report.py
+
+      # GitHub показывает не больше ~10 аннотаций на шаг, поэтому ошибки
+      # печатаются отдельным шагом: иначе они вытесняются списком предупреждений.
+      - name: Ошибки Lint
+        if: always()
+        run: python3 .github/scripts/lint-report.py --errors-only
 
       - uses: actions/upload-artifact@v4
         if: always()
