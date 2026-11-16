@@ -63,8 +63,9 @@ for r in rows:
     cur += r + ' ; '
 if cur:
     chunks.append(cur)
-for i, ch in enumerate(chunks[:8]):
-    print(f"::notice title={title} #{i+1}::{ch}")
+# Аннотаций на прогон немного (лимит GitHub), поэтому в аннотацию — только
+# счётчик и первый кусок, полный дамп пишется в отчёт шага и в файл.
+print(f"::notice title={title}::узлов={len(nodes)}; {chunks[0] if chunks else ''}")
 if not rows:
     print(f"::error title={title}::дерево пустое — на экране нет UI")
 PYEOF
@@ -121,29 +122,35 @@ adb shell dumpsys window 2>/dev/null | grep -E "mCurrentFocus|mDreamingLockscree
 endlog
 
 log "Лаунчер как системный HOME"
-# cmd package set-home-activity на части образов не срабатывает, поэтому
-# назначаем роль HOME штатным механизмом и проверяем результат.
-adb shell cmd role add-role-holder android.app.role.HOME "$PKG" >/dev/null 2>&1 || true
-HOME_HOLDERS="$(adb shell cmd role get-role-holders android.app.role.HOME 2>/dev/null | tr -d '\r')"
-echo "HOME holders: $HOME_HOLDERS" | tee "$OUT/home-role.txt"
-if ! echo "$HOME_HOLDERS" | grep -q "$PKG"; then
-    note "home-role" "роль HOME не назначилась, отключаю системный лаунчер"
-    adb shell pm disable-user --user 0 com.google.android.apps.nexuslauncher >/dev/null 2>&1 || true
-    adb shell cmd role add-role-holder android.app.role.HOME "$PKG" >/dev/null 2>&1 || true
-    HOME_HOLDERS="$(adb shell cmd role get-role-holders android.app.role.HOME 2>/dev/null | tr -d '\r')"
-    echo "HOME holders (retry): $HOME_HOLDERS" >> "$OUT/home-role.txt"
+# На эмуляторе по умолчанию HOME — Nexus Launcher, и `cmd role add-role-holder`
+# для стороннего пакета молча не срабатывает. Порядок, который работает:
+# отключить штатный лаунчер, назначить home-activity, затем проверить факт.
+adb shell pm disable-user --user 0 com.google.android.apps.nexuslauncher >/dev/null 2>&1 || true
+adb shell cmd package set-home-activity "$PKG/.MainActivity" >/dev/null 2>&1 || true
+RESOLVED="$(adb shell cmd package resolve-activity --brief -c android.intent.category.HOME -a android.intent.action.MAIN 2>/dev/null | tr -d '\r' | tail -1)"
+echo "resolve HOME -> $RESOLVED" | tee "$OUT/home-role.txt"
+if ! echo "$RESOLVED" | grep -q "$PKG"; then
+    # Резерв: явно записать компонент в настройки HOME.
+    adb shell settings put secure user_setup_complete 1 >/dev/null 2>&1 || true
+    adb shell am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null 2>&1 || true
+    sleep 3
+    RESOLVED="$(adb shell cmd package resolve-activity --brief -c android.intent.category.HOME -a android.intent.action.MAIN 2>/dev/null | tr -d '\r' | tail -1)"
+    echo "resolve HOME (retry) -> $RESOLVED" >> "$OUT/home-role.txt"
 fi
-if ! echo "$HOME_HOLDERS" | grep -q "$PKG"; then
-    report_fail "Лаунчер не стал системным HOME ($HOME_HOLDERS) — проверка жестов недостоверна"
+note "home-resolve" "$RESOLVED"
+if ! echo "$RESOLVED" | grep -q "$PKG"; then
+    report_fail "Лаунчер не назначается системным HOME: $RESOLVED"
 fi
+
 adb shell input keyevent KEYCODE_HOME
 sleep 4
 FOCUS="$(adb shell dumpsys window 2>/dev/null | grep -E 'mCurrentFocus' | head -1)"
 echo "$FOCUS" | tee "$OUT/focus-home.txt"
 if ! echo "$FOCUS" | grep -q "$PKG"; then
     report_fail "По кнопке HOME открылся не лаунчер: $FOCUS"
+else
+    note "focus-home" "HOME открывает $PKG"
 fi
-note "focus-home" "$FOCUS"
 endlog
 
 check_crash "старт" || true
@@ -215,6 +222,24 @@ check_crash "прокрутка" || true
 endlog
 
 log "Итог"
+# Полные дампы и метрики — в отчёт шага: он приложен к run и читается глазами.
+if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+    {
+        echo "## Doxaiz: проверка на эмуляторе API 34"
+        echo
+        for f in ui-home.txt ui-drawer.txt gfxinfo-summary.txt device.txt focus-home.txt home-role.txt; do
+            [ -f "$OUT/$f" ] || continue
+            echo "### $f"
+            echo '```'
+            head -c 4000 "$OUT/$f"
+            echo '```'
+        done
+        if [ -s "$OUT/failures.txt" ]; then
+            echo "### Провалы"
+            cat "$OUT/failures.txt"
+        fi
+    } >> "$GITHUB_STEP_SUMMARY"
+fi
 if [ -s "$OUT/failures.txt" ]; then
     echo "ПРОВЕРКА НЕ ПРОЙДЕНА:"
     cat "$OUT/failures.txt"
