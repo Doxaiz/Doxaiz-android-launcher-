@@ -5107,16 +5107,43 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         );
     }
 
+    /**
+     * Открывает системную шторку уведомлений.
+     *
+     * Порядок попыток:
+     * 1) GLOBAL_ACTION_NOTIFICATIONS через нашу службу специальных возможностей —
+     *    единственный поддерживаемый стороннему лаунчеру путь;
+     * 2) прежняя рефлексия по StatusBarManager#expandNotificationsPanel — она
+     *    срабатывает только на старых прошивках, где метод ещё существовал;
+     * 3) если не вышло ни то, ни другое — объясняем причину и предлагаем
+     *    включить службу, вместо прежнего «жест есть, реакции нет».
+     */
     private void expandNotificationShade() {
+        if (DoxaizLockService.expandNotificationShade()) {
+            return;
+        }
+        boolean reflected = false;
         try {
             Object service = getSystemService("statusbar");
             if (service != null) {
                 Class<?> cls = Class.forName("android.app.StatusBarManager");
                 Method expand = cls.getMethod("expandNotificationsPanel");
                 expand.invoke(service);
+                reflected = true;
             }
         } catch (Throwable ignored) {
         }
+        if (reflected) return;
+
+        // Служба специальных возможностей — единственный путь к системной шторке.
+        // Вместо тихого бездействия показываем диалог с переходом в настройки.
+        showConfirmModal(
+                "Нужна служба Doxaiz",
+                "Чтобы открывать системную шторку уведомлений жестом, включите "
+                        + "«Doxaiz — Панель ОЗУ и блокировка» в Специальных возможностях Android. "
+                        + "Альтернатива — собственная шторка Doxaiz в настройках.",
+                this::openAccessibilitySettings
+        );
     }
 
     // =========================================================================

@@ -61,13 +61,17 @@ def main():
     for issue in root.findall("issue"):
         severity = issue.get("severity", "?")
         category = issue.get("category", "?")
+        # В отчёте Lint адрес — это <location file="..." line="..."/>, атрибуты.
+        # Раньше читались дочерние теги, из-за чего в аннотациях пропадали
+        # файл и строка и находки нельзя было проверить.
+        loc = issue.find("location")
         issues.append({
             "id": issue.get("id", "?"),
             "severity": severity,
             "category": category,
-            "message": (issue.get("message") or "").strip(),
-            "file": (issue.findtext("location/file") or "").strip(),
-            "line": (issue.findtext("location/line") or "").strip(),
+            "message": re.sub(r"\s+", " ", (issue.get("message") or "")).strip(),
+            "file": (loc.get("file") if loc is not None else "") or "",
+            "line": (loc.get("line") if loc is not None else "") or "",
         })
 
     by_severity = {}
@@ -107,11 +111,17 @@ def main():
         + ", ".join(f"{c}={n}" for c, n in sorted(by_category.items(), key=lambda kv: -kv[1])),
     )
 
-    # Печатаем самые значимые: ошибки и предупреждения в важных категориях.
+    # Ошибки печатаем ВСЕ и первыми: это то, что валит сборку.
+    for it in [i for i in issues if i["severity"] in ("Error", "Fatal")]:
+        annotate(
+            f"lint ERROR {it['id']}",
+            f"{it['file'] or '-'}:{it['line'] or '-'} [{it['category']}] {it['message']}",
+        )
+
+    # Затем предупреждения в важных категориях.
     important = [
         it for it in issues
-        if it["severity"] in ("Error", "Fatal")
-        or (it["severity"] == "Warning" and it["category"] in FOCUS_CATEGORIES)
+        if it["severity"] == "Warning" and it["category"] in FOCUS_CATEGORIES
     ]
     seen = set()
     shown = 0
@@ -120,13 +130,16 @@ def main():
         if key in seen:
             continue
         seen.add(key)
-        where = os.path.basename(it["file"]) if it["file"] else "-"
+        where = it["file"].split("java/com/doxaiz/launcher/")[-1] if it["file"] else "-"
         annotate(
             f"lint {it['severity']} {it['id']}",
-            f"{where}:{it['line']} — {it['message']}",
+            f"{where}:{it['line']} [{it['category']}] {it['message']}",
         )
         shown += 1
         if shown >= MAX_ISSUES_PER_ANNOTATION:
+            remaining = len(important) - shown
+            if remaining > 0:
+                annotate("lint-ещё", f"ещё {remaining} предупреждений — полный список в lint-summary.txt")
             break
 
     if errors:

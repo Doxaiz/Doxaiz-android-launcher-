@@ -122,6 +122,26 @@ public final class DoxaizLockService extends AccessibilityService {
         return svc.performGlobalAction(GLOBAL_ACTION_RECENTS);
     }
 
+    /**
+     * Открывает системную шторку уведомлений.
+     *
+     * Раньше это делалось только рефлексией MainActivity по
+     * android.app.StatusBarManager#expandNotificationsPanel(). В API 33/34 такого
+     * метода в android.jar нет вовсе (проверено по классу платформы), а
+     * непубличный API закрыт с Android 11. Значит, жест «шторка» в системном
+     * стиле молча не работал: NoSuchMethodException проглатывался.
+     *
+     * Правильный путь для лаунчера — GLOBAL_ACTION_NOTIFICATIONS, у него нет
+     * ограничений hidden-API, но он требует включённой службы специальных
+     * возможностей. Если её нет, вызывающий код показывает понятный диалог, а
+     * не «ничего не произошло».
+     */
+    public static boolean expandNotificationShade() {
+        DoxaizLockService svc = instance;
+        if (svc == null) return false;
+        return svc.performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS);
+    }
+
     public static boolean previewRamOverlay() {
         DoxaizLockService svc = instance;
         if (svc == null) return false;
