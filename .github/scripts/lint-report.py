@@ -105,6 +105,12 @@ def main():
             where = f"{it['file']}:{it['line']}" if it["file"] else "-"
             fh.write(f"[{it['severity']}] {it['id']} ({it['category']}) {where} — {it['message']}\n")
 
+    # Полный список ошибок — с id и категорией, чтобы их можно было найти
+    # даже когда в отчёте пустое сообщение.
+    only_errors = [i for i in issues if i["severity"] in ("Error", "Fatal")]
+    if only_errors:
+        annotate("lint-error-ids", ", ".join(f"{i['id']}@{i['file'].split('/')[-1]}:{i['line']}" for i in only_errors))
+
     annotate(
         "lint-итог",
         f"ошибок={errors}, предупреждений={warnings}, информационных={infos}; "
