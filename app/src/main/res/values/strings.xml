@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Doxaiz</string>
+    <string name="lock_service_label">Doxaiz — Панель ОЗУ и блокировка</string>
+    <string name="lock_service_desc">Помогает блокировать экран и отображать панель в недавних приложениях. Служба может видеть содержимое активных окон и использует его для поиска системной кнопки очистки. Доступ включается пользователем в настройках Android.</string>
+    <string name="notif_service_label">Doxaiz — Шторка и уведомления</string>
+</resources>
