@@ -1788,7 +1788,24 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     // Применение темы (AMOLED-стекло по умолчанию)
     // =========================================================================
 
+    /**
+     * Полное применение темы: перекраска всех слоёв + пересборка рабочего стола.
+     *
+     * Пересборка нужна только когда меняются структурные параметры страниц
+     * (число колонок, размер иконок, подписи). Для чисто цветовых настроек —
+     * темы, обоев, затемнения, прозрачности — используйте applyThemeColorsOnly(),
+     * иначе каждое переключение темы пересоздаёт все страницы со всеми иконками.
+     */
     private void applyTheme() {
+        applyThemeInternal(true);
+    }
+
+    /** Перекраска интерфейса без пересборки страниц рабочего стола. */
+    private void applyThemeColorsOnly() {
+        applyThemeInternal(false);
+    }
+
+    private void applyThemeInternal(boolean rebuildPages) {
         lastDrawerRecentSig = "";
         lastAlphabetBarSig = "";
         theme = GlassTheme.create(prefs.getVisualStyle(), prefs.getGlassOpacity(), false);
@@ -1880,13 +1897,49 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         }
 
         updateDrawerModeUi();
-        rebuildDesktop();
+        if (rebuildPages) {
+            rebuildDesktop();
+        } else {
+            // Док и точки страниц зависят от цвета/видимости, но не от цвета иконок.
+            rebuildDock();
+            rebuildPageDots();
+            // Уже созданные плитки хранят старый цвет подписи/тени — обновляем
+            // только подписи и бейджи, не пересоздавая иконки и страницы.
+            refreshDesktopTextColors();
+        }
         refreshDrawerMemory();
         rebuildDrawerRecent();
         rebuildDrawerCategories();
         rebuildAlphabetBar();
         if (currentScreen == SCREEN_SETTINGS) {
             rebuildSettingsContent();
+        }
+    }
+
+    /**
+     * Обновляет цвета подписей на уже построенных страницах рабочего стола:
+     * при смене темы светлый/тёмный текст должен поменяться, но пересоздавать
+     * сами плитки и заново грузить иконки незачем.
+     */
+    private void refreshDesktopTextColors() {
+        if (pagerView == null) return;
+        for (int p = 0; p < pagerView.getPageCount(); p++) {
+            FreeGridPageView grid = getFreeGridForPage(p);
+            if (grid == null) continue;
+            recolorDesktopLabels(grid);
+        }
+        recolorDesktopLabels(dockAppsRow);
+    }
+
+    private void recolorDesktopLabels(ViewGroup root) {
+        if (root == null) return;
+        for (int i = 0; i < root.getChildCount(); i++) {
+            View child = root.getChildAt(i);
+            if (child instanceof TextView) {
+                ((TextView) child).setTextColor(theme.textPrimary);
+            } else if (child instanceof ViewGroup) {
+                recolorDesktopLabels((ViewGroup) child);
+            }
         }
     }
 
@@ -2082,23 +2135,50 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     }
 
     private void runQuickRamBoost() {
-        MemoryHelper.BoostResult res = MemoryHelper.boostRam(this, visibleApps);
-        refreshDrawerMemory();
-        refreshDrawerBgPill();
-        if (currentScreen == SCREEN_SETTINGS) {
-            rebuildSettingsContent();
-        }
-        Toast.makeText(this, res.message, Toast.LENGTH_SHORT).show();
+        // Очистка идёт в фоновом потоке: сотни killBackgroundProcesses() не должны
+        // отнимать кадр у закрытия диалога/перерисовки настроек.
+        MemoryHelper.boostRamAsync(this, visibleApps, null, res -> {
+            if (isFinishing() || isDestroyed()) return;
+            refreshDrawerMemory(true);
+            refreshDrawerBgPill();
+            if (currentScreen == SCREEN_SETTINGS) {
+                rebuildSettingsContent();
+            }
+            Toast.makeText(this, res.message, Toast.LENGTH_SHORT).show();
+        });
     }
 
+    /**
+     * Обновление блока ОЗУ/ПЗУ в меню приложений.
+     *
+     * MemoryHelper.read() — это IPC в ActivityManager + StatFs по /data и четыре вызова
+     * Formatter.formatFileSize (дорогой разбор локали). Прокрутка списка и раскрытие
+     * карточки вызывали его повторно без нужды, поэтому результат кэшируется на 1,5 с.
+     * Принудительное обновление (после очистки ОЗУ) — refreshDrawerMemory(true).
+     */
+    private static final long MEMORY_SNAPSHOT_TTL_MS = 1500L;
+    private MemoryHelper.Snapshot cachedMemorySnapshot;
+    private long cachedMemorySnapshotAtMs;
+
     private void refreshDrawerMemory() {
+        refreshDrawerMemory(false);
+    }
+
+    private void refreshDrawerMemory(boolean force) {
         if (drawerMemoryCard == null) return;
         if (!prefs.isShowDrawerMemory()) {
             drawerMemoryCard.setVisibility(View.GONE);
             return;
         }
         drawerMemoryCard.setVisibility(View.VISIBLE);
-        final MemoryHelper.Snapshot snap = MemoryHelper.read(this);
+        final long now = System.currentTimeMillis();
+        MemoryHelper.Snapshot snap = cachedMemorySnapshot;
+        if (force || snap == null || (now - cachedMemorySnapshotAtMs) > MEMORY_SNAPSHOT_TTL_MS
+                || cachedMemorySnapshotAtMs > now) {
+            snap = MemoryHelper.read(this);
+            cachedMemorySnapshot = snap;
+            cachedMemorySnapshotAtMs = now;
+        }
         lastRamPct = snap.ramUsedPercent;
         lastStoragePct = snap.storageUsedPercent;
         drawerRamValue.setText(snap.ramShortText);
@@ -2803,8 +2883,9 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
     private CharSequence formatAppLabel(AppEntry entry) {
         if (entry == null) return "";
-        if (!Prefs.isNewUnopenedApp(entry.isSystemApp, entry.firstInstallTime,
-                prefs.hasEverLaunched(entry.key), System.currentTimeMillis())) {
+        // Кэш на минуту: раньше на каждую привязку элемента (и на каждый кадр прокрутки
+        // меню приложений) брался usageLock, разбирался журнал запусков и читалось время.
+        if (!prefs.isNewUnopenedAppCached(entry)) {
             return entry.displayLabel;
         }
         SpannableStringBuilder sb = new SpannableStringBuilder("• ");
@@ -3911,8 +3992,15 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         boolean continuingSearch = (fromUserTyping && prevLen > 0 && q.length() > 0);
         // Во время продолжения набора текста в поиске не пересоздаём скрытые чипы категорий и блок частых приложений
         if (!continuingSearch) {
+            // Кэш чипов категорий: при простом переключении сортировки/поиска набор
+            // категорий и их счётчики не меняются, а раньше панель пересоздавалась
+            // целиком (десятки View + фоновые drawable) на каждое нажатие.
+            String catSig = buildCategorySignature(q);
+            if (!catSig.equals(lastCategoryPanelSig)) {
+                lastCategoryPanelSig = catSig;
+                rebuildDrawerCategories();
+            }
             rebuildDrawerRecent();
-            rebuildDrawerCategories();
             refreshDrawerBgPill();
             rebuildAlphabetBar();
         }
@@ -3951,6 +4039,24 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     }
 
     private String lastAlphabetBarSig = "";
+    private String lastCategoryPanelSig = "";
+
+    /**
+     * Подпись панели категорий. Учитывает только то, от чего зависит её отрисовка:
+     * режим сортировки, выбранный раздел/категорию, число приложений и их категории.
+     */
+    private String buildCategorySignature(String query) {
+        if (drawerSearchInput != null && !query.isEmpty()) return "search";
+        StringBuilder sb = new StringBuilder(96);
+        sb.append(prefs.getDrawerSortMode()).append(':')
+                .append(prefs.isShowDrawerCategories())
+                .append(':').append(selectedCustomSectionId).append(':')
+                .append(selectedDrawerCategory).append(':').append(visibleApps.size());
+        for (AppEntry e : visibleApps) {
+            sb.append(',').append(e.category);
+        }
+        return sb.toString();
+    }
 
     private void rebuildAlphabetBar() {
         alphabetPositions.clear();
@@ -3963,14 +4069,24 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         }
         StringBuilder sig = new StringBuilder(64);
         sig.append(theme.textHint).append(':');
-        for (int i = 0; i < filteredApps.size(); i++) {
-            String letter = filteredApps.get(i).getIndexChar();
+        // Буква-индекс кэшируется в AppEntry: раньше на каждое приложение создавалась
+        // новая строка (String.valueOf), то есть ~300 аллокаций на каждое нажатие клавиши.
+        int total = filteredApps.size();
+        for (int i = 0; i < total; i++) {
+            String letter = filteredApps.get(i).indexCharFast();
             if (!alphabetPositions.containsKey(letter)) {
                 alphabetPositions.put(letter, i);
                 sig.append(letter).append(i).append(',');
             }
         }
         String nextSig = sig.toString();
+
+        // Набор приложений и их буквы не изменились — трогать полосу незачем.
+        if (nextSig.equals(lastAlphabetBarSig)
+                && alphabetBar.getChildCount() == alphabetPositions.size() + 1) {
+            alphabetBar.setVisibility(View.VISIBLE);
+            return;
+        }
         if (nextSig.equals(lastAlphabetBarSig) && alphabetBar.getChildCount() == alphabetPositions.size() + 1) {
             alphabetBar.setVisibility(View.VISIBLE);
             return;
@@ -4019,6 +4135,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             return;
         }
         prefs.recordAppLaunch(entry.key);
+        prefs.invalidateNewAppCache();
         if (wasNew) {
             lastDrawerRecentSig = "";
             rebuildDesktop();
@@ -7188,21 +7305,22 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                 new String[]{"Тёмная", "Светлая"},
                 prefs.getVisualStyle() == Prefs.STYLE_CLASSIC_LIGHT ? 1 : 0, index -> {
                     prefs.setVisualStyle(index == 1 ? Prefs.STYLE_CLASSIC_LIGHT : Prefs.STYLE_CLASSIC_DARK);
-                    applyTheme();
+                    // Только цвета: страницы рабочего стола не пересобираются.
+                    applyThemeColorsOnly();
                 });
         addDivider(lookCard);
         addOptionGroup(lookCard, "Обои рабочего стола",
                 new String[]{"Куруми × Сяо Бай", "Системные"},
                 prefs.getWallpaperMode(), index -> {
                     prefs.setWallpaperMode(index);
-                    applyTheme();
+                    applyThemeColorsOnly();
                 });
         addDivider(lookCard);
         addOptionGroup(lookCard, "Затемнение встроенных обоев",
                 new String[]{"Лёгкое", "Среднее", "Сильное"},
                 prefs.getWallpaperDimLevel(), index -> {
                     prefs.setWallpaperDimLevel(index);
-                    applyTheme();
+                    applyThemeColorsOnly();
                 });
         addDivider(lookCard);
         addOptionGroup(lookCard, "Прозрачность панелей",
@@ -7210,7 +7328,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                 prefs.getGlassOpacity(),
                 index -> {
                     prefs.setGlassOpacity(index);
-                    applyTheme();
+                    applyThemeColorsOnly();
                 });
 
         addDivider(lookCard);
@@ -8756,15 +8874,20 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             DoxaizNotificationService.stopActiveMediaExcept(this, lockedPkgs);
             DoxaizNotificationService.clearAllClearableExcept(lockedPkgs);
             prefs.markAllRecentTabsClearedExcept(lockedPkgs);
-            MemoryHelper.BoostResult res = MemoryHelper.boostRam(this, visibleApps, lockedPkgs);
-            ramPillText.setText(MemoryHelper.read(this).recentsHeadline);
-            refreshDrawerMemory();
-            refreshDrawerBgPill();
-            if (toRemove.isEmpty() && lockedVisible > 0) {
-                Toast.makeText(this, "Все окна защищены замком (" + lockedVisible + ") • ОЗУ освежено", Toast.LENGTH_SHORT).show();
-            } else {
-                Toast.makeText(this, res.message, Toast.LENGTH_SHORT).show();
-            }
+            final boolean allLocked = toRemove.isEmpty() && lockedVisible > 0;
+            final int lockedVisibleFinal = lockedVisible;
+            MemoryHelper.boostRamAsync(this, visibleApps, lockedPkgs, res -> {
+                if (isFinishing() || isDestroyed()) return;
+                ramPillText.setText(MemoryHelper.read(this).recentsHeadline);
+                refreshDrawerMemory();
+                refreshDrawerBgPill();
+                if (allLocked) {
+                    Toast.makeText(this, "Все окна защищены замком (" + lockedVisibleFinal
+                            + ") • ОЗУ освежено", Toast.LENGTH_SHORT).show();
+                } else {
+                    Toast.makeText(this, res.message, Toast.LENGTH_SHORT).show();
+                }
+            });
 
             long finishDelay = Math.min(460L, 210L + animIdx * 45L);
             strip.postDelayed(() -> {

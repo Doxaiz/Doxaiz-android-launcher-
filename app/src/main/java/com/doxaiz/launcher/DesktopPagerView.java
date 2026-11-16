@@ -6,8 +6,7 @@ import android.view.VelocityTracker;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.ViewGroup;
-import android.view.animation.Interpolator;
-import android.widget.OverScroller;
+import android.os.SystemClock;
 
 import java.util.List;
 
@@ -15,7 +14,7 @@ import java.util.List;
  * DesktopPagerView v3.4 — собственный физически плавный перелистыватель страниц рабочего стола.
  *
  * Особенности:
- *  - Прямое следование за пальцем 1:1 и мягкая доводка OverScroller с кривой Quintic Ease-Out.
+ *  - Прямое следование за пальцем 1:1 и мягкая доводка (собственная, Quintic Ease-Out).
  *  - Синхронизация строго по VSYNC (postInvalidateOnAnimation) — идеально плавно на 90 и 120 Гц.
  *  - Учёт реальной скорости смахивания (VelocityTracker) + мягкий резиновый оттяг на краях.
  *  - Лёгкий GPU-эффект смягчения (scale 1.0 -> 0.965, alpha 1.0 -> 0.80) без тяжёлого 3D.
@@ -28,10 +27,17 @@ public final class DesktopPagerView extends ViewGroup {
         void onPageChanged(int pageIndex);
     }
 
-    private static final Interpolator QUINTIC_EASE_OUT = t -> quinticOut(t);
-
-    private final OverScroller scroller;
     private final int touchSlop;
+
+    // Собственная доводка вместо OverScroller: OverScroller пропускает первый кадр
+    // (после startScroll() позиция меняется только через ~8 мс), из-за чего на 120 Гц
+    // ощущалась задержка старта свайпа. Здесь позиция пересчитывается в computeScroll()
+    // каждые 16/8 мс по кривой Quintic Ease-Out, без внутреннего «догоняния».
+    private boolean snapAnimating = false;
+    private long snapStartMs = 0L;
+    private int snapFromX = 0;
+    private int snapToX = 0;
+    private int snapDurationMs = 0;
     private final int minFlingVelocity;
     private VelocityTracker velocityTracker;
 
@@ -47,12 +53,17 @@ public final class DesktopPagerView extends ViewGroup {
     private boolean dragLocked = false;
     private boolean smoothScrollEnabled = true;
     private boolean loopPagesEnabled = true;
+
+    // Кэш применённых трансформаций: setScale/setAlpha на каждом кадре помечают страницу
+    // грязной, даже если значение не изменилось. На 8 страницах это лишние инвалидации
+    // всех страниц 120 раз в секунду.
+    private float[] appliedScale = new float[0];
+    private float[] appliedAlpha = new float[0];
     private OnPageChangedListener pageListener;
     private final Runnable pendingSnapRunnable = () -> snapToPage(currentPage, false, false, 0f);
 
     public DesktopPagerView(Context context) {
         super(context);
-        this.scroller = new OverScroller(context, QUINTIC_EASE_OUT);
         ViewConfiguration vc = ViewConfiguration.get(context);
         this.touchSlop = Math.max(6, Math.round(vc.getScaledTouchSlop() * 0.85f));
         this.minFlingVelocity = Math.max(220, vc.getScaledMinimumFlingVelocity() * 2);
@@ -81,7 +92,7 @@ public final class DesktopPagerView extends ViewGroup {
         return 1.0f;
     }
 
-    /** Чистая функция кривой замедления (1 - (1 - t)^4) для тестов и OverScroller. */
+    /** Чистая функция кривой замедления (1 - (1 - t)^4) для тестов и доводки. */
     static float quinticOut(float t) {
         float clamped = Math.max(0f, Math.min(1f, t));
         float inv = 1f - clamped;
@@ -186,9 +197,7 @@ public final class DesktopPagerView extends ViewGroup {
     }
 
     public void setPages(List<View> views, int targetPage) {
-        if (!scroller.isFinished()) {
-            scroller.abortAnimation();
-        }
+        abortSnapAnimation();
         removeAllViews();
         if (views != null) {
             for (View v : views) {
@@ -200,6 +209,8 @@ public final class DesktopPagerView extends ViewGroup {
         }
         int count = getChildCount();
         currentPage = (count == 0) ? 0 : Math.max(0, Math.min(targetPage, count - 1));
+        appliedScale = new float[0];
+        appliedAlpha = new float[0];
         requestLayout();
         removeCallbacks(pendingSnapRunnable);
         post(pendingSnapRunnable);
@@ -250,6 +261,9 @@ public final class DesktopPagerView extends ViewGroup {
     @Override
     protected void onScrollChanged(int l, int t, int oldl, int oldt) {
         super.onScrollChanged(l, t, oldl, oldt);
+        // Единственная точка применения трансформаций за кадр: scrollTo() внутри
+        // computeScroll() сам вызывает onScrollChanged(), поэтому вторая (прежняя)
+        // копия вызова там удваивала работу на каждом кадре анимации доводки.
         if (smoothScrollEnabled) {
             applyPageTransitions();
         }
@@ -257,15 +271,41 @@ public final class DesktopPagerView extends ViewGroup {
 
     @Override
     public void computeScroll() {
-        if (scroller.computeScrollOffset()) {
-            scrollTo(scroller.getCurrX(), 0);
+        if (snapAnimating) {
+            final long elapsed = SystemClock.uptimeMillis() - snapStartMs;
+            final float rawT = (snapDurationMs > 0) ? (elapsed / (float) snapDurationMs) : 1f;
+            if (rawT >= 1f) {
+                scrollTo(snapToX, 0);
+                snapAnimating = false;
+                if (smoothScrollEnabled) applyPageTransitions();
+                return;
+            }
+            float t = quinticOut(rawT);
+            int x = snapFromX + Math.round((snapToX - snapFromX) * t);
+            scrollTo(x, 0);
             if (smoothScrollEnabled) {
+                // Кривая демпфирует старт, поэтому первые кадры дают смещение меньше пикселя
+                // и без явного onScrollChanged() трансформации страниц отставали бы от
+                // фактической позиции. Шагаем по кадру явно.
                 applyPageTransitions();
             }
             postInvalidateOnAnimation();
         } else if (smoothScrollEnabled && !isDragging) {
             applyPageTransitions();
         }
+    }
+
+    private void abortSnapAnimation() {
+        snapAnimating = false;
+    }
+
+    /**
+     * Страница участвует в переходе, только если она в пределах кадра (или рядом с ним).
+     * Дальние страницы всё равно не видны: их трансформация не меняет картинку, а стоит
+     * инвалидации всего поддерева.
+     */
+    static boolean isPageInTransitionRange(float pageOffset) {
+        return Math.abs(pageOffset) < 1.001f;
     }
 
     private void applyPageTransitions() {
@@ -280,37 +320,89 @@ public final class DesktopPagerView extends ViewGroup {
         int count = getChildCount();
         if (w <= 0 || count == 0) return;
 
-        float sx = getScrollX();
+        ensureTransformCache(count);
+        final int childH = (count > 0) ? getChildAt(0).getHeight() : 0;
+        final float pivotX = w * 0.5f;
+        final float pivotY = childH * 0.5f;
+        final float sx = getScrollX();
+
         for (int i = 0; i < count; i++) {
             View child = getChildAt(i);
             float pageOffset = (i * w - sx) / (float) w;
-            float abs = Math.min(1.2f, Math.abs(pageOffset));
-            if (abs < 0.002f) {
-                if (child.getScaleX() != 1f) child.setScaleX(1f);
-                if (child.getScaleY() != 1f) child.setScaleY(1f);
-                if (child.getAlpha() != 1f) child.setAlpha(1f);
-                if (child.getTranslationX() != 0f) child.setTranslationX(0f);
-            } else {
-                float scale = computePageScale(abs);
-                float alpha = computePageAlpha(abs);
-                child.setPivotX(w * 0.5f);
-                child.setPivotY(child.getHeight() * 0.5f);
+
+            // Дальние страницы: приводим к «покойному» состоянию один раз и больше не трогаем.
+            if (!isPageInTransitionRange(pageOffset)) {
+                if (appliedScale[i] != 1f) {
+                    appliedScale[i] = 1f;
+                    child.setScaleX(1f);
+                    child.setScaleY(1f);
+                }
+                if (appliedAlpha[i] != 1f) {
+                    appliedAlpha[i] = 1f;
+                    child.setAlpha(1f);
+                }
+                applyPageVisibility(child, false);
+                continue;
+            }
+            applyPageVisibility(child, true);
+
+            float abs = Math.min(1f, Math.abs(pageOffset));
+            float scale = (abs < 0.002f) ? 1f : computePageScale(abs);
+            float alpha = (abs < 0.002f) ? 1f : computePageAlpha(abs);
+
+            if (appliedScale[i] != scale) {
+                appliedScale[i] = scale;
+                if (child.getPivotX() != pivotX) child.setPivotX(pivotX);
+                if (child.getPivotY() != pivotY) child.setPivotY(pivotY);
                 child.setScaleX(scale);
                 child.setScaleY(scale);
+            }
+            if (appliedAlpha[i] != alpha) {
+                appliedAlpha[i] = alpha;
                 child.setAlpha(alpha);
-                if (child.getTranslationX() != 0f) child.setTranslationX(0f);
             }
         }
     }
 
+    /**
+     * Скрывает отрисовку невидимых страниц.
+     *
+     * Все страницы лежат в одном ViewGroup и формально находятся «в окне», поэтому
+     * их onDraw вызывается на каждом кадре, даже если видна только одна. Для восьми
+     * страниц по 20–25 плиток это сотни лишних вызовов draw и заметный расход
+     * GPU-времени при прокрутке. Отключаем отрисовку у страниц вне кадра: layout
+     * и позиции сохраняются, поэтому возврат на страницу не требует пересборки.
+     */
+    private void applyPageVisibility(View child, boolean visible) {
+        int desired = visible ? View.VISIBLE : View.INVISIBLE;
+        if (child.getVisibility() != desired) {
+            child.setVisibility(desired);
+        }
+    }
+
+    private void ensureTransformCache(int count) {
+        if (appliedScale.length == count) return;
+        appliedScale = new float[count];
+        appliedAlpha = new float[count];
+        java.util.Arrays.fill(appliedScale, 1f);
+        java.util.Arrays.fill(appliedAlpha, 1f);
+    }
+
     private void resetChildTransforms() {
         int count = getChildCount();
+        ensureTransformCache(count);
         for (int i = 0; i < count; i++) {
             View child = getChildAt(i);
-            child.setScaleX(1f);
-            child.setScaleY(1f);
-            child.setAlpha(1f);
-            child.setTranslationX(0f);
+            if (appliedScale[i] != 1f) {
+                appliedScale[i] = 1f;
+                child.setScaleX(1f);
+                child.setScaleY(1f);
+            }
+            if (appliedAlpha[i] != 1f) {
+                appliedAlpha[i] = 1f;
+                child.setAlpha(1f);
+            }
+            if (child.getTranslationX() != 0f) child.setTranslationX(0f);
         }
     }
 
@@ -333,9 +425,7 @@ public final class DesktopPagerView extends ViewGroup {
                 isDragging = false;
                 initOrResetVelocityTracker();
                 velocityTracker.addMovement(ev);
-                if (!scroller.isFinished()) {
-                    scroller.abortAnimation();
-                }
+                abortSnapAnimation();
                 return false;
 
             case MotionEvent.ACTION_MOVE: {
@@ -381,7 +471,7 @@ public final class DesktopPagerView extends ViewGroup {
         int action = ev.getActionMasked();
         switch (action) {
             case MotionEvent.ACTION_DOWN:
-                if (!scroller.isFinished()) scroller.abortAnimation();
+                abortSnapAnimation();
                 downX = ev.getX();
                 downY = ev.getY();
                 lastX = downX;
@@ -494,7 +584,7 @@ public final class DesktopPagerView extends ViewGroup {
             int targetX = currentPage * w;
             int startX = getScrollX();
             int dx = targetX - startX;
-            if (!scroller.isFinished()) scroller.abortAnimation();
+            abortSnapAnimation();
 
             if (animate && dx != 0) {
                 float distRatio = Math.min(1f, Math.abs(dx) / (float) w);
@@ -502,8 +592,13 @@ public final class DesktopPagerView extends ViewGroup {
                 // Быстрый смах + реальная частота экрана (60/90/120 Гц) -> упругая и мгновенная доводка
                 float speedBoost = Math.min(0.32f, Math.abs(velocityX) / 7500f);
                 float hzScale = readDisplayRefreshScale();
-                int duration = Math.max(130, Math.min(275, Math.round(baseDur * (1f - speedBoost) * hzScale)));
-                scroller.startScroll(startX, 0, dx, 0, duration);
+                snapDurationMs = Math.max(130, Math.min(275,
+                        Math.round(baseDur * (1f - speedBoost) * hzScale)));
+                snapFromX = startX;
+                snapToX = targetX;
+                snapStartMs = SystemClock.uptimeMillis();
+                snapAnimating = true;
+                // Первый кадр рисуем сразу, не ожидая следующего тика скроллера.
                 postInvalidateOnAnimation();
             } else {
                 scrollTo(targetX, 0);
@@ -546,6 +641,6 @@ public final class DesktopPagerView extends ViewGroup {
         super.onDetachedFromWindow();
         removeCallbacks(pendingSnapRunnable);
         recycleVelocityTracker();
-        if (!scroller.isFinished()) scroller.abortAnimation();
+        abortSnapAnimation();
     }
 }

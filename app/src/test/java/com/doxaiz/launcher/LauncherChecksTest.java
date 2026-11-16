@@ -28,6 +28,11 @@ public class LauncherChecksTest {
         run("SimpleThemeTest", () -> SimpleThemeTest.main(new String[0]));
     }
 
+    @Test
+    public void perf56Responsiveness() {
+        run("Perf56Tests", () -> Perf56Tests.main(new String[0]));
+    }
+
     private interface Check {
         void run() throws Exception;
     }

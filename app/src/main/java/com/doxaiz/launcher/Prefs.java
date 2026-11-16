@@ -428,10 +428,15 @@ public final class Prefs {
         return map;
     }
 
+    /**
+     * Журнал засчитывается сразу, а сериализация в JSON и запись на диск уходят
+     * в фоновый поток: вызов идёт на горячем пути запуска приложения (сразу после
+     * старта активности) и не должен отнимать кадр у анимации запуска.
+     */
     public void recordAppLaunch(String appKey) {
         if (appKey == null || appKey.isEmpty()) return;
         try {
-            String serialized;
+            final String serialized;
             synchronized (usageLock) {
                 Map<String, long[]> map = ensureUsageCacheLocked();
                 long[] rec = map.get(appKey);
@@ -461,8 +466,30 @@ public final class Prefs {
                 }
                 serialized = root.toString();
             }
-            sp.edit().putString(KEY_USAGE_JSON, serialized).apply();
+            persistUsageAsync(serialized);
         } catch (Throwable ignored) {
+        }
+    }
+
+    /** Исполнитель для редких фоновых записей настроек (журнал запусков, статистика). */
+    private static final java.util.concurrent.ExecutorService PERSIST_IO =
+            java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "doxaiz-prefs-io");
+                t.setDaemon(true);
+                return t;
+            });
+
+    private void persistUsageAsync(final String json) {
+        try {
+            PERSIST_IO.execute(() -> {
+                try {
+                    sp.edit().putString(KEY_USAGE_JSON, json).apply();
+                } catch (Throwable ignored) {
+                }
+            });
+        } catch (Throwable ignored) {
+            // Пул уже остановлен (выход из процесса) — пишем синхронно, чтобы не потерять счётчик.
+            sp.edit().putString(KEY_USAGE_JSON, json).apply();
         }
     }
 
@@ -485,6 +512,47 @@ public final class Prefs {
             Map<String, long[]> map = ensureUsageCacheLocked();
             long[] rec = map.get(appKey);
             return rec != null && rec[0] > 0L;
+        }
+    }
+
+    /**
+     * Кэш метки «новое и ещё не открывалось» на текущие сутки.
+     *
+     * formatAppLabel() вызывается при каждой привязке элемента списка (в том числе на
+     * каждом кадре прокрутки меню приложений), а внутри — захват usageLock, разбор
+     * журнала и System.currentTimeMillis(). Метка живёт до 7 суток, поэтому пересчёт
+     * раз в минуту даёт тот же результат бесплатно.
+     */
+    private final Object newAppCacheLock = new Object();
+    private final Map<String, Boolean> newAppFlags = new HashMap<>();
+    private long newAppFlagsBuiltAtMs = 0L;
+    private static final long NEW_APP_FLAGS_TTL_MS = 60_000L;
+
+    /** true, если у приложения ещё не было запусков и оно установлено недавно. */
+    public boolean isNewUnopenedAppCached(AppEntry entry) {
+        if (entry == null) return false;
+        final long now = System.currentTimeMillis();
+        synchronized (newAppCacheLock) {
+            if (now - newAppFlagsBuiltAtMs > NEW_APP_FLAGS_TTL_MS || newAppFlagsBuiltAtMs > now) {
+                newAppFlags.clear();
+                newAppFlagsBuiltAtMs = now;
+            }
+            Boolean cached = newAppFlags.get(entry.key);
+            if (cached != null) return cached;
+        }
+        boolean value = isNewUnopenedApp(entry.isSystemApp, entry.firstInstallTime,
+                hasEverLaunched(entry.key), now);
+        synchronized (newAppCacheLock) {
+            newAppFlags.put(entry.key, value);
+        }
+        return value;
+    }
+
+    /** После запуска/установки приложения кэш меток нужно сбросить. */
+    public void invalidateNewAppCache() {
+        synchronized (newAppCacheLock) {
+            newAppFlags.clear();
+            newAppFlagsBuiltAtMs = 0L;
         }
     }
 

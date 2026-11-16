@@ -62,14 +62,31 @@ public final class FreeGridPageView extends ViewGroup {
         return rows;
     }
 
+    /**
+     * Подсветка целевой ячейки при перетаскивании.
+     *
+     * Раньше сравнение игнорировало цвета и, что важнее, не проверяло переход
+     * «подсветка была → подсветки нет»: каждый кадр перетаскивания запрашивался полный
+     * invalidate() сетки, то есть перерисовывались все иконки и подписи страницы.
+     * Теперь перерисовка запрашивается только при реальном изменении видимого
+     * состояния, а не на каждом движении пальца.
+     */
     public void setHighlight(int col, int row, int mode, int fillColor, int strokeColor) {
-        if (hlCol == col && hlRow == row && hlMode == mode) return;
+        boolean sameCell = (hlCol == col && hlRow == row);
+        if (sameCell && hlMode == mode
+                && hlFillPaint.getColor() == fillColor
+                && hlStrokePaint.getColor() == strokeColor) {
+            return;
+        }
+        final boolean wasVisible = (hlMode != HIGHLIGHT_NONE);
         hlCol = col;
         hlRow = row;
         hlMode = mode;
         hlFillPaint.setColor(fillColor);
         hlStrokePaint.setColor(strokeColor);
-        invalidate();
+        if (wasVisible || mode != HIGHLIGHT_NONE) {
+            invalidate();
+        }
     }
 
     public void clearHighlight() {

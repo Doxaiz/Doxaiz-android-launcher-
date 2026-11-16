@@ -22,6 +22,8 @@ public final class AppEntry {
     public final boolean isMainProfile;
     public int category;
     public final long firstInstallTime;
+    /** Кэш буквы-индекса для алфавитной полосы (создаётся один раз на приложение). */
+    private String indexCharCache;
 
     public AppEntry(
             ComponentName componentName,
@@ -63,5 +65,18 @@ public final class AppEntry {
             return (ch == 'Ё') ? "Е" : String.valueOf(ch);
         }
         return "#";
+    }
+
+    /**
+     * То же значение, но без аллокации при повторных вызовах: алфавитная полоса
+     * перестраивается на каждое нажатие клавиши и раньше создавала по новой строке
+     * на каждое приложение списка (до ~300 объектов на нажатие).
+     */
+    public String indexCharFast() {
+        String cached = indexCharCache;
+        if (cached != null) return cached;
+        String value = getIndexChar();
+        indexCharCache = value;
+        return value;
     }
 }
