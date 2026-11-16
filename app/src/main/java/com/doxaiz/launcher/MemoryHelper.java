@@ -3,6 +3,7 @@ package com.doxaiz.launcher;
 import android.app.ActivityManager;
 import android.content.Context;
 import android.os.Environment;
+import android.os.Process;
 import android.os.StatFs;
 import android.text.format.Formatter;
 
@@ -153,6 +154,57 @@ public final class MemoryHelper {
      * Честная быстрая очистка фоновых кэш-процессов ОЗУ (без root и без трогания самого Doxaiz,
      * критичных системных служб и закреплённых пользователем приложений из lockedPackages).
      */
+    /**
+     * Быстрая очистка ОЗУ.
+     *
+     * Вызывается по нажатию кнопки/мусорки, то есть на UI-потоке. Внутри — опрос
+     * ActivityManager и killBackgroundProcesses() для каждого найденного пакета: это
+     * сотни Binder-вызовов подряд, которые раньше блокировали кадр закрытия диалога
+     * (заметный «залип» кнопки на устройствах с большим числом приложений).
+     * Теперь работа уходит в фоновый поток, UI получает результат через Handler.
+     */
+    public interface BoostCallback {
+        void onBoostFinished(BoostResult result);
+    }
+
+    private static final android.os.Handler BOOST_MAIN =
+            new android.os.Handler(android.os.Looper.getMainLooper());
+
+    public static void boostRamAsync(
+            final Context context,
+            final List<AppEntry> installedApps,
+            final Set<String> lockedPackages,
+            final BoostCallback callback
+    ) {
+        if (context == null) {
+            if (callback != null) callback.onBoostFinished(new BoostResult(0L, 0L, 0, "ОЗУ оптимизировано"));
+            return;
+        }
+        final Context appCtx = context.getApplicationContext() != null
+                ? context.getApplicationContext() : context;
+        Thread worker = new Thread(() -> {
+            final BoostResult result;
+            try {
+                result = boostRam(appCtx, installedApps, lockedPackages);
+            } catch (Throwable ignored) {
+                if (callback != null) {
+                    BOOST_MAIN.post(() -> callback.onBoostFinished(
+                            new BoostResult(0L, 0L, 0, "ОЗУ оптимизировано")));
+                }
+                return;
+            }
+            if (callback != null) {
+                BOOST_MAIN.post(() -> callback.onBoostFinished(result));
+            }
+        }, "doxaiz-ram-boost");
+        worker.setDaemon(true);
+        try {
+            Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND);
+        } catch (Throwable ignored) {
+        }
+        worker.start();
+    }
+
     public static BoostResult boostRam(Context context, List<AppEntry> installedApps, Set<String> lockedPackages) {
         if (context == null) {
             return new BoostResult(0L, 0L, 0, "ОЗУ оптимизировано");

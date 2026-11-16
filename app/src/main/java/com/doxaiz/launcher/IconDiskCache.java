@@ -12,6 +12,7 @@ import java.io.FileOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Постоянный локальный дисковый кэш оригинальных иконок приложений (Doxaiz 3.4).
@@ -29,9 +30,13 @@ public final class IconDiskCache {
     private static final String LEGACY_DIR_NAME = "doxaiz_icons_v1";
     private static final long MAX_ICON_FILE_BYTES = 512L * 1024L; // Защита от OOM на повреждённом файле
     private static final int MAX_CACHE_FILES = 450;               // Верхний предел кэша на флеш-памяти
+    /** Уникальный суффикс временных файлов в пределах процесса. */
+    private static final AtomicInteger TMP_SEQ = new AtomicInteger(0);
     private final File cacheDir;
     private volatile boolean hadExistingFiles = false;
-    private int knownFileCount = 0;
+    // Счётчик изменяется из save() (2–4 потока загрузки иконок) и из evict(), поэтому
+    // раньше это было гонкой «++ / --» без атомарности → неверный учёт и лишние обходы каталога.
+    private final AtomicInteger knownFileCount = new AtomicInteger(0);
 
     public IconDiskCache(Context context) {
         File rootCache = context.getApplicationContext().getCacheDir();
@@ -55,7 +60,7 @@ public final class IconDiskCache {
                         }
                     }
                     hadExistingFiles = (imgCount > 0);
-                    knownFileCount = imgCount;
+                    knownFileCount.set(imgCount);
                     if (imgCount > MAX_CACHE_FILES) {
                         pruneExcessFiles(cur, imgCount - MAX_CACHE_FILES);
                         recountFiles();
@@ -113,7 +118,16 @@ public final class IconDiskCache {
         return null;
     }
 
-    public synchronized void save(String appKey, long versionStamp, Bitmap bmp) {
+    /**
+     * Сохранение иконки.
+     *
+     * Раньше метод был synchronized целиком: пока один поток кодировал Bitmap в WebP/PNG
+     * (десятки миллисекунд), остальные 2–4 рабочих потока AppRepository ждали на входе,
+     * то есть кодирование фактически сериализовалось. Блокировка нужна только вокруг
+     * учёта файлов, а уникальность .tmp обеспечивается именем целевого файла:
+     * (hash, versionStamp) уже уникальны сами по себе.
+     */
+    public void save(String appKey, long versionStamp, Bitmap bmp) {
         if (appKey == null || appKey.isEmpty() || bmp == null || bmp.isRecycled()) return;
         try {
             if (!cacheDir.exists()) {
@@ -124,9 +138,11 @@ public final class IconDiskCache {
             File target = new File(cacheDir, prefix + Math.max(0L, versionStamp) + ".img");
             if (target.isFile() && target.length() > 16L) return;
 
-            // Уникальное имя .tmp по ID потока исключает коллизии между 2 рабочими потоками AppRepository
+            // Имя .tmp делаем уникальным счётчиком, а не Thread.getId(): тот помечен
+            // deprecated (Java 19 / API 33), а Thread.threadId() на minSdk 26 ещё
+            // отсутствует. Счётчик уникален в пределах процесса — этого достаточно.
             File tmp = new File(cacheDir, prefix + Math.max(0L, versionStamp)
-                    + "_" + Thread.currentThread().getId() + ".tmp");
+                    + "_" + TMP_SEQ.incrementAndGet() + ".tmp");
             boolean ok;
             try (FileOutputStream fos = new FileOutputStream(tmp)) {
                 if (Build.VERSION.SDK_INT >= 30) {
@@ -141,15 +157,17 @@ public final class IconDiskCache {
                 //noinspection ResultOfMethodCallIgnored
                 tmp.delete();
             } else {
-                if (!existed) knownFileCount++;
+                if (!existed) knownFileCount.incrementAndGet();
                 if (hadExistingFiles) cleanupStaleVersions(prefix, target.getName());
-                // Enforce the limit during a long-running session, not only after restart.
-                if (knownFileCount > MAX_CACHE_FILES) {
+                // Держим лимит и во время долгой сессии, а не только при старте.
+                int over = knownFileCount.get() - MAX_CACHE_FILES;
+                if (over > 0) {
                     File[] files = cacheDir.listFiles();
                     if (files != null) {
                         recountFiles();
-                        if (knownFileCount > MAX_CACHE_FILES) {
-                            pruneExcessFiles(files, knownFileCount - MAX_CACHE_FILES);
+                        over = knownFileCount.get() - MAX_CACHE_FILES;
+                        if (over > 0) {
+                            pruneExcessFiles(files, over);
                             recountFiles();
                         }
                     }
@@ -182,7 +200,7 @@ public final class IconDiskCache {
             for (File f : files) {
                 if (f != null && isStaleVersionFile(f.getName(), prefix, currentFileName)) {
                     //noinspection ResultOfMethodCallIgnored
-                    if (f.delete()) knownFileCount = Math.max(0, knownFileCount - 1);
+                    if (f.delete()) decrementCount();
                 }
             }
         } catch (Throwable ignored) {
@@ -233,7 +251,12 @@ public final class IconDiskCache {
 
     private synchronized void removeCacheFile(File f) {
         if (f != null && f.delete() && f.getName().endsWith(".img"))
-            knownFileCount = Math.max(0, knownFileCount - 1);
+            decrementCount();
+    }
+
+    /** Атомарное уменьшение счётчика без ухода в минус. */
+    private void decrementCount() {
+        knownFileCount.updateAndGet(v -> Math.max(0, v - 1));
     }
 
     private void recountFiles() {
@@ -241,7 +264,7 @@ public final class IconDiskCache {
         if (files == null) return;
         int count = 0;
         for (File f : files) if (f.isFile() && f.getName().endsWith(".img")) count++;
-        knownFileCount = count;
+        knownFileCount.set(count);
     }
 
     /**

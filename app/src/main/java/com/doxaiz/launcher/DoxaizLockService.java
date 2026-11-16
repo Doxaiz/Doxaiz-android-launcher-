@@ -59,6 +59,12 @@ public final class DoxaizLockService extends AccessibilityService {
     private long lastDefaultCheckMs = 0L;
     private boolean cachedIsDefault = false;
 
+    /** Период опроса ОЗУ/батареи в оверлее Недавних (было 1 с на каждый тик). */
+    private static final long OVERLAY_REFRESH_MS = 2000L;
+    /** Кратность опроса батареи: sticky-запрос дороже чтения MemoryInfo. */
+    private static final int BATTERY_TICK_EVERY = 2;
+    private int overlayTick = 0;
+
     private final Runnable refreshRunnable = new Runnable() {
         @Override
         public void run() {
@@ -67,8 +73,10 @@ public final class DoxaizLockService extends AccessibilityService {
                 hideOverlay();
                 return;
             }
-            updateOverlayNumbers();
-            handler.postDelayed(this, 1000L);
+            // ОЗУ читаем каждый тик, батарею (sticky registerReceiver + BatteryManager) — реже.
+            boolean withBattery = (overlayTick++ % BATTERY_TICK_EVERY) == 0;
+            updateOverlayNumbers(withBattery);
+            handler.postDelayed(this, OVERLAY_REFRESH_MS);
         }
     };
 
@@ -132,8 +140,12 @@ public final class DoxaizLockService extends AccessibilityService {
         windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
         try {
             IntentFilter filter = new IntentFilter(Intent.ACTION_SCREEN_OFF);
+            // См. MainActivity.registerSystemReceiver: на 26–32 явный RECEIVER_EXPORTED
+            // вместо неявного экспорта (система — единственный отправитель).
             if (Build.VERSION.SDK_INT >= 33) {
                 registerReceiver(screenOffReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+            } else if (Build.VERSION.SDK_INT >= 26) {
+                registerReceiver(screenOffReceiver, filter, Context.RECEIVER_EXPORTED);
             } else {
                 registerReceiver(screenOffReceiver, filter);
             }
@@ -713,9 +725,14 @@ public final class DoxaizLockService extends AccessibilityService {
     }
 
     private void updateOverlayNumbers() {
+        updateOverlayNumbers(true);
+    }
+
+    private void updateOverlayNumbers(boolean withBattery) {
         if (ramHeadView == null) return;
         MemoryHelper.Snapshot snap = MemoryHelper.read(this);
         ramHeadView.setText(snap.recentsHeadline);
+        if (!withBattery) return;
 
         BatteryInfoHelper.Snapshot bat = BatteryInfoHelper.read(this);
         if (batPillText != null) {

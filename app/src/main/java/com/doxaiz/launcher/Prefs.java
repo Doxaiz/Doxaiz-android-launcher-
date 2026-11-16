@@ -52,10 +52,6 @@ public final class Prefs {
     public static final int DRAWER_STYLE_INFINIX = 0; // Новый (AMOLED-карточки, как Infinix Hot 50)
     public static final int DRAWER_STYLE_REDMI = 1;   // Старый классический (компактный, как Redmi 9A)
 
-    // Оформление самого рабочего стола
-    public static final int HOME_MODE_WITH_DRAWER = 0;   // Главный + доп. экраны + меню приложений
-    public static final int HOME_MODE_CLASSIC_PAGES = 1; // Просто главный и доп. экраны (все приложения на страницах)
-
     // Способ оповещения о непрочитанных уведомлениях (как в системных настройках)
     public static final int NOTIF_BADGE_DOT = 0;       // Значок уведомления (точка)
     public static final int NOTIF_BADGE_APP_ICONS = 1; // Значки приложений
@@ -86,7 +82,6 @@ public final class Prefs {
     private static final String KEY_NOTIF_BADGE_MODE = "notif_badge_mode";
     private static final String KEY_SHOW_NET_SPEED = "show_net_speed";
     private static final String KEY_SHOW_BATTERY_PCT = "show_battery_pct";
-    private static final String KEY_HOME_LAYOUT_MODE = "home_layout_mode";
     private static final String KEY_SHOW_PAGE_DOTS = "show_page_dots";
     private static final String KEY_SHOW_ALPHABET_BAR = "show_alphabet_bar";
     private static final String KEY_SMOOTH_ANIMATIONS = "smooth_animations";
@@ -101,7 +96,6 @@ public final class Prefs {
     private static final String KEY_SWIPE_DOWN = "gesture_swipe_down";
     private static final String KEY_DOUBLE_TAP = "gesture_double_tap";
     private static final String KEY_SHOW_DRAWER_MEMORY = "show_drawer_memory";
-    private static final String KEY_SHOW_RECENTS_RAM = "show_recents_ram";
     private static final String KEY_RECENTS_RAM_POS = "recents_ram_pos";
     private static final String KEY_AUTO_NETWORK_ASSIST = "auto_network_assist";
     private static final String KEY_PROTECT_HIDDEN = "protect_hidden_apps";
@@ -181,14 +175,6 @@ public final class Prefs {
         sp.edit().putString(KEY_SHADE_TILES, safe).apply();
     }
 
-    public int getHomeLayoutMode() {
-        // Гибрид: страницы рабочего стола и отдельное меню «Все приложения».
-        return HOME_MODE_WITH_DRAWER;
-    }
-    public void setHomeLayoutMode(int mode) {
-        sp.edit().putInt(KEY_HOME_LAYOUT_MODE, HOME_MODE_WITH_DRAWER).apply();
-    }
-
     public boolean isShowPageDots() { return sp.getBoolean(KEY_SHOW_PAGE_DOTS, true); }
     public void setShowPageDots(boolean show) { sp.edit().putBoolean(KEY_SHOW_PAGE_DOTS, show).apply(); }
 
@@ -196,11 +182,10 @@ public final class Prefs {
     public void setShowAlphabetBar(boolean show) { sp.edit().putBoolean(KEY_SHOW_ALPHABET_BAR, show).apply(); }
 
     public boolean isSmoothAnimationsEnabled() {
-        // Одна простая плавная анимация всегда работает по умолчанию
-        return true;
+        return sp.getBoolean(KEY_SMOOTH_ANIMATIONS, true);
     }
     public void setSmoothAnimationsEnabled(boolean enabled) {
-        sp.edit().putBoolean(KEY_SMOOTH_ANIMATIONS, true).apply();
+        sp.edit().putBoolean(KEY_SMOOTH_ANIMATIONS, enabled).apply();
     }
 
     public boolean isShadeSplitSwipe() { return sp.getBoolean(KEY_SHADE_SPLIT_SWIPE, true); }
@@ -244,13 +229,6 @@ public final class Prefs {
 
     public boolean isShowDrawerMemory() { return sp.getBoolean(KEY_SHOW_DRAWER_MEMORY, false); }
     public void setShowDrawerMemory(boolean show) { sp.edit().putBoolean(KEY_SHOW_DRAWER_MEMORY, show).apply(); }
-
-    // ОЗУ и кнопка-мусорка в недавних приложениях работают всегда по умолчанию (нельзя выключить)
-    public boolean isShowRecentsRam() { return true; }
-    public void setShowRecentsRam(boolean show) { /* всегда включено по умолчанию */ }
-
-    public boolean isShowRecentsCleanBtn() { return true; }
-    public void setShowRecentsCleanBtn(boolean show) { /* всегда включено по умолчанию */ }
 
     public int getRecentsRamPosition() {
         int p = sp.getInt(KEY_RECENTS_RAM_POS, RECENTS_RAM_POS_DEFAULT);
@@ -450,10 +428,15 @@ public final class Prefs {
         return map;
     }
 
+    /**
+     * Журнал засчитывается сразу, а сериализация в JSON и запись на диск уходят
+     * в фоновый поток: вызов идёт на горячем пути запуска приложения (сразу после
+     * старта активности) и не должен отнимать кадр у анимации запуска.
+     */
     public void recordAppLaunch(String appKey) {
         if (appKey == null || appKey.isEmpty()) return;
         try {
-            String serialized;
+            final String serialized;
             synchronized (usageLock) {
                 Map<String, long[]> map = ensureUsageCacheLocked();
                 long[] rec = map.get(appKey);
@@ -483,8 +466,30 @@ public final class Prefs {
                 }
                 serialized = root.toString();
             }
-            sp.edit().putString(KEY_USAGE_JSON, serialized).apply();
+            persistUsageAsync(serialized);
         } catch (Throwable ignored) {
+        }
+    }
+
+    /** Исполнитель для редких фоновых записей настроек (журнал запусков, статистика). */
+    private static final java.util.concurrent.ExecutorService PERSIST_IO =
+            java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "doxaiz-prefs-io");
+                t.setDaemon(true);
+                return t;
+            });
+
+    private void persistUsageAsync(final String json) {
+        try {
+            PERSIST_IO.execute(() -> {
+                try {
+                    sp.edit().putString(KEY_USAGE_JSON, json).apply();
+                } catch (Throwable ignored) {
+                }
+            });
+        } catch (Throwable ignored) {
+            // Пул уже остановлен (выход из процесса) — пишем синхронно, чтобы не потерять счётчик.
+            sp.edit().putString(KEY_USAGE_JSON, json).apply();
         }
     }
 
@@ -507,6 +512,47 @@ public final class Prefs {
             Map<String, long[]> map = ensureUsageCacheLocked();
             long[] rec = map.get(appKey);
             return rec != null && rec[0] > 0L;
+        }
+    }
+
+    /**
+     * Кэш метки «новое и ещё не открывалось» на текущие сутки.
+     *
+     * formatAppLabel() вызывается при каждой привязке элемента списка (в том числе на
+     * каждом кадре прокрутки меню приложений), а внутри — захват usageLock, разбор
+     * журнала и System.currentTimeMillis(). Метка живёт до 7 суток, поэтому пересчёт
+     * раз в минуту даёт тот же результат бесплатно.
+     */
+    private final Object newAppCacheLock = new Object();
+    private final Map<String, Boolean> newAppFlags = new HashMap<>();
+    private long newAppFlagsBuiltAtMs = 0L;
+    private static final long NEW_APP_FLAGS_TTL_MS = 60_000L;
+
+    /** true, если у приложения ещё не было запусков и оно установлено недавно. */
+    public boolean isNewUnopenedAppCached(AppEntry entry) {
+        if (entry == null) return false;
+        final long now = System.currentTimeMillis();
+        synchronized (newAppCacheLock) {
+            if (now - newAppFlagsBuiltAtMs > NEW_APP_FLAGS_TTL_MS || newAppFlagsBuiltAtMs > now) {
+                newAppFlags.clear();
+                newAppFlagsBuiltAtMs = now;
+            }
+            Boolean cached = newAppFlags.get(entry.key);
+            if (cached != null) return cached;
+        }
+        boolean value = isNewUnopenedApp(entry.isSystemApp, entry.firstInstallTime,
+                hasEverLaunched(entry.key), now);
+        synchronized (newAppCacheLock) {
+            newAppFlags.put(entry.key, value);
+        }
+        return value;
+    }
+
+    /** После запуска/установки приложения кэш меток нужно сбросить. */
+    public void invalidateNewAppCache() {
+        synchronized (newAppCacheLock) {
+            newAppFlags.clear();
+            newAppFlagsBuiltAtMs = 0L;
         }
     }
 
@@ -736,19 +782,9 @@ public final class Prefs {
     public boolean isDynamicBarAutoHide() { return sp.getBoolean("dbar_auto_hide", true); }
     public void setDynamicBarAutoHide(boolean v) { sp.edit().putBoolean("dbar_auto_hide", v).apply(); }
 
-    // === Doxaiz 3.5: Стили перелистывания страниц, расширенный Dynamic Bar и всплывающие баннеры ===
-    public static final int PAGE_TRANS_SMOOTH = 0;
-    public static final int PAGE_TRANS_CARDS = 1;
-    public static final int PAGE_TRANS_FADE = 2;
-    public static final int PAGE_TRANS_STACK = 3;
-
-    public int getPageTransitionStyle() {
-        // Одна простая классическая плавная анимация перелистывания страниц
-        return PAGE_TRANS_SMOOTH;
-    }
-    public void setPageTransitionStyle(int style) {
-        sp.edit().putInt("page_transition_style", PAGE_TRANS_SMOOTH).apply();
-    }
+    // === Расширенный Dynamic Bar и всплывающие баннеры ===
+    // Стиль перелистывания страниц один — плавный (см. DesktopPagerView). Отдельная
+    // настройка с выбором «Карточки/Затухание/Стек» удалена вместе с недостижимым кодом.
 
     public boolean isHeadsUpBannersEnabled() { return sp.getBoolean("heads_up_banners", true); }
     public void setHeadsUpBannersEnabled(boolean v) { sp.edit().putBoolean("heads_up_banners", v).apply(); }
@@ -993,6 +1029,21 @@ public final class Prefs {
         }
     }
 
+    /**
+     * Вариант для импорта бэкапа: пишет в хранилище, но НЕ трогает кэш чтения —
+     * при откате кэш должен остаться согласованным с восстановленными настройками
+     * (см. invalidateCachesAfterImport()).
+     */
+    void setCustomSectionsRawJsonForImport(String raw) {
+        if (raw == null || raw.trim().isEmpty()) {
+            sp.edit().remove(KEY_CUSTOM_SECTIONS).apply();
+        } else {
+            // Та же строгая санитизация лимитов MAX_SECTIONS/MAX_NAME_LEN, но без кэша.
+            sp.edit().putString(KEY_CUSTOM_SECTIONS,
+                    CustomSection.toJson(CustomSection.fromJson(raw))).apply();
+        }
+    }
+
     public Set<Integer> getHiddenStdCategories() {
         synchronized (prefsCacheLock) {
             if (hiddenStdCatsCache == null) {
@@ -1024,6 +1075,12 @@ public final class Prefs {
 
     public String getHiddenStdCategoriesRaw() {
         return sp.getString(KEY_HIDDEN_STD_CATS, "");
+    }
+
+    void setHiddenStdCatsRawForImport(String raw) {
+        // Санитизация та же, что и в обычном пути, но без записи в кэш чтения.
+        Set<Integer> parsed = CustomSection.parseHiddenStdCategories(raw);
+        sp.edit().putString(KEY_HIDDEN_STD_CATS, CustomSection.encodeHiddenStdCategories(parsed)).apply();
     }
 
     public void setHiddenStdCategoriesRaw(String raw) {
@@ -1096,5 +1153,67 @@ public final class Prefs {
 
     public void setAnimeParticlesEnabled(boolean enabled) {
         sp.edit().putBoolean("anime_particles", enabled).apply();
+    }
+
+    // =========================================================================
+    // Транзакционный импорт резервной копии (BackupHelper)
+    //
+    // Импорт восстанавливает настройки по одной (setXxx → apply), поэтому исключение
+    // в середине разбора раньше оставляло пользователя с частично применённым
+    // состоянием — в том числе с уже очищенным списком скрытых приложений.
+    // Теперь BackupHelper снимает полный снимок настроек и при любой ошибке
+    // возвращает их одной атомарной записью.
+    // =========================================================================
+
+    /** Полный снимок настроек для отката неудачного импорта. */
+    @SuppressWarnings("unchecked")
+    Map<String, Object> snapshotForRollback() {
+        Map<String, Object> copy = new HashMap<>();
+        for (Map.Entry<String, ?> e : sp.getAll().entrySet()) {
+            Object v = e.getValue();
+            if (v instanceof Set) {
+                copy.put(e.getKey(), new HashSet<>((Set<String>) v));
+            } else {
+                copy.put(e.getKey(), v);
+            }
+        }
+        return copy;
+    }
+
+    /** Возвращает настройки к снимку: одна атомарная запись + сброс кэшей чтения. */
+    @SuppressWarnings("unchecked")
+    boolean restoreFromRollback(Map<String, Object> snapshot) {
+        if (snapshot == null) return false;
+        try {
+            SharedPreferences.Editor ed = sp.edit();
+            ed.clear();
+            for (Map.Entry<String, Object> e : snapshot.entrySet()) {
+                Object v = e.getValue();
+                if (v instanceof String) ed.putString(e.getKey(), (String) v);
+                else if (v instanceof Set) {
+                    ed.putStringSet(e.getKey(), new HashSet<>((Set<String>) v));
+                } else if (v instanceof Integer) ed.putInt(e.getKey(), (Integer) v);
+                else if (v instanceof Long) ed.putLong(e.getKey(), (Long) v);
+                else if (v instanceof Boolean) ed.putBoolean(e.getKey(), (Boolean) v);
+                else if (v instanceof Float) ed.putFloat(e.getKey(), (Float) v);
+            }
+            boolean ok = ed.commit();
+            invalidateCachesAfterImport();
+            return ok;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    /** Сбрасывает кэши чтения (скрытые приложения, разделы, категории, журнал запусков). */
+    void invalidateCachesAfterImport() {
+        synchronized (prefsCacheLock) {
+            hiddenAppsCache = null;
+            customSectionsCache = null;
+            hiddenStdCatsCache = null;
+        }
+        synchronized (usageLock) {
+            usageCache = null;
+        }
     }
 }

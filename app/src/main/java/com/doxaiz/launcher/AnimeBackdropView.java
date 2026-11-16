@@ -79,10 +79,10 @@ public final class AnimeBackdropView extends View {
         return new int[]{126, 36, 168};
     }
 
-    public void applyConfig(int wallpaperMode, int styleMode, int dimLevel) {
-        int safeWp = Prefs.sanitizeWallpaperMode(wallpaperMode);
-        int safeStyle = Prefs.sanitizeVisualStyle(styleMode);
-        int safeDim = Prefs.sanitizeWallpaperDim(dimLevel);
+    public void applyConfig(int newWallpaperMode, int newStyleMode, int newDimLevel) {
+        int safeWp = Prefs.sanitizeWallpaperMode(newWallpaperMode);
+        int safeStyle = Prefs.sanitizeVisualStyle(newStyleMode);
+        int safeDim = Prefs.sanitizeWallpaperDim(newDimLevel);
         boolean wpChanged = (this.wallpaperMode != safeWp);
         boolean scrimChanged = (this.styleMode != safeStyle || this.dimLevel != safeDim);
 

@@ -153,10 +153,9 @@ public final class CustomSection {
         if (sec.packages.contains(clean)) {
             sec.packages.remove(clean);
             return false;
-        } else {
-            sec.packages.add(clean);
-            return true;
         }
+        sec.packages.add(clean);
+        return true;
     }
 
     public static boolean removeSection(List<CustomSection> list, String sectionId) {

@@ -3,8 +3,35 @@ set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SDK_DIR="${ANDROID_SDK_ROOT:-/tmp/android-sdk}"
-BUILD_TOOLS="${SDK_DIR}/build-tools/android-14"
-ANDROID_JAR="${SDK_DIR}/platforms/android-34/android.jar"
+
+# Build Tools в Android SDK раскладываются по версии (34.0.0, 35.0.0, ...), а не по
+# схеме platforms (android-34). Разрешаем переопределение и подхватываем последнюю
+# установленную версию, чтобы скрипт не падал на несуществующем каталоге.
+BUILD_TOOLS_VERSION="${DOXAIZ_BUILD_TOOLS_VERSION:-34.0.0}"
+if [ ! -d "${SDK_DIR}/build-tools/${BUILD_TOOLS_VERSION}" ]; then
+    for candidate in "${SDK_DIR}"/build-tools/*; do
+        [ -d "$candidate" ] || continue
+        BUILD_TOOLS_VERSION="$(basename "$candidate")"
+    done
+fi
+BUILD_TOOLS="${SDK_DIR}/build-tools/${BUILD_TOOLS_VERSION}"
+
+# Единственный источник истины по версии — app/build.gradle (namespace для aapt2 — package в манифесте).
+GRADLE_FILE="${PROJECT_DIR}/app/build.gradle"
+MIN_SDK="$(sed -n 's/.*minSdk[[:space:]]\+\([0-9]\+\).*/\1/p' "$GRADLE_FILE" | head -1)"
+TARGET_SDK="$(sed -n 's/.*targetSdk[[:space:]]\+\([0-9]\+\).*/\1/p' "$GRADLE_FILE" | head -1)"
+VERSION_CODE="$(sed -n 's/.*versionCode[[:space:]]\+\([0-9]\+\).*/\1/p' "$GRADLE_FILE" | head -1)"
+VERSION_NAME="$(sed -n 's/.*versionName[[:space:]]\+"\(.*\)".*/\1/p' "$GRADLE_FILE" | head -1)"
+: "${MIN_SDK:?Не удалось прочитать minSdk из app/build.gradle}"
+: "${TARGET_SDK:?Не удалось прочитать targetSdk из app/build.gradle}"
+: "${VERSION_CODE:?Не удалось прочитать versionCode из app/build.gradle}"
+: "${VERSION_NAME:?Не удалось прочитать versionName из app/build.gradle}"
+
+ANDROID_JAR="${SDK_DIR}/platforms/android-${TARGET_SDK}/android.jar"
+[ -x "${BUILD_TOOLS}/aapt2" ] || { echo "Build Tools не найдены: ${BUILD_TOOLS}" >&2; exit 1; }
+[ -f "${ANDROID_JAR}" ] || { echo "android.jar не найден: ${ANDROID_JAR}" >&2; exit 1; }
+
+echo "SDK: ${SDK_DIR} | Build Tools: ${BUILD_TOOLS_VERSION} | minSdk ${MIN_SDK} / targetSdk ${TARGET_SDK} | ${VERSION_NAME} (${VERSION_CODE})"
 
 WORK_DIR="/tmp/doxaiz-build"
 RES_DIR="${PROJECT_DIR}/app/src/main/res"
@@ -34,10 +61,10 @@ echo "[2/6] Линковка ресурсов и R.java (aapt2 link)..."
     -I "${ANDROID_JAR}" \
     --manifest "${MANIFEST}" \
     --java "${WORK_DIR}/gen" \
-    --min-sdk-version 26 \
-    --target-sdk-version 34 \
-    --version-code 38 \
-    --version-name "5.5-test" \
+    --min-sdk-version "${MIN_SDK}" \
+    --target-sdk-version "${TARGET_SDK}" \
+    --version-code "${VERSION_CODE}" \
+    --version-name "${VERSION_NAME}" \
     --auto-add-overlay \
     "${WORK_DIR}/res.zip"
 
@@ -60,7 +87,7 @@ done < <(find "${WORK_DIR}/classes" -name "*.class" -print0)
 
 "${BUILD_TOOLS}/d8" \
     --release \
-    --min-api 26 \
+    --min-api "${MIN_SDK}" \
     --lib "${ANDROID_JAR}" \
     --output "${WORK_DIR}/dex" \
     "${CLASS_FILES[@]}"
@@ -70,13 +97,13 @@ cp "${WORK_DIR}/unsigned.apk" "${WORK_DIR}/unaligned.apk"
 (cd "${WORK_DIR}/dex" && zip -q -u "${WORK_DIR}/unaligned.apk" classes.dex)
 "${BUILD_TOOLS}/zipalign" -f -p 4 "${WORK_DIR}/unaligned.apk" "${WORK_DIR}/aligned.apk"
 
-echo "[6/6] Подпись APK (apksigner v1+v2+v3)..."
+echo "[6/6] Подпись APK (apksigner v2+v3; v1 не нужен при minSdk ${MIN_SDK})..."
 "${BUILD_TOOLS}/apksigner" sign \
     --ks "${KEYSTORE}" \
     --ks-key-alias "${KEY_ALIAS}" \
     --ks-pass env:DOXAIZ_KEYSTORE_PASSWORD \
     --key-pass env:DOXAIZ_KEY_PASSWORD \
-    --v1-signing-enabled true \
+    --v1-signing-enabled false \
     --v2-signing-enabled true \
     --v3-signing-enabled true \
     --v4-signing-enabled false \
@@ -84,5 +111,5 @@ echo "[6/6] Подпись APK (apksigner v1+v2+v3)..."
     "${WORK_DIR}/aligned.apk"
 
 echo "[Проверка подписи и манифеста]"
-"${BUILD_TOOLS}/apksigner" verify --min-sdk-version 21 --verbose "${OUT_APK}"
+"${BUILD_TOOLS}/apksigner" verify --min-sdk-version "${MIN_SDK}" --verbose "${OUT_APK}"
 ls -lh "${OUT_APK}"

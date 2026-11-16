@@ -1,0 +1,186 @@
+name: Android CI
+
+# Зачем это нужно.
+#
+# В среде, где ведётся разработка, нет ни Android SDK, ни Java-компилятора, ни
+# устройства — сборку APK и запуск лаунчера там сделать нельзя. Этот workflow
+# выполняет обе проверки на настоящем Android: компилирует проект Gradle/AGP,
+# гоняет JVM-тесты, подписывает debug-APK временным ключом CI и ставит его на
+# эмулятор (API 34, 64-bit), после чего снимает реальные кадровые метрики.
+#
+# Секретов не требуется: используется стандартная debug-подпись AGP (в CI она
+# ни для чего не переиспользуется). Release-подпись проекта сюда намеренно не
+# подключена — приватный ключ остаётся вне репозитория и вне CI.
+
+on:
+  push:
+    branches:
+      - main
+      - 'arena/**'
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-tests:
+    name: JVM-тесты
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: JVM-тесты
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon --stacktrace test 2>&1 | tee gradle-test.log
+
+      # Логи job читаются не во всех окружениях, а аннотации видны через API,
+      # поэтому причину падения выводим аннотациями, а не только в лог.
+      - name: Причина падения тестов
+        if: failure()
+        run: bash .github/scripts/gradle-failure.sh gradle-test.log
+
+      - name: Сводка по тестам
+        if: always()
+        run: |
+          python3 - <<'PYEOF'
+          import glob, xml.etree.ElementTree as ET, os
+          total = fail = err = skip = 0
+          for f in glob.glob('app/build/test-results/**/*.xml', recursive=True):
+              r = ET.parse(f).getroot()
+              total += int(r.get('tests', 0)); fail += int(r.get('failures', 0))
+              err += int(r.get('errors', 0)); skip += int(r.get('skipped', 0))
+              print(f"{os.path.basename(f)}: tests={r.get('tests')} failures={r.get('failures')} errors={r.get('errors')}")
+          print(f"ИТОГО: tests={total} failures={fail} errors={err} skipped={skip}")
+          if total == 0:
+              print("::error title=JVM-тесты::тесты не найдены — проверки не выполнялись")
+          print(f"::notice title=JVM-тесты::tests={total} failures={fail} errors={err} skipped={skip}")
+          PYEOF
+
+      - name: Отчёт о тестах
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-tests-report
+          path: |
+            app/build/reports/tests/
+            app/build/test-results/
+            gradle-test.log
+          if-no-files-found: warn
+
+  apk:
+    name: Сборка debug-APK
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Собрать debug-APK
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon --stacktrace assembleDebug 2>&1 | tee gradle-build.log
+
+      - name: Причина падения сборки
+        if: failure()
+        run: bash .github/scripts/gradle-failure.sh gradle-build.log
+
+      - name: Проверить APK (пакет, версия, разрешения, подпись)
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          BUILD_TOOLS="$(ls -d "$SDK"/build-tools/* | sort -V | tail -1)"
+          APK="$(find app/build/outputs/apk/debug -name '*.apk' | head -1)"
+          echo "APK: $APK"
+          "$BUILD_TOOLS/aapt2" dump badging "$APK" | head -5
+          echo "--- разрешения ---"
+          # 0aapt2 dump permissions поддерживается с build-tools 31+
+          "$BUILD_TOOLS/aapt2" dump permissions "$APK" || true
+          echo "--- подпись ---"
+          "$BUILD_TOOLS/apksigner" verify --verbose "$APK" | head -12
+          echo "--- sha256 ---"
+          sha256sum "$APK" | tee apk-sha256.txt
+
+      # F-20: сборка с включённым R8 проверяется отдельно. Если keep-правила
+      # неполные, падает именно этот шаг, а не релиз у пользователя.
+      - name: Сборка release с R8 (без подписи)
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon --stacktrace assembleRelease 2>&1 | tee gradle-release.log
+          echo "::notice title=R8-release::$(grep -E '^> Task :app:(minify|shrink|package)Release' gradle-release.log | tr '\n' ' ' | cut -c1-600)"
+
+      - name: Причина падения release-сборки
+        if: failure()
+        run: bash .github/scripts/gradle-failure.sh gradle-release.log
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: doxaiz-debug-apk
+          path: |
+            app/build/outputs/apk/debug/*.apk
+            apk-sha256.txt
+
+  emulator:
+    name: Запуск на эмуляторе (API 34)
+    runs-on: ubuntu-latest
+    needs: apk
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # Включаем аппаратное ускорение KVM: без него x86_64-эмулятор либо не
+      # стартует, либо неприемлемо медленный.
+      - name: Включить KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - uses: actions/download-artifact@v5
+        with:
+          name: doxaiz-debug-apk
+          path: apk
+
+      - name: Запустить эмулятор и проверить лаунчер
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: false
+          emulator-options: >-
+            -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect
+            -camera-back none -camera-front none
+          script: bash .github/scripts/emulator-check.sh
+        env:
+          APK_PATH: apk
+
+      - name: Сохранить отчёты эмулятора
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulator-report
+          path: emulator-report/
+          if-no-files-found: warn

@@ -162,7 +162,7 @@ public final class QuickShadeHelper {
     );
 
     private static final SimpleDateFormat TIME_FMT = new SimpleDateFormat("HH:mm", Locale.getDefault());
-    private static final SimpleDateFormat DATE_FMT = new SimpleDateFormat("EEE, d MMM", new Locale("ru", "RU"));
+    private static final SimpleDateFormat DATE_FMT = new SimpleDateFormat("EEE, d MMM", Locale.forLanguageTag("ru-RU"));
     private static final SimpleDateFormat NOTIF_TIME_FMT = new SimpleDateFormat("HH:mm", Locale.getDefault());
 
     /**
@@ -4468,7 +4468,10 @@ public final class QuickShadeHelper {
             }
             case "netboost": {
                 boolean ok = host.triggerNetworkBoostNow();
-                host.showToast(ok ? "Канал сети перепроверен" : "Нет активного подключения");
+                // reportNetworkConnectivity() на части прошивок — no-op, поэтому нельзя
+                // обещать «перепроверено», если сеть не подтвердила восстановление (F-13).
+                host.showToast(ok ? "Канал сети перепроверен"
+                        : "Система не подтвердила переподключение — откройте панель сети");
                 rebuildShadeContent();
                 break;
             }
@@ -5536,7 +5539,8 @@ public final class QuickShadeHelper {
             recheckRow.setOnClickListener(v -> {
                 performHaptic(v);
                 boolean ok = host.triggerNetworkBoostNow();
-                host.showToast(ok ? "Канал Wi-Fi / сети перепроверен" : "Нет активного подключения");
+                host.showToast(ok ? "Канал Wi-Fi / сети перепроверен"
+                        : "Система не подтвердила переподключение — откройте панель сети");
                 if (dlgRef[0] != null) dlgRef[0].dismiss();
                 rebuildShadeContent();
             });
