@@ -190,6 +190,10 @@ log "Лаунчер как системный HOME (мягкая проверк�
 # pm disable-user для штатного лаунчера роняет SystemUI (проверено в CI:
 # PACKAGE_CHANGED -> FATAL в com.android.systemui), поэтому не отключаем
 # ничего системного. Только просим назначить и фиксируем результат.
+# force-stop штатного лаунчера — не отключение пакета (disable-user ронял
+# SystemUI), а просто остановка процесса: он перестаёт драться за фокус и
+# не возвращается до перезагрузки образа.
+adb shell am force-stop com.google.android.apps.nexuslauncher >/dev/null 2>&1 || true
 adb shell cmd role add-role-holder android.app.role.HOME "$PKG" >/dev/null 2>&1 || true
 adb shell cmd package set-home-activity "$PKG/.MainActivity" >/dev/null 2>&1 || true
 RESOLVED="$(adb shell cmd package resolve-activity --brief -c android.intent.category.HOME -a android.intent.action.MAIN 2>/dev/null | tr -d '\r' | tail -1)"
