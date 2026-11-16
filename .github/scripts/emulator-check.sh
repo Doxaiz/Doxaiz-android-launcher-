@@ -203,10 +203,21 @@ else
     note "home" "HOME на эмуляторе остался за $RESOLVED; это ограничение образа, не приложения"
 fi
 
-adb shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1 || true
-sleep 3
-FOCUS="$(adb shell dumpsys window 2>/dev/null | grep -E 'mCurrentFocus' | head -1)"
-echo "$FOCUS" | tee "$OUT/focus-home.txt"
+# Кнопку HOME не жмём: на этом образе она поднимает штатный Pixel Launcher,
+# который висит в ANR. Запускаем активность явно, до трёх попыток: системный
+# лаунчер иногда перехватывает фокус сразу после старта.
+: > "$OUT/focus-home.txt"
+FOCUS=""
+for attempt in 1 2 3; do
+    adb shell am start -W -n "$PKG/.MainActivity" >> "$OUT/start-app.txt" 2>&1 || true
+    sleep 4
+    FOCUS="$(adb shell dumpsys window 2>/dev/null | grep -E 'mCurrentFocus' | head -1)"
+    echo "attempt $attempt: $FOCUS" >> "$OUT/focus-home.txt"
+    if echo "$FOCUS" | grep -q "$PKG"; then
+        break
+    fi
+    dismiss_system_dialog || true
+done
 if ! echo "$FOCUS" | grep -q "$PKG"; then
     report_fail "Лаунчер не на переднем плане: $FOCUS"
 else
@@ -224,55 +235,30 @@ fi
 endlog
 
 log "Каталог приложений"
-# Открываем каталог тем же жестом, что и пользователь: свайп вверх по
-# рабочему столу. Если не открылось — пробуем кнопку в доке по координатам
-# из дампа, а не наугад.
-dismiss_system_dialog || true
-adb shell input swipe 540 1700 540 600 250
-sleep 4
-dump_ui drawer "ui-drawer"
-DRAWER_NODES="$(sed -n 's/^узлов=//p' "$OUT/ui-drawer.txt" 2>/dev/null | head -1)"
-if [ "${DRAWER_NODES:-0}" -lt 20 ]; then
-    if dismiss_system_dialog; then
-        adb shell input swipe 540 1700 540 600 250
-        sleep 4
-        dump_ui drawer "ui-drawer"
-        DRAWER_NODES="$(sed -n 's/^узлов=//p' "$OUT/ui-drawer.txt" 2>/dev/null | head -1)"
-        note "drawer-retry" "после закрытия системного диалога узлов=${DRAWER_NODES:-0}"
+# Каталог открывается свайпом вверх по рабочему столу. На эмуляторе жест
+# срабатывает не с первого раза, поэтому делаем до четырёх попыток и после
+# каждой проверяем число узлов в дереве.
+DRAWER_NODES=0
+for attempt in 1 2 3 4; do
+    dismiss_system_dialog || true
+    adb shell am start -n "$PKG/.MainActivity" >/dev/null 2>&1 || true
+    sleep 2
+    adb shell input swipe 540 1800 540 500 180
+    sleep 3
+    dump_ui drawer "ui-drawer"
+    DRAWER_NODES="$(sed -n 's/^узлов=//p' "$OUT/ui-drawer.txt" 2>/dev/null | head -1)"
+    echo "attempt $attempt: узлов ${DRAWER_NODES:-0}" >> "$OUT/drawer-attempts.txt"
+    if [ "${DRAWER_NODES:-0}" -ge 40 ]; then
+        break
     fi
-fi
-if [ "${DRAWER_NODES:-0}" -lt 20 ]; then
-    note "drawer-retry" "после свайпа узлов=${DRAWER_NODES:-0}, ищу кнопку каталога в дампе"
-    BTN="$(python3 - "$OUT/ui-home.xml" <<'PYEOF' 2>/dev/null || true
-import re, sys
-xml = open(sys.argv[1], encoding='utf-8', errors='replace').read()
-for nd in re.findall(r'<node [^>]*>', xml):
-    dsc = re.search(r'content-desc="([^"]*)"', nd)
-    if dsc and ('Все приложения' in dsc.group(1) or 'каталог' in dsc.group(1).lower()):
-        b = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', nd)
-        if b:
-            x1, y1, x2, y2 = map(int, b.groups())
-            print(f"{(x1+x2)//2} {(y1+y2)//2}")
-            break
-PYEOF
-)"
-    if [ -n "${BTN:-}" ]; then
-        note "drawer-retry" "нажимаю кнопку каталога в $BTN"
-        adb shell input tap $BTN
-        sleep 3
-        dump_ui drawer "ui-drawer"
-        DRAWER_NODES="$(sed -n 's/^узлов=//p' "$OUT/ui-drawer.txt" 2>/dev/null | head -1)"
-    else
-        note "drawer-retry" "кнопка каталога в дереве не найдена"
-    fi
-fi
+done
 note "drawer" "узлов в каталоге=${DRAWER_NODES:-0}"
-if [ "${DRAWER_NODES:-0}" -lt 20 ]; then
+if [ "${DRAWER_NODES:-0}" -lt 40 ]; then
     if grep -qE "isn't responding|не отвечает" "$OUT/ui-drawer.xml" 2>/dev/null; then
         note "drawer" "экран перекрыт системным диалогом — результат недостоверен"
         report_fail "Каталог не проверен: системный ANR-диалог перекрыл экран"
     else
-        report_fail "Каталог приложений не открылся или пуст (узлов=${DRAWER_NODES:-0})"
+        report_fail "Каталог приложений не открылся (узлов=${DRAWER_NODES:-0})"
     fi
 fi
 check_crash "каталог" || true
