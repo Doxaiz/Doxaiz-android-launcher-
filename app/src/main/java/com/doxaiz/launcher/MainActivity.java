@@ -9629,6 +9629,21 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                 () -> pendingPrivateSpaceAction = null);
     }
 
+    /**
+     * Открывает поток на запись для экспорта копии.
+     *
+     * «wt» (truncate) поддерживается не всеми провайдерами SAF, поэтому при
+     * ошибке используется обычный режим. Возвращается один поток — закрывать
+     * его обязан вызывающий (try-with-resources).
+     */
+    private OutputStream openBackupOutputStream(Uri uri) throws java.io.FileNotFoundException {
+        try {
+            return getContentResolver().openOutputStream(uri, "wt");
+        } catch (Exception first) {
+            return getContentResolver().openOutputStream(uri);
+        }
+    }
+
     private void launchExportBackupPicker() {
         try {
             Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
@@ -9718,15 +9733,14 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             try {
                 backupIo.execute(() -> {
                     boolean ok = false;
-                    try {
-                        OutputStream stream;
-                        try { stream = getContentResolver().openOutputStream(uri, "wt"); }
-                        catch (Exception e) { stream = getContentResolver().openOutputStream(uri); }
-                        if (stream != null) {
-                            try (OutputStream out = stream) {
-                                out.write(encoded);
-                                out.flush();
-                            }
+                    // ВАЖНО: try-with-resources, а не ручной поток. Если первый
+                    // openOutputStream(uri, "wt") открылся, но второй вызов из
+                    // catch открыл ЕЩЁ один поток, старое значение терялось и
+                    // файловый дескриптор не закрывался (утечка, отмечена Android Lint).
+                    try (OutputStream out = openBackupOutputStream(uri)) {
+                        if (out != null) {
+                            out.write(encoded);
+                            out.flush();
                             ok = true;
                         }
                     } catch (Exception ignored) { }
