@@ -55,12 +55,14 @@ jobs:
           python3 - <<'PYEOF'
           import glob, xml.etree.ElementTree as ET, os
           total = fail = err = skip = 0
-          for f in glob.glob('app/build/test-results/test/*.xml'):
+          for f in glob.glob('app/build/test-results/**/*.xml', recursive=True):
               r = ET.parse(f).getroot()
               total += int(r.get('tests', 0)); fail += int(r.get('failures', 0))
               err += int(r.get('errors', 0)); skip += int(r.get('skipped', 0))
               print(f"{os.path.basename(f)}: tests={r.get('tests')} failures={r.get('failures')} errors={r.get('errors')}")
           print(f"ИТОГО: tests={total} failures={fail} errors={err} skipped={skip}")
+          if total == 0:
+              print("::error title=JVM-тесты::тесты не найдены — проверки не выполнялись")
           print(f"::notice title=JVM-тесты::tests={total} failures={fail} errors={err} skipped={skip}")
           PYEOF
 
