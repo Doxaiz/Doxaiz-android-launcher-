@@ -79,14 +79,42 @@ else
 fi
 endlog
 
+log "AI-подсказки из view-дерева (доказательство, что интерфейс построен)"
+# Скриншот из этой среды не посмотреть (артефакты не скачиваются), поэтому
+# снимаем текст с экрана: он показывает, что реально отрисовано.
+adb shell uiautomator dump /sdcard/ui-home.xml >/dev/null 2>&1 || true
+adb shell cat /sdcard/ui-home.xml > "$OUT/ui-home.xml" 2>/dev/null || true
+python3 - "$OUT/ui-home.xml" > "$OUT/ui-home.txt" 2>/dev/null <<'PYEOF' || true
+import re, sys
+xml = open(sys.argv[1], encoding='utf-8', errors='replace').read()
+items = []
+for m in re.finditer(r'text="([^"]{1,40})"', xml):
+    t = m.group(1).strip()
+    if t and t not in items:
+        items.append(t)
+print(" | ".join(items[:40]) or "(текста на экране нет)")
+PYEOF
+cat "$OUT/ui-home.txt" 2>/dev/null || echo "(дамп не получен)"
+endlog
+
 log "Кадровые метрики"
 # Важно: эмулятор рисует через swiftshader (программный GPU), поэтому абсолютные
 # значения FPS/percentile здесь НЕ показывают реальную плавность на телефоне.
 # Метрика нужна как относительная: сколько кадров отрисовано и есть ли тяжёлые
 # кадры в конкретном сценарии. Реальные числа снимаются на устройстве.
+# Базовый замер: перелистывание страниц рабочего стола.
 adb shell dumpsys gfxinfo "$PKG" reset >/dev/null 2>&1 || true
+for _ in 1 2 3; do
+    adb shell input swipe 900 1200 200 1200 120
+    sleep 1
+    adb shell input swipe 200 1200 900 1200 120
+    sleep 1
+done
+adb shell dumpsys gfxinfo "$PKG" > "$OUT/gfxinfo-desktop.txt" 2>/dev/null || true
+grep -E "Total frames rendered|Janky frames:|50th percentile|90th percentile|Number Missed Vsync|Number Slow UI thread" \
+    "$OUT/gfxinfo-desktop.txt" | tee "$OUT/gfxinfo-desktop-summary.txt"
 
-# Сценарий 1: каталог приложений. Свайп снизу вверх раскрывает список,
+# Сценарий 2: каталог приложений. Свайп снизу вверх раскрывает список,
 # прокрутка списка — самая частая операция в лаунчере.
 adb shell input swipe 540 1900 540 500 200
 sleep 4
@@ -109,6 +137,8 @@ log "Итог"
 note "install" "$(tail -1 "$OUT/install.txt")"
 note "start" "$(grep -E 'Status|Activity|TotalTime|WaitTime' "$OUT/start.txt" | tr '\n' ' ')"
 note "crash" "$(head -1 "$OUT/crash-summary.txt")"
+note "ui-home" "$(cat "$OUT/ui-home.txt" 2>/dev/null | cut -c1-700)"
+note "gfxinfo-desktop" "$(tr '\n' ' ' < "$OUT/gfxinfo-desktop-summary.txt" | cut -c1-700)"
 note "gfxinfo-drawer" "$(tr '\n' ' ' < "$OUT/gfxinfo-summary.txt" | cut -c1-800)"
 note "gfxinfo-note" "эмулятор рисует программно: числа годятся только как относительные, FPS на телефоне не подтверждают"
 
