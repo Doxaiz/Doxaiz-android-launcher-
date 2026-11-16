@@ -166,6 +166,17 @@ else
 fi
 endlog
 
+log "Служебные настройки эмулятора"
+# hide_error_dialogs убирает системные окна «... isn't responding». Без этого
+# ANR штатного Pixel Launcher (он на эмуляторе всегда тормозит) перекрывает
+# экран и делает дампы бесполезными.
+adb shell settings put global hide_error_dialogs 1 >/dev/null 2>&1 || true
+adb shell settings put global window_animation_scale 0 >/dev/null 2>&1 || true
+adb shell settings put global transition_animation_scale 0 >/dev/null 2>&1 || true
+adb shell settings put global animator_duration_scale 0 >/dev/null 2>&1 || true
+echo "hide_error_dialogs=1, анимации выключены" | tee "$OUT/emulator-settings.txt"
+endlog
+
 log "Разблокировка экрана"
 # Эмулятор стартует с keyguard: пока он висит, любые замеры и дампы относятся
 # к экрану блокировки, а не к лаунчеру.
