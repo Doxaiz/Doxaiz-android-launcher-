@@ -2,9 +2,8 @@ package com.doxaiz.launcher;
 
 import android.app.Activity;
 import android.app.ActivityManager;
+import android.app.KeyguardManager;
 import android.content.BroadcastReceiver;
-import android.content.ClipData;
-import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
@@ -61,9 +60,7 @@ import android.widget.Toast;
 import android.window.OnBackInvokedCallback;
 import android.window.OnBackInvokedDispatcher;
 
-import java.io.BufferedReader;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
@@ -99,7 +96,6 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     private int lastUnreadHash = 0;
     private boolean volumeCompactOpen = false;
     private boolean volumeExpandedOpen = false;
-    private boolean shadeOpen = false;
     private static final DecelerateInterpolator SMOOTH_INTERPOLATOR = new DecelerateInterpolator(1.6f);
     private final Runnable autoHideVolumeRunnable = this::onAutoHideVolume;
 
@@ -125,7 +121,6 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     // Корневые слои
     private FrameLayout rootContainer;
     private AnimeBackdropView animeBackdrop;
-    private boolean activityResumed;
     private LinearLayout homeContainer;
     private LinearLayout drawerContainer;
     private LinearLayout settingsContainer;
@@ -290,11 +285,42 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     private final BroadcastReceiver userPresentReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
-            if (dynamicBarHelper != null && Intent.ACTION_USER_PRESENT.equals(intent != null ? intent.getAction() : null)) {
-                dynamicBarHelper.triggerUnlockPulse();
-            }
+            if (dynamicBarHelper == null) return;
+            if (!Intent.ACTION_USER_PRESENT.equals(intent != null ? intent.getAction() : null)) return;
+            // До Android 13 динамический ресивер неявно экспортирован, и «пульс разблокировки»
+            // мог дёрнуть любой сторонний броадкаст. Требуем, чтобы экран действительно был
+            // разблокирован — подделка системного состояния через KeyguardManager невозможна.
+            if (isKeyguardStillLocked()) return;
+            dynamicBarHelper.triggerUnlockPulse();
         }
     };
+
+    /**
+     * Регистрация динамического ресивера только для системных броадкастов.
+     *
+     * На API 33+ есть RECEIVER_NOT_EXPORTED. На 26–32 эквивалента нет, но флаг
+     * RECEIVER_EXPORTED подавляет предупреждение платформы о неявном экспорте,
+     * а сами фильтры (ACTION_BATTERY_CHANGED, RINGER_MODE_CHANGED, USER_PRESENT)
+     * отправляет только система, поэтому отличается только видимость намерения.
+     */
+    private void registerSystemReceiver(BroadcastReceiver receiver, IntentFilter filter) {
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        } else if (Build.VERSION.SDK_INT >= 26) {
+            registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED);
+        } else {
+            registerReceiver(receiver, filter);
+        }
+    }
+
+    private boolean isKeyguardStillLocked() {
+        try {
+            KeyguardManager km = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
+            return km != null && km.isKeyguardLocked();
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -486,7 +512,6 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     }
 
     @Override
-    @SuppressWarnings("deprecation")
     public void onBackPressed() {
         handleBackAction();
     }
@@ -569,7 +594,6 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     @Override
     protected void onResume() {
         super.onResume();
-        activityResumed = true;
         if (animeBackdrop != null && prefs != null)
             animeBackdrop.applyConfig(prefs.getWallpaperMode(), prefs.getVisualStyle(), prefs.getWallpaperDimLevel());
         syncAmbientParticles();
@@ -585,11 +609,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             try {
                 IntentFilter bf = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
                 bf.addAction(android.media.AudioManager.RINGER_MODE_CHANGED_ACTION);
-                if (Build.VERSION.SDK_INT >= 33) {
-                    registerReceiver(batteryReceiver, bf, Context.RECEIVER_NOT_EXPORTED);
-                } else {
-                    registerReceiver(batteryReceiver, bf);
-                }
+                registerSystemReceiver(batteryReceiver, bf);
                 batteryReceiverRegistered = true;
                 freshBatteryReg = true;
             } catch (Throwable ignored) {
@@ -598,11 +618,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         if (!userPresentReceiverRegistered) {
             try {
                 IntentFilter uf = new IntentFilter(Intent.ACTION_USER_PRESENT);
-                if (Build.VERSION.SDK_INT >= 33) {
-                    registerReceiver(userPresentReceiver, uf, Context.RECEIVER_NOT_EXPORTED);
-                } else {
-                    registerReceiver(userPresentReceiver, uf);
-                }
+                registerSystemReceiver(userPresentReceiver, uf);
                 userPresentReceiverRegistered = true;
             } catch (Throwable ignored) {
             }
@@ -707,7 +723,6 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
     @Override
     protected void onPause() {
-        activityResumed = false;
         syncAmbientParticles();
         super.onPause();
         if (dragging || dragPending) {
@@ -727,6 +742,16 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             } catch (Throwable ignored) {
             }
             batteryReceiverRegistered = false;
+        }
+        // Приёмник ACTION_USER_PRESENT нужен только пока Activity на экране:
+        // раньше он жил от onResume до onDestroy, то есть всё время работы лаунчера
+        // в фоне (а лаунчер висит в фоне почти всегда) и висел в системном реестре.
+        if (userPresentReceiverRegistered) {
+            try {
+                unregisterReceiver(userPresentReceiver);
+            } catch (Throwable ignored) {
+            }
+            userPresentReceiverRegistered = false;
         }
         if (dynamicBarHelper != null) {
             dynamicBarHelper.collapse();
@@ -1779,8 +1804,8 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
         // Doxaiz 4.6: Чистый безрамочный док со свободными иконками (без тяжёлой капсулы)
         dockCard.setBackground(null);
-        boolean classicPagesOnly = prefs.getHomeLayoutMode() == Prefs.HOME_MODE_CLASSIC_PAGES;
-        dockDrawerBtn.setVisibility((prefs.isShowDockDrawerBtn() && !classicPagesOnly) ? View.VISIBLE : View.GONE);
+        // Рабочий стол всегда гибридный: страницы + отдельное меню приложений.
+        dockDrawerBtn.setVisibility(prefs.isShowDockDrawerBtn() ? View.VISIBLE : View.GONE);
         dockDrawerBtn.setBackground(GlassTheme.makeGlassRect(
                 this, theme.chipInactiveBg, theme.cardBorderColor, 16f, 1f
         ));
@@ -1852,7 +1877,6 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         if (pagerView != null) {
             pagerView.setSmoothScrollEnabled(prefs.isSmoothAnimationsEnabled());
             pagerView.setLoopPagesEnabled(prefs.isLoopHomePages());
-            pagerView.setTransitionStyle(prefs.getPageTransitionStyle());
         }
 
         updateDrawerModeUi();
@@ -2250,9 +2274,6 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             int effectiveCols = prefs.getColumns();
             if (!imp.success) {
                 desktop.buildInitialLayout(visible, effectiveCols, bottomAlign);
-                if (prefs.getHomeLayoutMode() == Prefs.HOME_MODE_CLASSIC_PAGES) {
-                    desktop.spreadAllAppsAcrossPages(visible, effectiveCols);
-                }
             } else {
                 Toast.makeText(
                         this,
@@ -4942,11 +4963,15 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
     private void runQuickNetworkImprove() {
         boolean reprobed = (networkHelper != null) && networkHelper.triggerSystemReprobe();
-        Toast.makeText(
-                this,
-                reprobed ? "Перепроверка канала запущена" : "Открытие панели подключения",
-                Toast.LENGTH_SHORT
-        ).show();
+        String msg;
+        if (reprobed) {
+            msg = "Канал перепроверен: сеть активна";
+        } else if (networkHelper != null) {
+            msg = "Система не подтвердила переподключение — открываю панель подключения";
+        } else {
+            msg = "Открытие панели подключения";
+        }
+        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
         NetworkQualityHelper.openInternetQuickPanel(this);
     }
 
@@ -4988,7 +5013,6 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     private void showModalCardInternal(View cardContent, int gravity, boolean keepFolderOpen, boolean animate) {
         volumeCompactOpen = false;
         volumeExpandedOpen = false;
-        shadeOpen = false;
         uiHandler.removeCallbacks(autoHideVolumeRunnable);
         if (!keepFolderOpen) {
             modalOverlay.setBackgroundColor(Color.argb(165, 0, 0, 0));
@@ -5031,7 +5055,6 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     private void dismissModal() {
         volumeCompactOpen = false;
         volumeExpandedOpen = false;
-        shadeOpen = false;
         uiHandler.removeCallbacks(autoHideVolumeRunnable);
         final View closingFolder = activeFolderCard;
         final float origX = folderZoomOriginX;
@@ -9319,17 +9342,6 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         }
     }
 
-    private void openPackageAppInfo(String pkg) {
-        try {
-            Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
-            i.setData(Uri.fromParts("package", pkg, null));
-            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(i);
-            Toast.makeText(this, "Нажмите «Остановить» на экране приложения", Toast.LENGTH_SHORT).show();
-        } catch (Throwable ignored) {
-        }
-    }
-
     private static String formatRunningDuration(long diffMs) {
         long sec = Math.max(0L, diffMs / 1000L);
         if (sec < 60L) return "меньше минуты";
@@ -9599,6 +9611,9 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                     } catch (Exception ignored) { }
                     final boolean oversized = tooLarge;
                     final String input = json;
+                    // Предварительная проверка в фоновом потоке: для чужого/битого файла
+                    // не нужно снимать снимок настроек и трогать Prefs вообще (F-03).
+                    final boolean looksValid = (input != null) && BackupHelper.looksLikeValidBackup(input);
                     runOnUiThread(() -> {
                         if (isFinishing() || isDestroyed()) return;
                         if (oversized) {
@@ -9607,6 +9622,8 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                             Toast.makeText(this, "Не удалось прочитать файл", Toast.LENGTH_SHORT).show();
                         } else if (prefs.isProtectHiddenApps() && !BiometricHelper.isDeviceSecure(this)) {
                             Toast.makeText(this, "Для восстановления защищённой копии установите PIN или пароль экрана", Toast.LENGTH_LONG).show();
+                        } else if (!looksValid) {
+                            Toast.makeText(this, "Файл не является резервной копией Doxaiz", Toast.LENGTH_SHORT).show();
                         } else if (BackupHelper.importBackupJson(input, prefs, desktop, importAuth && BiometricHelper.isDeviceSecure(this))) {
                             // Apply restored privacy state before any desktop rebuild or async repository refresh.
                             hiddenAppKeys.clear();

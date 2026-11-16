@@ -103,6 +103,7 @@ public final class NetworkQualityHelper {
     private boolean activeWeakWifi = false;
     private volatile long lastAutoReprobeTs = 0L;
 
+    private volatile boolean lastReprobeAccepted = false;
     private final Object statsLock = new Object();
     private final SimpleDateFormat timeFmt = new SimpleDateFormat("HH:mm", Locale.getDefault());
     private int healCount = 0;
@@ -281,13 +282,24 @@ public final class NetworkQualityHelper {
         try {
             Network net = cm.getActiveNetwork();
             if (net == null) return false;
+            // reportNetworkConnectivity() вне @SystemApi доступен, но поведение зависит
+            // от прошивки: часть OEM-сборок молча игнорирует вызов. Раньше результат
+            // никак не отражался и функция выглядела «сработавшей» всегда.
             cm.reportNetworkConnectivity(net, false);
             Status st = inspect();
-            recordHealEvent(st.transportName, reason);
-            return true;
+            boolean reported = st.connected && st.validated;
+            lastReprobeAccepted = reported;
+            recordHealEvent(st.transportName, reported ? reason : (reason + " (без эффекта)"));
+            return reported;
         } catch (Throwable ignored) {
+            lastReprobeAccepted = false;
             return false;
         }
+    }
+
+    /** true, если последний reportNetworkConnectivity() действительно оставил сеть валидной. */
+    public boolean wasLastReprobeAccepted() {
+        return lastReprobeAccepted;
     }
 
     private void recordHealEvent(String transport, String reason) {

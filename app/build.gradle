@@ -16,7 +16,11 @@ android {
 
     buildTypes {
         release {
-            minifyEnabled false
+            // F-20: R8 был отключён без причины. Своей рефлексии по классам лаунчера
+            // нет, поэтому сжатие безопасно. Отключить точечно: -PnoMinify
+            minifyEnabled !project.hasProperty('noMinify')
+            shrinkResources !project.hasProperty('noMinify')
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
 
@@ -24,8 +28,29 @@ android {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }
+
+    sourceSets {
+        // F-18: наборы проверок из ../tests раньше не запускались ничем.
+        test.java.srcDirs += '../tests'
+        // Audit54Tests требует настоящий org.json, а в unit-тестах доступна
+        // только заглушка из android.jar — его подключаем отдельно, когда появится
+        // реализация org.json в тестовом classpath.
+        test.java.exclude 'Audit54Tests.java'
+    }
+
+    testOptions {
+        unitTests.returnDefaultValues = true
+    }
 }
 
 dependencies {
-    // Без сторонних зависимостей — минимальный размер APK и мгновенный отклик
+    // Без сторонних зависимостей в рантайме — минимальный размер APK и мгновенный отклик.
+    testImplementation 'junit:junit:4.13.2'
+}
+
+tasks.withType(Test).configureEach {
+    testLogging {
+        events 'passed', 'failed', 'skipped'
+        exceptionFormat 'full'
+    }
 }

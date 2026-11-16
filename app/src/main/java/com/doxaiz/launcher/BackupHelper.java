@@ -46,7 +46,6 @@ public final class BackupHelper {
             s.put("drawerStyle", prefs.getDrawerStyle());
             s.put("shadeStyle", prefs.getShadeStyle());
             s.put("shadeTiles", prefs.getShadeTilesCsv());
-            s.put("homeLayoutMode", prefs.getHomeLayoutMode());
             s.put("showPageDots", prefs.isShowPageDots());
             s.put("showAlphabetBar", prefs.isShowAlphabetBar());
             s.put("smoothAnimations", prefs.isSmoothAnimationsEnabled());
@@ -68,8 +67,6 @@ public final class BackupHelper {
             s.put("swipeDown", prefs.getSwipeDownAction());
             s.put("doubleTap", prefs.getDoubleTapAction());
             s.put("showMemory", prefs.isShowDrawerMemory());
-            s.put("showRecentsRam", prefs.isShowRecentsRam());
-            s.put("showRecentsCleanBtn", prefs.isShowRecentsCleanBtn());
             s.put("recentsRamPos", prefs.getRecentsRamPosition());
             s.put("autoNetworkAssist", prefs.isAutoNetworkAssist());
             s.put("autoNetMode", prefs.getAutoNetworkMode());
@@ -89,7 +86,6 @@ public final class BackupHelper {
             s.put("shadeGroupNotif", prefs.isShadeGroupNotifications());
             s.put("dbarPosition", prefs.getDynamicBarPosition());
             s.put("dbarAutoHide", prefs.isDynamicBarAutoHide());
-            s.put("pageTransitionStyle", prefs.getPageTransitionStyle());
             s.put("headsUpBanners", prefs.isHeadsUpBannersEnabled());
             s.put("dbarLowBattery", prefs.isDynamicBarLowBattery());
             s.put("dbarTimer", prefs.isDynamicBarTimer());
@@ -218,8 +214,18 @@ public final class BackupHelper {
         return importBackupJson(raw, prefs, desktop, false);
     }
 
+    /**
+     * Импорт резервной копии со снимком/откатом.
+     *
+     * Настройки восстанавливаются по одной (setXxx → apply), поэтому исключение в
+     * середине разбора раньше оставляло пользователя с частично применённым
+     * состоянием — включая уже очищенный список скрытых приложений. Теперь перед
+     * разбором снимается полный снимок SharedPreferences, а любая ошибка
+     * возвращает настройки одной атомарной записью и перечитывает раскладку с диска.
+     */
     public static boolean importBackupJson(String raw, Prefs prefs, DesktopModel desktop, boolean privacyAuthVerified) {
         if (raw == null || raw.trim().isEmpty() || raw.length() > MAX_BACKUP_BYTES) return false;
+        final Map<String, Object> rollback = (prefs != null) ? prefs.snapshotForRollback() : null;
         try {
             JSONObject root = new JSONObject(raw);
             JSONObject desk = root.optJSONObject("desktop");
@@ -234,8 +240,11 @@ public final class BackupHelper {
             final boolean allowPrivacyChange = !wasProtected || privacyAuthVerified;
 
             prefs.setDesktopJson(desk.toString());
-            desktop.load();
-            int actualPageCount = Math.max(1, desktop.pages.size());
+            // desktop.load() раньше стоял здесь и оставлял раскладку уже подменённой даже
+            // при провале последующего разбора. Теперь считаем страницы из JSON, а сам
+            // load() выполняется один раз после успешного применения всех настроек.
+            int actualPageCount = Math.max(1, (desk.optJSONArray("pages") != null)
+                    ? desk.optJSONArray("pages").length() : 1);
 
             JSONObject s = root.optJSONObject("settings");
             if (s != null) {
@@ -254,7 +263,6 @@ public final class BackupHelper {
                     String csv = sanitizeTileCsv(s.optString("shadeTiles", Prefs.DEFAULT_SHADE_TILES));
                     if (!csv.isEmpty()) prefs.setShadeTilesCsv(csv);
                 }
-                if (s.has("homeLayoutMode")) prefs.setHomeLayoutMode(clamp(s.optInt("homeLayoutMode", Prefs.HOME_MODE_CLASSIC_PAGES), 0, 1));
                 if (s.has("showPageDots")) prefs.setShowPageDots(s.optBoolean("showPageDots", true));
                 if (s.has("showAlphabetBar")) prefs.setShowAlphabetBar(s.optBoolean("showAlphabetBar", true));
                 if (s.has("smoothAnimations")) prefs.setSmoothAnimationsEnabled(s.optBoolean("smoothAnimations", true));
@@ -276,8 +284,6 @@ public final class BackupHelper {
                 if (s.has("swipeDown")) prefs.setSwipeDownAction(clamp(s.optInt("swipeDown", Prefs.GESTURE_NOTIFICATIONS), 0, 7));
                 if (s.has("doubleTap")) prefs.setDoubleTapAction(clamp(s.optInt("doubleTap", Prefs.GESTURE_SEARCH), 0, 7));
                 if (s.has("showMemory")) prefs.setShowDrawerMemory(s.optBoolean("showMemory", true));
-                if (s.has("showRecentsRam")) prefs.setShowRecentsRam(s.optBoolean("showRecentsRam", true));
-                if (s.has("showRecentsCleanBtn")) prefs.setShowRecentsCleanBtn(s.optBoolean("showRecentsCleanBtn", true));
                 if (s.has("recentsRamPos")) prefs.setRecentsRamPosition(clamp(s.optInt("recentsRamPos", Prefs.RECENTS_RAM_POS_DEFAULT), 0, 2));
                 if (s.has("autoNetworkAssist")) prefs.setAutoNetworkAssist(s.optBoolean("autoNetworkAssist", true));
                 if (s.has("autoNetMode")) prefs.setAutoNetworkMode(clamp(s.optInt("autoNetMode", Prefs.NET_MODE_BALANCED), 0, 2));
@@ -300,19 +306,18 @@ public final class BackupHelper {
                 if (s.has("shadeGroupNotif")) prefs.setShadeGroupNotifications(s.optBoolean("shadeGroupNotif", true));
                 if (s.has("dbarPosition")) prefs.setDynamicBarPosition(clamp(s.optInt("dbarPosition", Prefs.DBAR_POS_AUTO), 0, 2));
                 if (s.has("dbarAutoHide")) prefs.setDynamicBarAutoHide(s.optBoolean("dbarAutoHide", true));
-                if (s.has("pageTransitionStyle")) prefs.setPageTransitionStyle(clamp(s.optInt("pageTransitionStyle", Prefs.PAGE_TRANS_SMOOTH), 0, 3));
                 if (s.has("headsUpBanners")) prefs.setHeadsUpBannersEnabled(s.optBoolean("headsUpBanners", true));
                 if (s.has("dbarLowBattery")) prefs.setDynamicBarLowBattery(s.optBoolean("dbarLowBattery", true));
                 if (s.has("dbarTimer")) prefs.setDynamicBarTimer(s.optBoolean("dbarTimer", true));
                 if (s.has("dbarHotspot")) prefs.setDynamicBarHotspot(s.optBoolean("dbarHotspot", true));
-                if (s.has("hiddenStdCats")) prefs.setHiddenStdCategoriesRaw(s.optString("hiddenStdCats", ""));
+                if (s.has("hiddenStdCats")) prefs.setHiddenStdCatsRawForImport(s.optString("hiddenStdCats", ""));
                 if (s.has("hapticFeedback")) prefs.setHapticFeedbackEnabled(s.optBoolean("hapticFeedback", true));
             }
 
             JSONArray customSecArr = root.optJSONArray("customSections");
             if (customSecArr != null) {
                 // Строгая санитизация лимитов MAX_SECTIONS и MAX_NAME_LEN при импорте произвольного JSON
-                prefs.setCustomSectionsRawJson(
+                prefs.setCustomSectionsRawJsonForImport(
                         CustomSection.toJson(CustomSection.fromJson(customSecArr.toString())));
             }
 
@@ -385,10 +390,50 @@ public final class BackupHelper {
                     }
                 }
             }
+            // Единственная перезагрузка раскладки — после того, как все настройки применены.
+            desktop.load();
             desktop.save(); // Queue a fresh recovery copy instead of retaining an older layout.
+            prefs.invalidateCachesAfterImport();
             return true;
         } catch (Throwable ignored) {
+            rollbackImportedState(prefs, desktop, rollback);
             return false;
+        }
+    }
+
+    /** Есть ли в JSON хоть одна известная секция — дешёвая предварительная проверка. */
+    static boolean looksLikeBackup(JSONObject root) {
+        if (root == null) return false;
+        return root.has("pages") || root.has("desktop") || root.has("settings")
+                || root.has("hidden") || root.has("customSections");
+    }
+
+    /**
+     * Быстрая валидация выбранного файла бэкапа ДО снятия снимка настроек.
+     *
+     * Снимок SharedPreferences (snapshotForRollback) копирует все ключи и множества
+     * в память, поэтому снимать его для заведомо чужого/битого файла бессмысленно:
+     * сначала дешёвый разбор и проверка структуры, и только затем реальный импорт.
+     */
+    public static boolean looksLikeValidBackup(String raw) {
+        if (raw == null || raw.trim().isEmpty() || raw.length() > MAX_BACKUP_BYTES) return false;
+        try {
+            JSONObject root = new JSONObject(raw);
+            if (!looksLikeBackup(root)) return false;
+            JSONObject desk = root.optJSONObject("desktop");
+            if (desk == null && root.has("pages")) desk = root;
+            return validateDesktopJson(desk);
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    /** Откат неудачного импорта: настройки — из снимка, раскладка — с диска. */
+    private static void rollbackImportedState(Prefs prefs, DesktopModel desktop, Map<String, Object> snapshot) {
+        if (prefs != null && snapshot != null) prefs.restoreFromRollback(snapshot);
+        try {
+            if (desktop != null) desktop.load();
+        } catch (Throwable ignored) {
         }
     }
 

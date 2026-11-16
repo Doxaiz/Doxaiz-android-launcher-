@@ -106,7 +106,6 @@ public final class VectorGlyphs {
         }
 
         @Override
-        @SuppressWarnings("deprecation")
         public int getOpacity() { return PixelFormat.TRANSLUCENT; }
 
         @Override

@@ -302,12 +302,48 @@ public final class DoxaizNotificationService extends NotificationListenerService
         }, 4000L);
     }
 
+    /**
+     * Доступ к прослушиванию уведомлений.
+     *
+     * Раньше проверка делалась через contains() по Settings.Secure
+     * "enabled_notification_listeners": она даёт ложное срабатывание, если имя
+     * другого включённого пакета содержит наше как подстроку (com.foo.launcher,
+     * com.doxaiz.launcher.pro), и не учитывает отзыв доступа в рантайме.
+     * На API 27+ берём штатный NotificationManager API, на 26 — прежняя
+     * проверка, но с разбором списка "pkg/cls:pkg/cls" по компонентам.
+     */
     public static boolean isPermissionGranted(Context context) {
+        if (context == null) return false;
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                NotificationManager nm =
+                        (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+                if (nm != null) {
+                    return nm.isNotificationListenerAccessGranted(
+                            new ComponentName(context, DoxaizNotificationService.class));
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return isPermissionGrantedLegacy(context);
+    }
+
+    private static boolean isPermissionGrantedLegacy(Context context) {
         try {
             String flat = Settings.Secure.getString(
                     context.getContentResolver(), "enabled_notification_listeners"
             );
-            return flat != null && flat.contains(context.getPackageName());
+            if (flat == null || flat.isEmpty()) return false;
+            String self = context.getPackageName();
+            for (String entry : flat.split(":")) {
+                if (entry == null) continue;
+                String pkg = entry.trim();
+                int slash = pkg.indexOf('/');
+                if (slash >= 0) pkg = pkg.substring(0, slash);
+                // Сравниваем пакет ЦЕЛИКОМ, а не вхождение подстроки.
+                if (pkg.equals(self)) return true;
+            }
+            return false;
         } catch (Throwable ignored) {
             return false;
         }

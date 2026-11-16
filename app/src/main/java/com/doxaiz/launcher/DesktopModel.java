@@ -69,7 +69,8 @@ public final class DesktopModel {
         return !pages.isEmpty();
     }
 
-    public void load() {
+    /** Синхронизирован по той же причине, что и save(): перезагрузка и запись не должны пересекаться. */
+    public synchronized void load() {
         dock.clear();
         pages.clear();
         String raw = (prefs != null) ? prefs.getDesktopJson() : null;
@@ -157,7 +158,13 @@ public final class DesktopModel {
         }
     }
 
-    public void save() {
+    /**
+     * Сериализация и запись раскладки. Метод синхронизирован: save() вызывается и с
+     * главного потока, и из фоновых (импорт бэкапа, guard-writer), а раньше два
+     * конкурентных вызова могли перемешать итерацию по pages/dock и записать
+     * повреждённый или устаревший JSON поверх свежего.
+     */
+    public synchronized void save() {
         try {
             JSONObject root = new JSONObject();
             root.put("seq", nextFolderSeq);

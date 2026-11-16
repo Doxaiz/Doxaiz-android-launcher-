@@ -385,7 +385,7 @@ public final class AppRepository {
                 }
             }
 
-            Collator collator = Collator.getInstance(new Locale("ru", "RU"));
+            Collator collator = Collator.getInstance(Locale.forLanguageTag("ru-RU"));
             collator.setStrength(Collator.PRIMARY);
             Collections.sort(allEntries, new Comparator<AppEntry>() {
                 @Override

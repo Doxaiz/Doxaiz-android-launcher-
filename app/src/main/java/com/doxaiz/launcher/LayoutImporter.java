@@ -426,8 +426,9 @@ public final class LayoutImporter {
         return null;
     }
 
+    /** Ограничивает колонку реальным числом столбцов: 5-я иконка при 4 столбцах не должна «уезжать» за сетку. */
     private static int clampCol(int cellX, int cols) {
-        int c = Math.max(4, cols);
+        int c = Math.max(1, cols);
         if (cellX < 0) return 0;
         if (cellX >= c) return c - 1;
         return cellX;

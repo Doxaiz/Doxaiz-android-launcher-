@@ -88,47 +88,6 @@ public final class DesktopPagerView extends ViewGroup {
         return 1f - (inv * inv * inv * inv);
     }
 
-    /** Лёгкий масштаб страницы для выбранного стиля перехода (0=Плавный, 1=Карточки, 2=Затухание, 3=Стек). */
-    static float computeStyleScale(int style, float pageOffset) {
-        float abs = Math.max(0f, Math.min(1f, Math.abs(pageOffset)));
-        switch (style) {
-            case Prefs.PAGE_TRANS_CARDS:
-                return 1f - 0.10f * abs;
-            case Prefs.PAGE_TRANS_FADE:
-                return 1f;
-            case Prefs.PAGE_TRANS_STACK:
-                return (pageOffset < 0f) ? (1f - 0.07f * abs) : 1f;
-            case Prefs.PAGE_TRANS_SMOOTH:
-            default:
-                return computePageScale(abs);
-        }
-    }
-
-    /** Лёгкая прозрачность страницы для выбранного стиля перехода. */
-    static float computeStyleAlpha(int style, float pageOffset) {
-        float abs = Math.max(0f, Math.min(1f, Math.abs(pageOffset)));
-        switch (style) {
-            case Prefs.PAGE_TRANS_CARDS:
-                return 1f - 0.38f * abs;
-            case Prefs.PAGE_TRANS_FADE:
-                return 1f - 0.72f * abs;
-            case Prefs.PAGE_TRANS_STACK:
-                return (pageOffset < 0f) ? (1f - 0.36f * abs) : 1f;
-            case Prefs.PAGE_TRANS_SMOOTH:
-            default:
-                return computePageAlpha(abs);
-        }
-    }
-
-    /** Мягкий параллакс translationX для стиля «Стек». */
-    static float computeStyleTranslationX(int style, float pageOffset, int width) {
-        if (style == Prefs.PAGE_TRANS_STACK && pageOffset < 0f && width > 0) {
-            float clamped = Math.max(-1f, pageOffset);
-            return -clamped * width * 0.34f;
-        }
-        return 0f;
-    }
-
     /** Лёгкий масштаб страницы при смещении offset ∈ [-1..1] (0 = по центру). */
     static float computePageScale(float offsetAbs) {
         float c = Math.max(0f, Math.min(1f, offsetAbs));
@@ -154,11 +113,10 @@ public final class DesktopPagerView extends ViewGroup {
                 // Свайп влево -> следующая страница
                 if (current == count - 1) return loopEnabled ? 0 : current;
                 return current + 1;
-            } else {
-                // Свайп вправо -> предыдущая страница
-                if (current == 0) return loopEnabled ? (count - 1) : 0;
-                return current - 1;
             }
+            // Свайп вправо -> предыдущая страница
+            if (current == 0) return loopEnabled ? (count - 1) : 0;
+            return current - 1;
         }
 
         // Зацикливание при уверенном протягивании за край
@@ -212,11 +170,6 @@ public final class DesktopPagerView extends ViewGroup {
 
     public void setLoopPagesEnabled(boolean enabled) {
         this.loopPagesEnabled = enabled;
-    }
-
-    public void setTransitionStyle(int style) {
-        // Одна простая классическая плавная анимация перелистывания
-        applyPageTransitions();
     }
 
     public int getCurrentPage() {
@@ -316,6 +269,13 @@ public final class DesktopPagerView extends ViewGroup {
     }
 
     private void applyPageTransitions() {
+        // Единственный поддерживаемый стиль — плавный. Если анимации выключены пользователем,
+        // страницы должны оставаться без масштаба/прозрачности, иначе «мгновенное» перелистывание
+        // всё равно бледнеет и уменьшается во время скролла.
+        if (!smoothScrollEnabled) {
+            resetChildTransforms();
+            return;
+        }
         int w = (pageWidth > 0) ? pageWidth : getWidth();
         int count = getChildCount();
         if (w <= 0 || count == 0) return;

@@ -101,8 +101,8 @@ public final class AnimeParticlesView extends View {
                 && !powerSaveMode;
     }
 
-    public void applyConfig(int styleMode, boolean enabled) {
-        int safeStyle = Prefs.sanitizeVisualStyle(styleMode);
+    public void applyConfig(int newStyleMode, boolean enabled) {
+        int safeStyle = Prefs.sanitizeVisualStyle(newStyleMode);
         boolean styleChanged = (this.styleMode != safeStyle);
         this.styleMode = safeStyle;
         this.userEnabled = enabled;
@@ -227,6 +227,8 @@ public final class AnimeParticlesView extends View {
             IntentFilter filter = new IntentFilter(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED);
             if (Build.VERSION.SDK_INT >= 33) {
                 getContext().registerReceiver(powerReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+            } else if (Build.VERSION.SDK_INT >= 26) {
+                getContext().registerReceiver(powerReceiver, filter, Context.RECEIVER_EXPORTED);
             } else {
                 getContext().registerReceiver(powerReceiver, filter);
             }

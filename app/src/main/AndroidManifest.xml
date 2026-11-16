@@ -1,12 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.doxaiz.launcher"
-    android:versionCode="38"
-    android:versionName="5.5-test">
+    package="com.doxaiz.launcher">
 
-    <uses-sdk
-        android:minSdkVersion="26"
-        android:targetSdkVersion="34" />
+    <!-- minSdk/targetSdk и versionCode/versionName задаются только в app/build.gradle.
+         build.sh передаёт их в aapt2 link через --min-sdk-version/--target-sdk-version/
+         --version-code/--version-name, поэтому дублировать их здесь не нужно. -->
 
     <!-- Отображение всех установленных приложений на Android 11+ -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
@@ -66,10 +64,14 @@
             </intent-filter>
         </activity>
 
-        <!-- Опциональная служба только для жеста «двойной тап -> выключить экран» (Android 9+) -->
+        <!-- Опциональная служба только для жеста «двойной тап -> выключить экран» (Android 9+).
+             exported="true" обязателен: службу биндит системный процесс (system_server),
+             доступ при этом закрыт разрешением BIND_ACCESSIBILITY_SERVICE, которое
+             выдаётся только системе. С exported="false" привязка отклоняется
+             на части прошивок, и панель ОЗУ/жест молча не работают. -->
         <service
             android:name=".DoxaizLockService"
-            android:exported="false"
+            android:exported="true"
             android:label="@string/lock_service_label"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
