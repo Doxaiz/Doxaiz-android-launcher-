@@ -235,22 +235,22 @@ fi
 endlog
 
 log "Каталог приложений"
-# Каталог открывается свайпом вверх по рабочему столу. На эмуляторе жест
-# срабатывает не с первого раза, поэтому делаем до четырёх попыток и после
-# каждой проверяем число узлов в дереве.
+# Жест — тот же, что у пользователя: свайп вверх по рабочему столу.
+# Важно: перед свайпом нельзя перезапускать активность — на эмуляторе жест
+# приходит во время старта и теряется (проверено в CI). Поэтому здесь только
+# свайп, ожидание и дамп; повторы нужны из-за нестабильности эмулятора.
 DRAWER_NODES=0
 for attempt in 1 2 3 4; do
-    dismiss_system_dialog || true
-    adb shell am start -n "$PKG/.MainActivity" >/dev/null 2>&1 || true
-    sleep 2
-    adb shell input swipe 540 1800 540 500 180
-    sleep 3
+    adb shell input swipe 540 1700 540 600 250
+    sleep 4
     dump_ui drawer "ui-drawer"
     DRAWER_NODES="$(sed -n 's/^узлов=//p' "$OUT/ui-drawer.txt" 2>/dev/null | head -1)"
     echo "attempt $attempt: узлов ${DRAWER_NODES:-0}" >> "$OUT/drawer-attempts.txt"
     if [ "${DRAWER_NODES:-0}" -ge 40 ]; then
         break
     fi
+    adb shell input keyevent KEYCODE_BACK
+    sleep 2
 done
 note "drawer" "узлов в каталоге=${DRAWER_NODES:-0}"
 if [ "${DRAWER_NODES:-0}" -lt 40 ]; then
