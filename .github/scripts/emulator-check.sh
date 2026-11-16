@@ -29,6 +29,42 @@ endlog() { echo "::endgroup::"; }
 note() {
     echo "::notice title=$1::$(printf '%s' "$2" | tr '\r\n' '  ' | cut -c1-900)"
 }
+
+# Системные диалоги («Pixel Launcher isn't responding», «System UI не отвечает»)
+# появляются на медленных эмуляторах и перекрывают экран. Раньше из-за такого
+# диалога прогон падал с ложным «каталог пуст». Здесь мы его распознаём,
+# закрываем кнопкой «Wait/Подождать» и честно отмечаем в отчёте.
+dismiss_system_dialog() {
+    adb shell uiautomator dump /sdcard/ui-dialog.xml >/dev/null 2>&1 || true
+    adb shell cat /sdcard/ui-dialog.xml > "$OUT/ui-dialog.xml" 2>/dev/null || true
+    local btn
+    btn="$(python3 - "$OUT/ui-dialog.xml" <<'PYEOF' 2>/dev/null || true
+import re, sys
+try:
+    xml = open(sys.argv[1], encoding='utf-8', errors='replace').read()
+except OSError:
+    raise SystemExit
+if not re.search(r"isn't responding|is not responding|не отвечает", xml):
+    raise SystemExit
+for nd in re.findall(r'<node [^>]*>', xml):
+    txt = re.search(r'text="([^"]*)"', nd)
+    if txt and re.search(r'^(Wait|Подождать|Ждать)$', txt.group(1).strip()):
+        b = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', nd)
+        if b:
+            x1, y1, x2, y2 = map(int, b.groups())
+            print(f"{(x1+x2)//2} {(y1+y2)//2}")
+            break
+PYEOF
+)"
+    if [ -n "${btn:-}" ]; then
+        note "system-dialog" "закрываю системный диалог ANR (${btn})"
+        adb shell input tap $btn
+        sleep 3
+        return 0
+    fi
+    return 1
+}
+
 report_fail() {
     echo "::error title=проверка::$*"
     echo "$*" | tee -a "$OUT/failures.txt"
@@ -180,10 +216,20 @@ log "Каталог приложений"
 # Открываем каталог тем же жестом, что и пользователь: свайп вверх по
 # рабочему столу. Если не открылось — пробуем кнопку в доке по координатам
 # из дампа, а не наугад.
+dismiss_system_dialog || true
 adb shell input swipe 540 1700 540 600 250
 sleep 4
 dump_ui drawer "ui-drawer"
 DRAWER_NODES="$(sed -n 's/^узлов=//p' "$OUT/ui-drawer.txt" 2>/dev/null | head -1)"
+if [ "${DRAWER_NODES:-0}" -lt 20 ]; then
+    if dismiss_system_dialog; then
+        adb shell input swipe 540 1700 540 600 250
+        sleep 4
+        dump_ui drawer "ui-drawer"
+        DRAWER_NODES="$(sed -n 's/^узлов=//p' "$OUT/ui-drawer.txt" 2>/dev/null | head -1)"
+        note "drawer-retry" "после закрытия системного диалога узлов=${DRAWER_NODES:-0}"
+    fi
+fi
 if [ "${DRAWER_NODES:-0}" -lt 20 ]; then
     note "drawer-retry" "после свайпа узлов=${DRAWER_NODES:-0}, ищу кнопку каталога в дампе"
     BTN="$(python3 - "$OUT/ui-home.xml" <<'PYEOF' 2>/dev/null || true
@@ -211,7 +257,12 @@ PYEOF
 fi
 note "drawer" "узлов в каталоге=${DRAWER_NODES:-0}"
 if [ "${DRAWER_NODES:-0}" -lt 20 ]; then
-    report_fail "Каталог приложений не открылся или пуст (узлов=${DRAWER_NODES:-0})"
+    if grep -qE "isn't responding|не отвечает" "$OUT/ui-drawer.xml" 2>/dev/null; then
+        note "drawer" "экран перекрыт системным диалогом — результат недостоверен"
+        report_fail "Каталог не проверен: системный ANR-диалог перекрыл экран"
+    else
+        report_fail "Каталог приложений не открылся или пуст (узлов=${DRAWER_NODES:-0})"
+    fi
 fi
 check_crash "каталог" || true
 endlog
