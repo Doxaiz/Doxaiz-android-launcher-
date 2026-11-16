@@ -2,9 +2,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.doxaiz.launcher">
 
-    <!-- minSdk/targetSdk и versionCode/versionName задаются только в app/build.gradle.
-         build.sh передаёт их в aapt2 link через --min-sdk-version/--target-sdk-version/
-         --version-code/--version-name, поэтому дублировать их здесь не нужно. -->
+    <!-- minSdk/targetSdk и versionCode/versionName задаются только в app/build.gradle:
+         build.sh передаёт их в aapt2 link флагами min-sdk-version/target-sdk-version/
+         version-code/version-name, поэтому дублировать их здесь не нужно.
+         Важно: двойной дефис внутри XML-комментария запрещён стандартом, поэтому
+         названия флагов здесь пишутся без ведущих дефисов. -->
 
     <!-- Отображение всех установленных приложений на Android 11+ -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
