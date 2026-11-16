@@ -47,16 +47,7 @@ jobs:
       # поэтому причину падения выводим аннотациями, а не только в лог.
       - name: Причина падения тестов
         if: failure()
-        run: |
-          if [ -f gradle-test.log ]; then
-            grep -nE "What went wrong|^> |FAILED|error:|Caused by|tests? completed, .*failed" gradle-test.log \
-              | head -40 | while IFS= read -r line; do
-                echo "::error title=gradle::$(printf '%s' "$line" | cut -c1-900)"
-              done
-            echo "::error title=gradle-tail::$(tail -3 gradle-test.log | tr '\n' ' ' | cut -c1-900)"
-          else
-            echo "::error title=gradle::лог сборки не создан — падение до запуска Gradle"
-          fi
+        run: bash .github/scripts/gradle-failure.sh gradle-test.log
 
       - name: Отчёт о тестах
         if: always()
@@ -90,14 +81,7 @@ jobs:
 
       - name: Причина падения сборки
         if: failure()
-        run: |
-          if [ -f gradle-build.log ]; then
-            grep -nE "What went wrong|^> |FAILED|error:|Caused by" gradle-build.log \
-              | head -40 | while IFS= read -r line; do
-                echo "::error title=gradle::$(printf '%s' "$line" | cut -c1-900)"
-              done
-            echo "::error title=gradle-tail::$(tail -3 gradle-build.log | tr '\n' ' ' | cut -c1-900)"
-          fi
+        run: bash .github/scripts/gradle-failure.sh gradle-build.log
 
       - name: Проверить APK (пакет, версия, разрешения, подпись)
         run: |
