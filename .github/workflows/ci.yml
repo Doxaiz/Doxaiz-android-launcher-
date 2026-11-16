@@ -49,6 +49,21 @@ jobs:
         if: failure()
         run: bash .github/scripts/gradle-failure.sh gradle-test.log
 
+      - name: Сводка по тестам
+        if: always()
+        run: |
+          python3 - <<'PYEOF'
+          import glob, xml.etree.ElementTree as ET, os
+          total = fail = err = skip = 0
+          for f in glob.glob('app/build/test-results/test/*.xml'):
+              r = ET.parse(f).getroot()
+              total += int(r.get('tests', 0)); fail += int(r.get('failures', 0))
+              err += int(r.get('errors', 0)); skip += int(r.get('skipped', 0))
+              print(f"{os.path.basename(f)}: tests={r.get('tests')} failures={r.get('failures')} errors={r.get('errors')}")
+          print(f"ИТОГО: tests={total} failures={fail} errors={err} skipped={skip}")
+          print(f"::notice title=JVM-тесты::tests={total} failures={fail} errors={err} skipped={skip}")
+          PYEOF
+
       - name: Отчёт о тестах
         if: always()
         uses: actions/upload-artifact@v4
@@ -98,6 +113,18 @@ jobs:
           "$BUILD_TOOLS/apksigner" verify --verbose "$APK" | head -12
           echo "--- sha256 ---"
           sha256sum "$APK" | tee apk-sha256.txt
+
+      # F-20: сборка с включённым R8 проверяется отдельно. Если keep-правила
+      # неполные, падает именно этот шаг, а не релиз у пользователя.
+      - name: Сборка release с R8 (без подписи)
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon --stacktrace assembleRelease 2>&1 | tee gradle-release.log
+          echo "::notice title=R8-release::$(grep -E '^> Task :app:(minify|shrink|package)Release' gradle-release.log | tr '\n' ' ' | cut -c1-600)"
+
+      - name: Причина падения release-сборки
+        if: failure()
+        run: bash .github/scripts/gradle-failure.sh gradle-release.log
 
       - uses: actions/upload-artifact@v4
         with:

@@ -22,6 +22,12 @@ report_fail() {
     echo "$*" | tee -a "$OUT/failures.txt"
 }
 
+# Ключевые факты дублируем аннотацией: артефакты из этой среды не скачиваются
+# (блокируется blob-хранилище), а аннотации читаются через REST API.
+note() {
+    echo "::notice title=$1::$(printf '%s' "$2" | tr '\r\n' '  ' | cut -c1-900)"
+}
+
 log "Устройство"
 adb devices -l
 adb shell getprop ro.build.version.release | tee "$OUT/device.txt"
@@ -49,6 +55,7 @@ sleep 5
 adb shell dumpsys activity activities | grep -E "mResumedActivity|topResumedActivity" | tee "$OUT/home.txt"
 if grep -q "$PKG" "$OUT/home.txt"; then
     echo "home=OK" | tee -a "$OUT/home.txt"
+    note "home" "HOME-активность = $PKG"
 else
     report_fail "HOME-активность не наш лаунчер"
 fi
@@ -100,6 +107,11 @@ adb exec-out screencap -p > "$OUT/screen-2-after-swipe.png" 2>/dev/null || true
 endlog
 
 log "Итог"
+note "install" "$(tail -1 "$OUT/install.txt")"
+note "start" "$(grep -E 'Status|Activity|TotalTime|WaitTime' "$OUT/start.txt" | tr '\n' ' ')"
+note "crash" "$(head -1 "$OUT/crash-summary.txt")"
+note "gfxinfo" "$(tr '\n' ' ' < "$OUT/gfxinfo-desktop-summary.txt" | cut -c1-800)"
+
 if [ -s "$OUT/failures.txt" ]; then
     echo "ПРОВЕРКА НЕ ПРОЙДЕНА:"
     cat "$OUT/failures.txt"
