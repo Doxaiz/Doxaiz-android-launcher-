@@ -1,0 +1,33 @@
+# Сборка Gradle
+.gradle/
+build/
+app/build/
+local.properties
+
+# Артефакты сборки: APK подписывается приватным ключом и не хранится в Git
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+Doxaiz-Launcher.apk
+/tmp/doxaiz-build/
+
+# Ключи и секреты подписи — только вне репозитория
+*.jks
+*.keystore
+*.p12
+*.pepk
+keystore.properties
+signing.properties
+.env
+
+# IDE
+.idea/
+*.iml
+.DS_Store
+captures/
+
+# Отчёты и артефакты проверок
+emulator-report/
+apk-sha256.txt

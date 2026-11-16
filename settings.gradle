@@ -1,3 +1,8 @@
+// Импорт нужен явно: RepositoriesMode не входит в набор автоматических импортов
+// Groovy-скрипта Gradle, и без него dependencyResolutionManagement падает с
+// «unable to resolve class RepositoriesMode» ещё до начала сборки.
+import org.gradle.api.initialization.resolve.RepositoriesMode
+
 pluginManagement {
     repositories {
         google()
