@@ -5151,12 +5151,20 @@ public final class QuickShadeHelper {
                     for (AudioDeviceInfo dev : outs) {
                         if (dev == null) continue;
                         int type = dev.getType();
+                        // Поля AudioDeviceInfo имеют разный уровень API:
+                        // TYPE_HEARING_AID появился в 28, TYPE_BLE_* — в 31.
+                        // Без проверки версии на старых Android был бы
+                        // NoSuchFieldError, и панель звука падала бы целиком.
+                        // Раньше здесь ещё стояли магические числа 26/27/30 —
+                        // заменил на публичные константы BLE_* (они с API 31).
                         boolean isBt = type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP
                                 || type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
-                                || type == AudioDeviceInfo.TYPE_HEARING_AID;
-                        if (!isBt && Build.VERSION.SDK_INT >= 31) {
-                            isBt = (type == 26 || type == 27 || type == 30); // BLE headset / speaker / broadcast
-                        }
+                                || (Build.VERSION.SDK_INT >= 28
+                                    && type == AudioDeviceInfo.TYPE_HEARING_AID)
+                                || (Build.VERSION.SDK_INT >= 31
+                                    && (type == AudioDeviceInfo.TYPE_BLE_HEADSET
+                                        || type == AudioDeviceInfo.TYPE_BLE_SPEAKER
+                                        || type == AudioDeviceInfo.TYPE_BLE_BROADCAST));
                         if (!isBt) continue;
                         CharSequence pn = dev.getProductName();
                         String label = (pn != null) ? pn.toString().trim() : "";

@@ -160,12 +160,10 @@ public final class DoxaizLockService extends AccessibilityService {
         windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
         try {
             IntentFilter filter = new IntentFilter(Intent.ACTION_SCREEN_OFF);
-            // См. MainActivity.registerSystemReceiver: на 26–32 явный RECEIVER_EXPORTED
-            // вместо неявного экспорта (система — единственный отправитель).
+            // RECEIVER_NOT_EXPORTED существует с API 33; на 26–32 — обычная
+            // регистрация (поля RECEIVER_EXPORTED до 33 нет вовсе).
             if (Build.VERSION.SDK_INT >= 33) {
                 registerReceiver(screenOffReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
-            } else if (Build.VERSION.SDK_INT >= 26) {
-                registerReceiver(screenOffReceiver, filter, Context.RECEIVER_EXPORTED);
             } else {
                 registerReceiver(screenOffReceiver, filter);
             }
@@ -794,8 +792,12 @@ public final class DoxaizLockService extends AccessibilityService {
             } catch (Throwable ignored) {
             }
         }
-        int id = getResources().getIdentifier("navigation_bar_height", "dimen", "android");
-        return (id > 0) ? getResources().getDimensionPixelSize(id) : GlassTheme.dp(this, 44);
+        // Внутренний ресурс android:navigation_bar_height не публичный: на части
+        // прошивок его нет, а с Android 11 ресурсная рефлексия к платформе
+        // ограничена. На 26–29 используем настраиваемый запас высоты (для
+        // панели ОЗУ разница в пару dp не критична), на 30+ работает
+        // WindowInsets выше.
+        return GlassTheme.dp(this, 44);
     }
 
     @Override

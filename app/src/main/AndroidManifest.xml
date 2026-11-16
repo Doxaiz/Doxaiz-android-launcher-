@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     package="com.doxaiz.launcher">
 
     <!-- minSdk/targetSdk и versionCode/versionName задаются только в app/build.gradle:
@@ -41,7 +42,12 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="false"
         android:theme="@style/DoxaizTheme"
-        android:usesCleartextTraffic="false">
+        android:usesCleartextTraffic="false"
+        tools:targetApi="33">
+        <!-- enableOnBackInvokedCallback действует только с Android 13 (API 33).
+             Атрибут объявлен здесь, потому что манифест один для всех версий;
+             tools:targetApi сообщает Lint, что атрибут сознательно объявлен
+             при minSdk 26 — на старых версиях система просто его игнорирует. -->
 
         <activity
             android:name=".MainActivity"

@@ -225,10 +225,10 @@ public final class AnimeParticlesView extends View {
         super.onAttachedToWindow();
         try {
             IntentFilter filter = new IntentFilter(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED);
+            // RECEIVER_NOT_EXPORTED появился в API 33 — на более старых версиях
+            // используется двухаргументный вызов (поля RECEIVER_EXPORTED до 33 нет).
             if (Build.VERSION.SDK_INT >= 33) {
                 getContext().registerReceiver(powerReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
-            } else if (Build.VERSION.SDK_INT >= 26) {
-                getContext().registerReceiver(powerReceiver, filter, Context.RECEIVER_EXPORTED);
             } else {
                 getContext().registerReceiver(powerReceiver, filter);
             }

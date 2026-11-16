@@ -298,16 +298,18 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     /**
      * Регистрация динамического ресивера только для системных броадкастов.
      *
-     * На API 33+ есть RECEIVER_NOT_EXPORTED. На 26–32 эквивалента нет, но флаг
-     * RECEIVER_EXPORTED подавляет предупреждение платформы о неявном экспорте,
-     * а сами фильтры (ACTION_BATTERY_CHANGED, RINGER_MODE_CHANGED, USER_PRESENT)
-     * отправляет только система, поэтому отличается только видимость намерения.
+     * На API 33+ используется RECEIVER_NOT_EXPORTED. На 26–32 такого флага нет
+     * (он появился в 33 вместе с самим механизмом), поэтому там регистрация
+     * обычная: фильтры (ACTION_BATTERY_CHANGED, RINGER_MODE_CHANGED, USER_PRESENT)
+     * отправляет только система, так что неявный экспорт не создаёт угрозы.
      */
     private void registerSystemReceiver(BroadcastReceiver receiver, IntentFilter filter) {
+        // RECEIVER_NOT_EXPORTED появился только в API 33. Раньше на ветке «26–32»
+        // стоял Context.RECEIVER_EXPORTED, которого до 33 не существует: обращение
+        // к полю дало бы NoSuchFieldError на Android 8–12. Для этих версий
+        // корректный вызов — обычный двухаргументный registerReceiver.
         if (Build.VERSION.SDK_INT >= 33) {
             registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED);
-        } else if (Build.VERSION.SDK_INT >= 26) {
-            registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED);
         } else {
             registerReceiver(receiver, filter);
         }
