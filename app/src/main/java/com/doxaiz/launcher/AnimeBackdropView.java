@@ -214,9 +214,13 @@ public final class AnimeBackdropView extends View {
         super.onSizeChanged(w, h, oldw, oldh);
         viewW = w;
         viewH = h;
-        matrixDirty = true;
+        // Градиент скрима строится по высоте: после первого замера его нужно
+        // пересобрать. Раньше это происходило только на пути встроенных обоев,
+        // поэтому при системных обоях скрим оставался с нулевой высотой и не
+        // рисовался вовсе — а он теперь единственная защита подписей.
         scrimDirty = true;
         rebuildScrimIfNeeded();
+        matrixDirty = true;
         if (wallpaperMode == Prefs.WALLPAPER_KURUMI_XIAOBAI && wallpaperBitmap == null) {
             ensureBitmapLoaded();
         }
