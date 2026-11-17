@@ -468,6 +468,9 @@ public final class LayoutImporter {
             desktop.pages.add(new ArrayList<>());
         }
         desktop.normalizeAllPages(effectiveCols, false);
+        // Импорт — это тоже построенная раскладка: пустая страница после него
+        // не должна считаться «ещё не построенной» и перестраиваться.
+        desktop.markInitialized();
         desktop.save();
 
         return new Result(true, sourceName, importedApps, importedFolders, effectiveCols);

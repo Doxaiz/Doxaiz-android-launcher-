@@ -863,6 +863,16 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             dynamicBarHelper.refresh();
         }
         rebuildDesktop();
+        // Диагностика для отчёта CI и для пользователя: если рабочий стол
+        // оказался пустым при живом списке приложений, причина должна быть
+        // видна, а не выясняться догадками. Это единственный случай, когда
+        // пустой стол — дефект, а не отсутствие приложений.
+        if (visibleApps.size() >= 2 && !desktop.hasContent()) {
+            Diagnostics.record("MainActivity.emptyDesktop",
+                    new IllegalStateException("приложений=" + visibleApps.size()
+                            + ", страниц=" + desktop.pages.size()
+                            + ", док=" + desktop.dock.size()));
+        }
         if (openFolderId != null && openFolderPage >= 0 && modalOverlay != null
                 && modalOverlay.getVisibility() == View.VISIBLE) {
             DesktopItem folder = desktop.findFolder(openFolderPage, openFolderId);
@@ -2440,6 +2450,9 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         appsCompositionSignature = null;
 
         boolean bottomAlign = prefs.isHomeBottomAligned();
+        // Пустая сохранённая раскладка (pages=[[]]) не считается готовой: иначе
+        // авто-раскладка не строилась бы никогда (см. DesktopModel.isInitialized)
+        // и рабочий стол оставался пустым при 19 установленных приложениях.
         if (!desktop.isInitialized() && !visible.isEmpty()) {
             // Базу штатной оболочки НЕ читаем в UI-потоке. Это запрос к чужому
             // ContentProvider: на Android 14 он обычно запрещён, а если провайдер

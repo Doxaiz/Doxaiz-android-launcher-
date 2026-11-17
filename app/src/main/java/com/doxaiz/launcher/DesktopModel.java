@@ -55,6 +55,17 @@ public final class DesktopModel {
     public final List<List<DesktopItem>> pages = new ArrayList<>();
     private int nextFolderSeq = 1;
 
+    /**
+     * Раскладка хоть раз была построена (в том числе если пользователь потом сам
+     * удалил с неё всё). Хранится в JSON как "built": true.
+     *
+     * Зачем отдельный признак: пустой рабочий стол — это нормальное состояние
+     * после того, как пользователь убрал все иконки, и перестраивать его нельзя.
+     * Но пустой стол ДО первой раскладки — это отсутствие данных, и его нужно
+     * заполнить (иначе лаунчер навсегда остаётся пустым).
+     */
+    private boolean initialized = false;
+
     public DesktopModel(Prefs prefs) {
         this(null, prefs);
     }
@@ -65,14 +76,34 @@ public final class DesktopModel {
         load();
     }
 
+    /**
+     * Раскладка уже построена.
+     *
+     * Одной «есть хотя бы одна страница» недостаточно: любая пустая раскладка
+     * (в том числе сохранённая до того, как список приложений успел загрузиться)
+     * даёт pages=[[]], и раньше такое состояние считалось готовым. В результате
+     * авто-раскладка не строилась никогда, и рабочий стол оставался пустым при
+     * 19 установленных приложениях (видно в CI, отчёт «раскладка»).
+     */
     public boolean isInitialized() {
-        return !pages.isEmpty();
+        return initialized || hasContent();
+    }
+
+    /** Помечает раскладку построенной (после импорта или ручной сборки). */
+    public void markInitialized() {
+        initialized = true;
+    }
+
+    /** Есть ли хоть что-то, кроме пустых страниц (иконки, папки, док). */
+    public boolean hasContent() {
+        return !dock.isEmpty() || containsAnyDesktopItem();
     }
 
     /** Синхронизирован по той же причине, что и save(): перезагрузка и запись не должны пересекаться. */
     public synchronized void load() {
         dock.clear();
         pages.clear();
+        initialized = false;
         String raw = (prefs != null) ? prefs.getDesktopJson() : null;
         boolean recoveredFromGuard = false;
         if (raw == null || raw.isEmpty()) {
@@ -105,6 +136,7 @@ public final class DesktopModel {
             JSONObject root = new JSONObject(raw);
             nextFolderSeq = root.optInt("seq", 1);
 
+            initialized = root.optBoolean("built", false);
             JSONArray dockArr = root.optJSONArray("dock");
             if (dockArr != null) {
                 for (int i = 0; i < dockArr.length(); i++) {
@@ -175,6 +207,9 @@ public final class DesktopModel {
         try {
             JSONObject root = new JSONObject();
             root.put("seq", nextFolderSeq);
+            // Признак «раскладка построена»: без него пустой стол после первой
+            // неудачной загрузки приложений считался бы готовым навсегда.
+            root.put("built", initialized || hasContent());
 
             JSONArray dockArr = new JSONArray();
             for (String k : dock) dockArr.put(k);
@@ -384,6 +419,12 @@ public final class DesktopModel {
      * - Страница 2: папка «Инструменты» + остальные приложения сверху вниз
      */
     public void buildInitialLayout(List<AppEntry> visible, int cols, boolean bottomAlignPage0) {
+        // Пустой список приложений — это ещё не раскладка. Раньше здесь
+        // создавалась и сохранялась пустая страница, флаг «построено» ставился,
+        // и стол навсегда оставался пустым (в CI: 19 приложений, pages=[[]]).
+        if (visible == null || visible.isEmpty()) {
+            return;
+        }
         dock.clear();
         pages.clear();
         Set<String> used = new HashSet<>();
@@ -481,6 +522,7 @@ public final class DesktopModel {
         }
         assignSequentialCoords(page2, cols, false);
         pages.add(page2);
+        initialized = true;
         save();
     }
 
@@ -601,7 +643,10 @@ public final class DesktopModel {
                 }
             }
         }
-        if (changed) save();
+        // Пустую страницу добавляем только для отрисовки: сохранять её как
+        // раскладку незачем — иначе «пока приложения грузятся» снова оставляло
+        // бы в prefs pages=[[]], которое потом читается как готовая раскладка.
+        if (changed && hasContent()) save();
     }
 
     /**

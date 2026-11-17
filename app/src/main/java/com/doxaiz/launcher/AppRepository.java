@@ -335,6 +335,16 @@ public final class AppRepository {
         reloadNow(null);
     }
 
+    /**
+     * Сколько раз подряд пустой список приложений отбрасывался. Пока счётчик
+     * меньше {@link #MAX_EMPTY_SKIPS}, результат считается «пакетный менеджер
+     * ещё не готов» и повторяется с задержкой. Дальше принимаем пустой список
+     * как есть: если приложений действительно нет, стол должен остаться пустым,
+     * а не показывать ошибку.
+     */
+    private static final int MAX_EMPTY_SKIPS = 3;
+    private int emptySkips = 0;
+
     private void reloadNow(final String newlyInstalledPkg) {
         if (bgExecutor.isShutdown()) return;
         final int mySeq = reloadSeq.incrementAndGet();
@@ -463,6 +473,21 @@ public final class AppRepository {
                     if (cachedKey != null && !immutableInfo.containsKey(cachedKey)) {
                         iconCache.remove(cachedKey);
                     }
+                }
+                if (visible.isEmpty() && emptySkips < MAX_EMPTY_SKIPS) {
+                    // Пустой список — это ещё не «приложений нет». Бывает, что
+                    // пакетный менеджер не готов сразу после загрузки, и тогда
+                    // пустой ответ нельзя применять: рабочий стол построился бы
+                    // пустым и остался таким (баг 6.0: 19 приложений, pages=[[]]).
+                    emptySkips++;
+                    Diagnostics.record("AppRepository.emptyVisible",
+                            new IllegalStateException("пропуск " + emptySkips
+                                    + "/" + MAX_EMPTY_SKIPS + ": 0 приложений"));
+                    mainHandler.postDelayed(() -> reloadNow(null), 400L * emptySkips);
+                    return;
+                }
+                if (!visible.isEmpty()) {
+                    emptySkips = 0;
                 }
                 if (listener != null) {
                     listener.onAppsUpdated(visible, hidden, byKey, newlyInstalledPkg);
