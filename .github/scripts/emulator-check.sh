@@ -342,9 +342,27 @@ if [ "$scenario_ok" = "1" ]; then
     adb shell "run-as $PKG rm -f $CRASH_DIR/$CRASH_FILE" >/dev/null 2>&1 || true
     adb shell am force-stop "$PKG" >/dev/null 2>&1 || true
     sleep 1
-    adb shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1 || true
-    sleep 3
-    focus_now > "$OUT/crash-restored-focus.txt" 2>/dev/null || true
+    # После force-stop штатный лаунчер может вернуть себе передний план (он
+    # отдаёт окно при остановке нашего процесса). Запускаем активность до
+    # четырёх раз, как в проверке HOME: единственная попытка давала «лаунчер
+    # не работает», хотя приложение стартовало нормально.
+    RESTORED=""
+    for attempt in 1 2 3 4; do
+        adb shell am start -W -n "$PKG/.MainActivity" >> "$OUT/crash-restore-start.txt" 2>&1 || true
+        sleep 3
+        RESTORED="$(focus_now 2>/dev/null || true)"
+        echo "attempt $attempt: $RESTORED" >> "$OUT/crash-restored-focus.txt"
+        if echo "$RESTORED" | grep -q "$PKG"; then
+            break
+        fi
+        dismiss_system_dialog || true
+        sleep 2
+    done
+    if echo "$RESTORED" | grep -q "$PKG"; then
+        note "crash-restored" "после очистки состояния лаунчер снова на переднем плане"
+    else
+        echo "::warning title=восстановление::лаунчер не вернулся на передний план после очистки состояния (${RESTORED:-фокус неизвестен})"
+    fi
     note "crash-restored" "$(tr '\n' ' ' < "$OUT/crash-restored-focus.txt" | cut -c1-300)"
 fi
 endlog

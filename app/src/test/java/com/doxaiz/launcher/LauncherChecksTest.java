@@ -43,6 +43,11 @@ public class LauncherChecksTest {
         run("Perf56Tests", () -> Perf56Tests.main(new String[0]));
     }
 
+    @Test
+    public void audit60LayoutAndImport() {
+        run("Audit60Tests", () -> Audit60Tests.main(new String[0]));
+    }
+
     private interface Check {
         void run() throws Exception;
     }

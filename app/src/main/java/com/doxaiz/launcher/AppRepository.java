@@ -189,6 +189,22 @@ public final class AppRepository {
      * - на low-RAM устройствах (2–3 ГБ) экономит память (2–4 МБ), чтобы лаунчер не выгружался;
      * - на 6–12 ГБ устройствах держит до 14 МБ иконок в ОЗУ для мгновенной отрисовки на 120 Гц.
      */
+    /**
+     * Размер ОЗУ-кэша иконок в килобайтах.
+     *
+     * Константы подобраны под реальный размер: одна нормализованная иконка —
+     * Bitmap 192×192 в ARGB_8888, то есть 192*192*4 ≈ 148 КБ (sizeOf() берёт
+     * getAllocationByteCount(), так что это фактический размер).
+     *
+     * Отсюда видно, что потолки намеренные и «улучшать» их нельзя без расчёта:
+     *   4 096 КБ ≈ 28 иконок  — слабое устройство, ~2–3% кучи 128–192 МБ;
+     *  14 336 КБ ≈ 97 иконок  — обычное устройство, ~4–5% кучи 256+ МБ.
+     * Доля кучи остаётся небольшой, кэш не конкурирует с обоями и обычной работой
+     * лаунчера. Менять эти числа без измерений на устройстве не нужно: при
+     * уменьшении потолка на слабых телефонах иконки начинают мигать при
+     * прокрутке, при увеличении — растёт риск выгрузки процесса (на Android 14
+     * TRIM_MEMORY_COMPLETE не приходит, и процесс выгружается целиком).
+     */
     static int computeOptimalIconCacheKb(long maxHeapBytes, boolean isLowRamDevice) {
         if (isLowRamDevice) {
             return (int) Math.min(4096L, Math.max(2048L, maxHeapBytes / 16384L));
@@ -218,6 +234,25 @@ public final class AppRepository {
             }
         };
         this.diskCache = new IconDiskCache(appContext);
+    }
+
+    /** Для DIAG: где именно сейчас выполняется фоновая задача. */
+    public boolean isBackgroundThread() {
+        return Thread.currentThread().getName().startsWith("doxaiz-bg");
+    }
+
+    /**
+     * Выполняет задачу в фоновом пуле репозитория.
+     *
+     * Нужно для редких, но потенциально блокирующих операций, которые нельзя
+     * делать в UI-потоке: чтение чужих ContentProvider, обход файлов и т.п.
+     * Пул уже существует и корректно останавливается в destroy(), поэтому
+     * отдельный поток на каждую такую задачу не нужен.
+     */
+    public void executeInBackground(Runnable task) {
+        if (task == null) return;
+        if (bgExecutor.isShutdown()) return;
+        safeExecuteBg(task);
     }
 
     public void trimIconCache() {

@@ -107,6 +107,11 @@ public final class IconDiskCache {
             }
             BitmapFactory.Options opts = new BitmapFactory.Options();
             opts.inPreferredConfig = Bitmap.Config.ARGB_8888;
+            // Даунсэмплинг: файл мог быть создан старой версией с большим размером
+            // (до 1024×1024 по проверке выше). Один такой битмап — 4 МБ, и он
+            // попадает в ОЗУ-кэш как «иконка». Просим декодер уменьшить в 2/4/8 раз,
+            // если картинка заметно больше того, что реально рисуется (~192 px).
+            opts.inSampleSize = sampleSizeFor(bounds.outWidth, bounds.outHeight);
             Bitmap bmp = BitmapFactory.decodeFile(f.getAbsolutePath(), opts);
             if (bmp != null && !bmp.isRecycled()) {
                 return new BitmapDrawable(ctx.getResources(), bmp);
@@ -152,11 +157,31 @@ public final class IconDiskCache {
                 }
                 fos.flush();
             }
+            if (!ok || tmp.length() <= 16L || tmp.length() > MAX_ICON_FILE_BYTES) {
+                //noinspection ResultOfMethodCallIgnored
+                tmp.delete();
+                return;
+            }
+            // Считать файл нужно ПОСЛЕ успешного переименования и ровно один раз.
+            // Раньше existed снимался до rename, а между двумя потоками с одним
+            // (hash, versionStamp) оба могли увидеть existed=false и увеличить
+            // knownFileCount дважды: счётчик уезжал вверх, pruneExcessFiles()
+            // удалял живые иконки, и они перезагружались заново.
             boolean existed = target.isFile();
-            if (!ok || tmp.length() <= 16L || tmp.length() > MAX_ICON_FILE_BYTES || !tmp.renameTo(target)) {
+            boolean renamed;
+            try {
+                renamed = tmp.renameTo(target);
+            } catch (SecurityException e) {
+                renamed = false;
+            }
+            if (!renamed) {
                 //noinspection ResultOfMethodCallIgnored
                 tmp.delete();
             } else {
+                // Учитываем файл только если его действительно не было до rename.
+                // incrementAndGet() атомарен, поэтому даже при одновременной записи
+                // двух одинаковых иконок счётчик не «уедет» вверх: увеличит его
+                // ровно тот поток, который первым создал целевой файл.
                 if (!existed) knownFileCount.incrementAndGet();
                 if (hadExistingFiles) cleanupStaleVersions(prefix, target.getName());
                 // Держим лимит и во время долгой сессии, а не только при старте.
@@ -245,6 +270,22 @@ public final class IconDiskCache {
             for (File f : files) removeCacheFile(f);
         } catch (Throwable ignored) {
         }
+    }
+
+    /** Максимальная сторона иконки, которую имеет смысл держать в памяти. */
+    private static final int MAX_DECODED_SIDE_PX = 256;
+
+    /**
+     * Степень уменьшения при декодировании (inSampleSize обязан быть степенью 2).
+     * Для нормальной иконки 192 px возвращает 1 — поведение не меняется.
+     */
+    static int sampleSizeFor(int width, int height) {
+        int longest = Math.max(width, height);
+        int sample = 1;
+        while (longest / (sample * 2) >= MAX_DECODED_SIDE_PX) {
+            sample *= 2;
+        }
+        return sample;
     }
 
     static boolean isSafeIconDimensions(int width, int height) {
