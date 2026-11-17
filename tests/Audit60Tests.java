@@ -39,7 +39,7 @@ public final class Audit60Tests {
 
     public static void main(String[] args) throws Exception {
         overflowGetsUniqueCells();
-        overflowSurvivesReload();
+        repeatedNormalizeIsStable();
         desktopEmptinessSeesFoldersAndApps();
         systemImportFlagRoundTrip();
         iconDownsampleOnlyForLargeFiles();
@@ -105,49 +105,64 @@ public final class Audit60Tests {
     }
 
     /**
-     * Тот же сценарий, но после «перезапуска»: раскладка сохраняется в JSON,
-     * модель создаётся заново, normalizeAllPages() вызывается ещё раз. При
-     * счётчике в памяти координаты после перезапуска совпали бы — здесь этого
-     * быть не должно.
+     * Повторная нормализация не должна «уезжать».
+     *
+     * В JVM-тестах org.json — заглушка (mockable android.jar), поэтому проверить
+     * запись в SharedPreferences здесь нельзя: save() молча ничего не сохраняет.
+     * Зато проверяемо главное свойство: переполненные элементы получают координаты
+     * за сеткой (row >= GRID_ROWS), а normalizeAllPages() считает такие координаты
+     * невалидными и раскладывает элементы заново. Со счётчиком в памяти каждая
+     * повторная нормализация уводила их на новую строку — координаты «уезжали».
+     * Теперь строка ищется по содержимому страницы, поэтому результат стабилен.
      */
-    private static void overflowSurvivesReload() throws Exception {
-        FakePrefs store = new FakePrefs();
-        Prefs prefs = newPrefs(store);
-        DesktopModel first = new DesktopModel(prefs);
-        first.addPage();
+    private static void repeatedNormalizeIsStable() throws Exception {
+        Prefs prefs = newPrefs(new FakePrefs());
+        DesktopModel desktop = new DesktopModel(prefs);
+        desktop.addPage();
 
         int perPage = DesktopModel.GRID_ROWS * 4;
         for (int p = 0; p < DesktopModel.MAX_PAGES - 1; p++) {
-            if (p > 0) first.addPage();
+            if (p > 0) desktop.addPage();
             for (int k = 0; k < perPage; k++) {
-                first.pages.get(p).add(DesktopItem.appAt("f" + p + "_" + k, k % 4, k / 4));
+                desktop.pages.get(p).add(DesktopItem.appAt("f" + p + "_" + k, k % 4, k / 4));
             }
         }
-        first.addPage();
-        List<DesktopItem> last = first.pages.get(DesktopModel.MAX_PAGES - 1);
+        desktop.addPage();
+        List<DesktopItem> last = desktop.pages.get(DesktopModel.MAX_PAGES - 1);
         for (int k = 0; k < perPage + 2; k++) last.add(DesktopItem.appAt("x" + k, -1, -1));
 
-        first.normalizeAllPages(4, false);
-        String saved = prefs.getDesktopJson();
-        check(saved != null && !saved.isEmpty(), "раскладка сохранена в JSON: " + saved
-                + " | журнал: " + Diagnostics.getAll().size() + " | "
-                + (Diagnostics.getAll().isEmpty() ? "" : Diagnostics.getAll().get(0).format()));
+        desktop.normalizeAllPages(4, false);
+        List<String> firstPass = hiddenCoordinates(desktop);
+        check(firstPass.size() == 2, "две иконки вынесены за сетку: " + firstPass);
 
-        Prefs prefs2 = newPrefs(store);
-        DesktopModel second = new DesktopModel(prefs2);
-        if (second.pages.isEmpty()) second.addPage();
-        second.normalizeAllPages(4, false);
+        // Повторные вызовы (как при каждом обновлении списка приложений) не должны
+        // менять координаты и не должны создавать дублей.
+        for (int i = 0; i < 3; i++) {
+            desktop.normalizeAllPages(4, false);
+            check(hiddenCoordinates(desktop).equals(firstPass),
+                    "координаты за сеткой стабильны после прохода " + (i + 2)
+                            + ": " + hiddenCoordinates(desktop) + " вместо " + firstPass);
+        }
 
         Set<String> seen = new HashSet<>();
-        int hidden = 0;
-        for (int p = 0; p < second.pages.size(); p++) {
-            for (DesktopItem it : second.pages.get(p)) {
+        for (int p = 0; p < desktop.pages.size(); p++) {
+            for (DesktopItem it : desktop.pages.get(p)) {
                 check(seen.add(pageKey(p) + it.col + ":" + it.row),
-                        "после перезапуска координата уникальна: " + it.col + ":" + it.row);
-                if (it.row >= DesktopModel.GRID_ROWS) hidden++;
+                        "координата уникальна: " + it.col + ":" + it.row);
             }
         }
-        check(hidden == 2, "после перезапуска переполнение сохранилось: " + hidden + " из 2");
+    }
+
+    /** Координаты всех элементов, вынесенных за пределы видимой сетки. */
+    private static List<String> hiddenCoordinates(DesktopModel desktop) {
+        List<String> out = new ArrayList<>();
+        for (List<DesktopItem> page : desktop.pages) {
+            for (DesktopItem it : page) {
+                if (it.row >= DesktopModel.GRID_ROWS) out.add(it.col + ":" + it.row);
+            }
+        }
+        Collections.sort(out);
+        return out;
     }
 
     // ------------------------------------------- 2. пустота стола и дубли
