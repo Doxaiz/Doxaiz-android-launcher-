@@ -77,7 +77,7 @@ public final class CrashGuard {
      *         до показа рабочего стола, и это n-й сбой подряд
      */
     public static int onDesktopLaunchStart(Prefs prefs) {
-        if (prefs == null) return 0;
+        if (prefs == null || !prefs.isCrashGuardEnabled()) return 0;
         try {
             long now = System.currentTimeMillis();
             long pending = prefs.getCrashGuardPending();
@@ -85,17 +85,17 @@ public final class CrashGuard {
             if (pending > 0L) {
                 long age = now - pending;
                 if (age >= 0L && age <= CRASH_WINDOW_MS) {
+                    // Прошлый запуск не дошёл до показа рабочего стола.
                     result = prefs.getCrashGuardStreak() + 1;
-                    prefs.setCrashGuardState(result, 0L);
                 } else {
-                    // Старая отметка: процесс не падал, а был выгружен или
-                    // устройство перезагружалось. Счётчик начинаем заново.
-                    prefs.setCrashGuardState(0, 0L);
+                    // Старая отметка: процесс не падал, а был выгружен системой
+                    // или устройство перезагружалось. Счётчик начинаем заново.
+                    result = 0;
                 }
             }
-            // Новая отметка «запуск идёт» ставится в любом случае, кроме
-            // перехода на аварийный экран: тот уже не запуск рабочего стола.
-            if (result == 0) prefs.setCrashGuardPending(now);
+            // Отметка «запуск идёт» ставится и при обнаруженном сбое: этот
+            // запуск тоже может упасть, и следующий должен это увидеть.
+            prefs.setCrashGuardState(result, now);
             return result;
         } catch (Throwable t) {
             Diagnostics.record("CrashGuard.onDesktopLaunchStart", t);
