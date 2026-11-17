@@ -119,6 +119,68 @@ public final class Prefs {
     }
 
     /**
+     * Конструктор для JVM-тестов: работает с готовым хранилищем, без Context.
+     * Пакетный доступ — снаружи приложения им пользоваться незачем.
+     */
+    Prefs(SharedPreferences storage) {
+        this.sp = storage;
+    }
+
+    // ---------------------------------------------------------------- CrashGuard
+
+    /**
+     * Состояние аварийного возврата на штатный лаунчер (см. {@link CrashGuard}).
+     *
+     * Отдельные ключи, а не один JSON: значения крошечные, а читаются на каждом
+     * старте — до построения интерфейса.
+     */
+    private static final String KEY_CRASH_PENDING = "crash_guard_pending";
+    private static final String KEY_CRASH_STREAK = "crash_guard_streak";
+    private static final String KEY_CRASH_FALLBACK = "crash_guard_fallback";
+    private static final String KEY_CRASH_LAST_FALLBACK = "crash_guard_last_fallback";
+    private static final String KEY_CRASH_ENABLED = "crash_guard_enabled";
+
+    public boolean isCrashGuardEnabled() { return sp.getBoolean(KEY_CRASH_ENABLED, true); }
+
+    public void setCrashGuardEnabled(boolean enabled) {
+        sp.edit().putBoolean(KEY_CRASH_ENABLED, enabled).apply();
+    }
+
+    /** Время начала последнего запуска рабочего стола, который не дошёл до показа. */
+    public long getCrashGuardPending() { return sp.getLong(KEY_CRASH_PENDING, 0L); }
+
+    public void setCrashGuardPending(long when) { sp.edit().putLong(KEY_CRASH_PENDING, when).apply(); }
+
+    public int getCrashGuardStreak() { return sp.getInt(KEY_CRASH_STREAK, 0); }
+
+    /** Устанавливает счётчик сбоев и отметку «запуск идёт» одним изменением. */
+    public void setCrashGuardState(int streak, long pending) {
+        sp.edit().putInt(KEY_CRASH_STREAK, streak).putLong(KEY_CRASH_PENDING, pending).apply();
+    }
+
+    public String getCrashGuardFallback() { return sp.getString(KEY_CRASH_FALLBACK, null); }
+
+    public long getCrashGuardLastFallback() { return sp.getLong(KEY_CRASH_LAST_FALLBACK, 0L); }
+
+    public void setCrashGuardFallback(String pkg, long when) {
+        sp.edit().putString(KEY_CRASH_FALLBACK, pkg)
+                .putLong(KEY_CRASH_LAST_FALLBACK, when).apply();
+    }
+
+    /**
+     * Сбрасывает отметки аварийного возврата: и счётчик, и запомненный штатный
+     * лаунчер. Пользователь сам решил начать с чистого листа — возвращаться
+     * «куда раньше переключались» уже не обязательно.
+     */
+    public void clearCrashGuardMarks() {
+        sp.edit().remove(KEY_CRASH_PENDING)
+                .remove(KEY_CRASH_STREAK)
+                .remove(KEY_CRASH_FALLBACK)
+                .remove(KEY_CRASH_LAST_FALLBACK)
+                .apply();
+    }
+
+    /**
      * Прямой доступ к хранилищу настроек. Нужен только диагностическому журналу
      * (см. {@link Diagnostics}): он живёт в тех же prefs и должен подняться
      * раньше, чем будет загружена раскладка.

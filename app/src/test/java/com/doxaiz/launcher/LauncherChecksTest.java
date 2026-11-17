@@ -29,6 +29,11 @@ public class LauncherChecksTest {
     }
 
     @Test
+    public void crashGuardStateMachine() {
+        run("CrashGuardTests", () -> CrashGuardTests.main(new String[0]));
+    }
+
+    @Test
     public void diagnosticsJournal() {
         run("DiagnosticsTests", () -> DiagnosticsTests.main(new String[0]));
     }

@@ -243,6 +243,112 @@ endlog
 
 check_crash "старт" || true
 
+log "Аварийный возврат: аварийный экран и уход на системный лаунчер"
+
+# Проверяем поведение, а не рассуждение. Состояние «предыдущий запуск рабочего
+# стола упал» подкладывается в настройки приложения: сборка debug, поэтому
+# run-as доступен. Ожидания:
+#   1-й аварийный запуск -> на экране аварийный экран Doxaiz с объяснением;
+#   2-й аварийный запуск -> лаунчер сам уступает: на переднем плане системный
+#                           рабочий стол, а не чёрный экран.
+#
+# Роль HOME после сценария может остаться у Doxaiz: снять её без подтверждения
+# пользователя Android не даёт (RoleManager показывает диалог, а в headless
+# эмуляторе подтверждать некому). Фиксируем именно переход на системный
+# лаунчер — то, что видит пользователь, — а остаточную роль отмечаем
+# предупреждением.
+CRASH_DIR=shared_prefs
+CRASH_FILE=doxaiz_prefs.xml
+
+# Запасной вариант записи напрямую через run-as, если внешний каталог недоступен.
+write_crash_state() {  # $1 = streak, $2 = pending (мс)
+    printf "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>\n<map>\n    <int name=\"crash_guard_streak\" value=\"%s\" />\n    <long name=\"crash_guard_pending\" value=\"%s\" />\n</map>\n" "$1" "$2" > /tmp/doxaiz-crash.xml
+    adb push /tmp/doxaiz-crash.xml /data/local/tmp/doxaiz-crash.xml >/dev/null 2>&1 || true
+    adb shell "run-as $PKG mkdir -p $CRASH_DIR" >/dev/null 2>&1 || true
+    if adb shell "run-as $PKG cp /data/local/tmp/doxaiz-crash.xml $CRASH_DIR/$CRASH_FILE" >/dev/null 2>&1; then
+        return 0
+    fi
+    # cat-перенаправление не всегда проходит через shell, поэтому вторым
+    # способом пишем по stdin.
+    if adb exec-in run-as "$PKG" sh -c "cat > $CRASH_DIR/$CRASH_FILE" < /tmp/doxaiz-crash.xml >/dev/null 2>&1; then
+        return 0
+    fi
+    return 1
+}
+
+read_crash_state() {
+    adb exec-out run-as "$PKG" cat "$CRASH_DIR/$CRASH_FILE" 2>/dev/null || true
+}
+
+focus_now() {
+    adb shell dumpsys window 2>/dev/null | grep -m1 mCurrentFocus || true
+}
+
+note "crash-prefs" "после сценария запись = $(read_crash_state | tr '\n' ' ' | cut -c1-200)"
+
+if adb shell dumpsys role 2>/dev/null | grep -q "$PKG"; then
+    note "crash-guard" "Doxaiz держит роль HOME — сценарий возврата применим"
+    scenario_ok=1
+else
+    note "crash-guard" "Doxaiz не держит роль HOME — сценарий возврата пропущен"
+    scenario_ok=0
+fi
+
+if [ "$scenario_ok" = "1" ]; then
+    # --- запуск №1: один предыдущий сбой -> аварийный экран -------------------
+    adb shell am force-stop "$PKG" >/dev/null 2>&1 || true
+    sleep 1
+    pending_ms=$(( $(date +%s) * 1000 - 3000 ))
+    if write_crash_state 0 "$pending_ms"; then
+        note "crash-write" "состояние сбоя записано: $(read_crash_state | tr '\n' ' ' | cut -c1-160)"
+        adb shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1 || true
+        sleep 4
+        dump_ui "crash-safe" "аварийный экран" || true
+        if grep -q "не запустился" "$OUT/ui-crash-safe.txt" 2>/dev/null; then
+            note "crash-safe" "аварийный экран показан после первого сбоя"
+        else
+            echo "::warning title=аварийный экран::аварийный экран не найден в дереве интерфейса"
+        fi
+        check_crash "аварийный экран" || true
+    else
+        echo "::warning title=аварийный экран::не удалось записать состояние сбоя (run-as недоступен)"
+    fi
+
+    # --- запуск №2: счётчик уже 1, ещё один сбой -> уход на системный ---------
+    adb shell am force-stop "$PKG" >/dev/null 2>&1 || true
+    sleep 1
+    pending_ms=$(( $(date +%s) * 1000 - 3000 ))
+    if write_crash_state 1 "$pending_ms"; then
+        adb shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1 || true
+        sleep 5
+        focus_now > "$OUT/crash-fallback-focus.txt" 2>/dev/null || true
+        note "crash-fallback" "$(tr '\n' ' ' < "$OUT/crash-fallback-focus.txt" | cut -c1-300)"
+        # Пустой mCurrentFocus — особенность эмулятора, а не доказательство.
+        # Возврат считается подтверждённым только если фокус есть и он НЕ наш:
+        # именно это видит пользователь вместо чёрного экрана.
+        if grep -q "$PKG" "$OUT/crash-fallback-focus.txt" 2>/dev/null; then
+            echo "::warning title=аварийный возврат::Doxaiz остался на переднем плане после второго сбоя — переход на системный лаунчер не подтверждён"
+        elif grep -q "mCurrentFocus=null" "$OUT/crash-fallback-focus.txt" 2>/dev/null; then
+            note "crash-fallback-result" "фокус не назначен (особенность эмулятора) — переход не подтверждён и не опровергнут"
+        elif grep -q "mCurrentFocus=Window" "$OUT/crash-fallback-focus.txt" 2>/dev/null; then
+            note "crash-fallback-result" "после второго сбоя на переднем плане другой лаунчер — возврат работает"
+        else
+            note "crash-fallback-result" "состояние фокуса не распознано — смотрите артефакт"
+        fi
+        check_crash "возврат на системный лаунчер" || true
+    fi
+
+    # --- восстановление: чистим состояние и возвращаем лаунчер в работу -------
+    adb shell "run-as $PKG rm -f $CRASH_DIR/$CRASH_FILE" >/dev/null 2>&1 || true
+    adb shell am force-stop "$PKG" >/dev/null 2>&1 || true
+    sleep 1
+    adb shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1 || true
+    sleep 3
+    focus_now > "$OUT/crash-restored-focus.txt" 2>/dev/null || true
+    note "crash-restored" "$(tr '\n' ' ' < "$OUT/crash-restored-focus.txt" | cut -c1-300)"
+fi
+endlog
+
 log "Рабочий стол: дерево интерфейса"
 dump_ui home "ui-home"
 if grep -q "нет ни одной подписи" "$OUT/ui-home.txt" 2>/dev/null; then
@@ -310,7 +416,7 @@ if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     {
         echo "## Doxaiz: проверка на эмуляторе API 34"
         echo
-        for f in ui-home.txt ui-drawer.txt gfxinfo-summary.txt device.txt focus-home.txt home-role.txt; do
+        for f in ui-home.txt ui-drawer.txt ui-crash-safe.txt crash-fallback-focus.txt crash-restored-focus.txt gfxinfo-summary.txt device.txt focus-home.txt home-role.txt; do
             [ -f "$OUT/$f" ] || continue
             echo "### $f"
             echo '```'
