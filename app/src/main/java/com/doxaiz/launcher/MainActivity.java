@@ -4224,7 +4224,6 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                 return a.entry.labelLower.compareTo(b.entry.labelLower);
             });
             filteredApps.clear();
-            filteredApps.ensureCapacity(scored.size());
             for (ScoredEntry se : scored) filteredApps.add(se.entry);
         }
         boolean hasSmart = rebuildDrawerSmartBox(q);
