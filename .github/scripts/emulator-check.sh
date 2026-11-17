@@ -609,18 +609,15 @@ PYEOF
     note "поиск-метрики" "$(cut -c1-240 < "$OUT/gfxinfo-search-compact.txt")"
     # Собственный замер приложения: сколько главный поток тратит на пересчёт
     # каталога после нажатия клавиши. В отличие от кадровых метрик эмулятора он
-    # слабо зависит от загрузки раннера: median/max по последним 16 пересчётам,
-    # публикуется приложением в debug.doxaiz.filter_ms.
-    FILTER_MS="$(adb shell getprop debug.doxaiz.filter_ms 2>/dev/null | tr -d '\r\n')"
-    if [ -n "$FILTER_MS" ]; then
-        note "пересчёт-каталога" "median/max = ${FILTER_MS} мс (по последним 16 пересчётам)"
-        summary "пересчёт-каталога" "${FILTER_MS} мс — median/max времени applyFilter() на нажатие клавиши"
+    # слабо зависит от загрузки раннера. Публикуется приложением в файл
+    # files/doxaiz_filter_stats.txt (setprop обычному приложению запрещён).
+    FILTER_STATS="$(adb shell "run-as $PKG cat files/doxaiz_filter_stats.txt" 2>/dev/null | tr -d '\r\n')"
+    if [ -n "$FILTER_STATS" ]; then
+        note "пересчёт-каталога" "$FILTER_STATS"
+        summary "пересчёт-каталога" "$FILTER_STATS (время applyFilter() на нажатие клавиши)"
     else
-        note "пересчёт-каталога" "свойство не опубликовано (debug-сборка?)"
+        note "пересчёт-каталога" "файл замера не создан (менее 8 пересчётов или не debug)"
     fi
-    summary "поиск-метрики" "$(cat "$OUT/gfxinfo-search-summary.txt")
-swiftshader: числа сравнимы только между прогонами, не с телефоном.
-Один раунд недостоверен: при одном и том же коде соседние прогоны дали 16 и 85 мс."
 else
     note "поиск-метрики" "каталог не открылся — замер набора текста пропущен"
 fi

@@ -4205,9 +4205,14 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     }
 
     /**
-     * Запоминает стоимость пересчёта и раз в 8 замеров публикует сводку в
-     * системное свойство — только в debug-сборке: в релизе лишний setprop
-     * не нужен, а чтение свойства из CI иначе невозможно.
+     * Запоминает стоимость пересчёта и раз в 8 замеров публикует сводку.
+     *
+     * Публикуем в файл приложения, а не в системное свойство: у обычного
+     * приложения нет прав на setprop (первая попытка с debug.doxaiz.filter_ms
+     * молча не сработала — CI увидел пустое значение). Файл читается из CI через
+     * `run-as <пакет> cat files/doxaiz_filter_stats.txt`.
+     *
+     * Запись — в фоновом потоке репозитория: набор текста не должен ждать диск.
      */
     private void recordFilterCost(long costNs) {
         try {
@@ -4216,14 +4221,24 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             recentFilterCostMs[slot] = Math.max(0L, costNs / 1_000_000L);
             recentFilterCostCount++;
             if (recentFilterCostCount < 8 || recentFilterCostCount % 8 != 0) return;
-            long[] sorted = new long[recentFilterCostMs.length];
-            System.arraycopy(recentFilterCostMs, 0, sorted, 0, sorted.length);
-            java.util.Arrays.sort(sorted);
-            long median = sorted[sorted.length / 2];
-            long max = sorted[sorted.length - 1];
-            Process p = Runtime.getRuntime().exec(new String[]{
-                    "setprop", "debug.doxaiz.filter_ms", median + "/" + max});
-            p.waitFor();
+            final long[] copy = new long[recentFilterCostMs.length];
+            System.arraycopy(recentFilterCostMs, 0, copy, 0, copy.length);
+            final int samples = Math.min(recentFilterCostCount, copy.length);
+            repository.executeInBackground(() -> {
+                try {
+                    java.util.Arrays.sort(copy);
+                    long median = copy[copy.length / 2];
+                    long max = copy[copy.length - 1];
+                    String line = "median=" + median + " max=" + max
+                            + " samples=" + samples + "\n";
+                    java.io.File f = new java.io.File(getFilesDir(), "doxaiz_filter_stats.txt");
+                    try (java.io.FileOutputStream out = new java.io.FileOutputStream(f, false)) {
+                        out.write(line.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    }
+                } catch (Throwable t) {
+                    Diagnostics.record("MainActivity.recordFilterCost", t);
+                }
+            });
         } catch (Throwable t) {
             // Диагностика не имеет права мешать набору текста.
             Diagnostics.record("MainActivity.recordFilterCost", t);
