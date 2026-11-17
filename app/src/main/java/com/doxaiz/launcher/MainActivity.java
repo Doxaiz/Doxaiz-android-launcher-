@@ -1905,6 +1905,9 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         lastDrawerRecentSig = "";
         lastAlphabetBarSig = "";
         theme = GlassTheme.create(prefs.getVisualStyle(), prefs.getGlassOpacity(), false);
+        // Подложка подписей зависит от темы — пересобираем её один раз здесь, а
+        // не на каждой из сотни иконок рабочего стола.
+        invalidateLabelBackdrop();
         updateSystemBarIconColors();
 
         homeContainer.setBackgroundColor(theme.homeScrimColor);
@@ -3045,6 +3048,15 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         return sb;
     }
 
+    /**
+     * Подпись иконки на рабочем столе.
+     *
+     * Поверх НЕИЗВЕСТНЫХ обоев белый текст без подложки не читается: на светлой
+     * картинке контраст 1,2:1 при пороге 4,5:1. Поэтому под текстом лежит
+     * «таблетка», плотность которой не подбирается на глаз, а считается в
+     * {@link Legibility#requiredBackdropAlpha}: худший случай — белые обои под
+     * скримом. Результат проверяется JVM-тестом ContrastTest.
+     */
     private TextView makeDesktopLabel(CharSequence text) {
         TextView label = new TextView(this);
         label.setText(text);
@@ -3054,12 +3066,41 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         label.setSingleLine(true);
         label.setEllipsize(TextUtils.TruncateAt.END);
         label.setShadowLayer(2f, 0f, 1f, Color.argb(150, 0, 0, 0));
+        // Горизонтальные отступы: таблетка не должна прилипать к буквам.
+        label.setPadding(dp(6), dp(1), dp(6), dp(1));
+        label.setBackground(desktopLabelBackdrop());
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
         );
         lp.topMargin = dp(5);
+        lp.gravity = Gravity.CENTER_HORIZONTAL;
         label.setLayoutParams(lp);
         return label;
+    }
+
+    /**
+     * Подложка под подпись: минимальная непрозрачность, при которой белый текст
+     * остаётся читаемым на самом светлом фоне.
+     *
+     * Кэшируется: метод вызывается на каждую иконку каждой страницы при
+     * перестройке рабочего стола.
+     */
+    private android.graphics.drawable.Drawable desktopLabelBackdropCache;
+
+    private android.graphics.drawable.Drawable desktopLabelBackdrop() {
+        if (desktopLabelBackdropCache != null) return desktopLabelBackdropCache;
+        // Тёмная «таблетка»: 8/10/20 — тот же тон, что у скрима, чтобы не
+        // выглядело чужеродным на обоих стилях темы.
+        int alpha = Legibility.requiredBackdropAlpha(8, 10, 20, 255, 255, 255,
+                DESKTOP_LABEL_MIN_CONTRAST, 190);
+        desktopLabelBackdropCache = GlassTheme.makeGlassRect(
+                this, (alpha << 24) | 0x00080A14, Color.TRANSPARENT, 8f, 0f);
+        return desktopLabelBackdropCache;
+    }
+
+    /** Сброс кэша подложки при смене темы/размера подписи. */
+    private void invalidateLabelBackdrop() {
+        desktopLabelBackdropCache = null;
     }
 
     private int dotsBuiltCount = -1;
@@ -3143,10 +3184,13 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         if (isHome && dot instanceof ImageView) {
             tintIcon((ImageView) dot, active ? theme.dotActiveColor : theme.dotInactiveColor);
         } else {
+            // На светлых обоях белые точки были не видны совсем. Теперь каждая
+            // точка лежит на тонкой тёмной обводке: она читается и на светлом, и
+            // на тёмном фоне, независимо от обоев пользователя.
             dot.setBackground(GlassTheme.makeGlassRect(
                     this,
-                    active ? Color.WHITE : 0x55FFFFFF,
-                    Color.TRANSPARENT, 4f, 0f
+                    active ? 0xFFFFFFFF : 0x99FFFFFF,
+                    0x66000000, 4f, 1f
             ));
             int sz = active ? dp(6) : dp(5);
             ViewGroup.LayoutParams lp = dot.getLayoutParams();
@@ -3197,8 +3241,13 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                 dl.setSingleLine(true);
                 dl.setEllipsize(TextUtils.TruncateAt.END);
                 dl.setShadowLayer(2f, 0f, 1f, Color.argb(150, 0, 0, 0));
+                // Та же подложка, что у иконок: док стоит прямо над обоями, и
+                // белая подпись без неё не читается на светлой картинке.
+                dl.setPadding(dp(6), dp(1), dp(6), dp(1));
+                dl.setBackground(desktopLabelBackdrop());
                 LinearLayout.LayoutParams dlLp = new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                dlLp.gravity = Gravity.CENTER_HORIZONTAL;
                 dlLp.topMargin = dp(3);
                 slot.addView(dl, dlLp);
             }
@@ -4109,6 +4158,12 @@ public class MainActivity extends Activity implements AppRepository.Listener {
      * складывалась бы с самим пересчётом и текст «отставал» от пальца.
      */
     private static final long DRAWER_FILTER_TIME_BUDGET_NS = 6_000_000L;
+
+    /**
+     * Минимальный контраст подписей на рабочем столе (WCAG AA для мелкого
+     * текста). Контраст считается по худшему случаю — белые обои.
+     */
+    private static final double DESKTOP_LABEL_MIN_CONTRAST = 4.5;
     private final Runnable pendingDrawerFilter = this::runPendingDrawerFilter;
     /** Сколько занял последний пересчёт каталога: 0 — ещё не считали. */
     private long lastDrawerFilterCostNs = 0L;

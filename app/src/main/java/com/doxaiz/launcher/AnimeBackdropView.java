@@ -68,15 +68,40 @@ public final class AnimeBackdropView extends View {
 
     /** Чистые значения альфа-виньетки (верх, середина, низ) для выбранного уровня затемнения. */
     public static int[] computeScrimAlphas(int dimLevel) {
+        return computeScrimAlphas(dimLevel, false);
+    }
+
+    /**
+     * Альфы скрима для трёх зон экрана: верх (строка настроек), середина
+     * (иконки), низ (док).
+     *
+     * @param systemWallpaper true — обои пользователя. Их яркость неизвестна,
+     *                        поэтому скрим плотнее: даже белая картинка под ним
+     *                        должна оставлять текст читаемым.
+     */
+    public static int[] computeScrimAlphas(int dimLevel, boolean systemWallpaper) {
         int safe = Prefs.sanitizeWallpaperDim(dimLevel);
+        int top;
+        int mid;
+        int bottom;
         if (safe == Prefs.WALLPAPER_DIM_LIGHT) {
-            return new int[]{88, 18, 124};
+            top = 88; mid = 18; bottom = 124;
+        } else if (safe == Prefs.WALLPAPER_DIM_STRONG) {
+            top = 162; mid = 68; bottom = 206;
+        } else {
+            // MEDIUM — баланс: встроенные обои остаются яркими, текст читается
+            top = 126; mid = 36; bottom = 168;
         }
-        if (safe == Prefs.WALLPAPER_DIM_STRONG) {
-            return new int[]{162, 68, 206};
+        if (systemWallpaper) {
+            // Нижние границы посчитаны, а не выбраны на глаз: белый текст на
+            // белых обоях даёт 4,66:1 уже при 145/255 в средней зоне (порог
+            // WCAG AA — 4,5:1). Верх и низ плотнее, потому что там текст
+            // мельче и лежит на самом краю экрана.
+            top = Math.max(top, 190);
+            mid = Math.max(mid, 150);
+            bottom = Math.max(bottom, 215);
         }
-        // MEDIUM — идеальный баланс: лица героинь яркие, верхняя строка и док читаются на 100%
-        return new int[]{126, 36, 168};
+        return new int[]{top, mid, bottom};
     }
 
     public void applyConfig(int newWallpaperMode, int newStyleMode, int newDimLevel) {
@@ -84,15 +109,23 @@ public final class AnimeBackdropView extends View {
         int safeStyle = Prefs.sanitizeVisualStyle(newStyleMode);
         int safeDim = Prefs.sanitizeWallpaperDim(newDimLevel);
         boolean wpChanged = (this.wallpaperMode != safeWp);
-        boolean scrimChanged = (this.styleMode != safeStyle || this.dimLevel != safeDim);
+        boolean scrimChanged = (this.styleMode != safeStyle || this.dimLevel != safeDim
+                || this.wallpaperMode != safeWp);
 
         this.wallpaperMode = safeWp;
         this.styleMode = safeStyle;
         this.dimLevel = safeDim;
 
+        // При системных обоях вью БОЛЬШЕ НЕ ПРЯЧЕТСЯ: оно единственный слой,
+        // который притемняет обои под белыми подписями рабочего стола. Раньше
+        // здесь стоял setVisibility(GONE), поэтому на светлой картинке контраст
+        // подписей падал до 1,2:1 при пороге WCAG 4,5:1.
         if (safeWp == Prefs.WALLPAPER_SYSTEM) {
             releaseBitmapInternal();
-            setVisibility(GONE);
+            scrimDirty = true;
+            rebuildScrimIfNeeded();
+            setVisibility(scrimAlphaIsUseful() ? VISIBLE : GONE);
+            invalidate();
             return;
         }
 
@@ -212,9 +245,19 @@ public final class AnimeBackdropView extends View {
         matrixDirty = false;
     }
 
+    /**
+     * Нужен ли слой скрима: если все три альфы нулевые, слой можно не включать.
+     * Отдельный метод, а не «всегда VISIBLE», чтобы пустой слой не участвовал
+     * в композиции на слабых устройствах.
+     */
+    private boolean scrimAlphaIsUseful() {
+        int[] a = computeScrimAlphas(dimLevel, wallpaperMode != Prefs.WALLPAPER_KURUMI_XIAOBAI);
+        return a[0] > 0 || a[1] > 0 || a[2] > 0;
+    }
+
     private void rebuildScrimIfNeeded() {
         if (!scrimDirty || viewH <= 0) return;
-        int[] a = computeScrimAlphas(dimLevel);
+        int[] a = computeScrimAlphas(dimLevel, wallpaperMode != Prefs.WALLPAPER_KURUMI_XIAOBAI);
         int baseR = (styleMode == Prefs.STYLE_CYBER_ANIME) ? 6 : 7;
         int baseG = (styleMode == Prefs.STYLE_CYBER_ANIME) ? 8 : 8;
         int baseB = (styleMode == Prefs.STYLE_CYBER_ANIME) ? 22 : 16;
@@ -234,14 +277,23 @@ public final class AnimeBackdropView extends View {
 
     @Override
     protected void onDraw(Canvas canvas) {
-        if (wallpaperMode != Prefs.WALLPAPER_KURUMI_XIAOBAI) return;
-        Bitmap bmp = wallpaperBitmap;
-        if (bmp != null && !bmp.isRecycled()) {
-            rebuildMatrixIfNeeded(bmp);
-            canvas.drawBitmap(bmp, drawMatrix, bmpPaint);
-        } else {
-            // Быстрая тёмно-ночная подложка, пока фоновый поток декодирует Bitmap (<15мс)
-            canvas.drawColor(styleMode == Prefs.STYLE_CYBER_ANIME ? 0xFF060814 : 0xFF07080F);
+        // Скрим рисуется ВСЕГДА — и поверх встроенных обоев, и поверх системных.
+        //
+        // Раньше при системных обоях здесь был ранний return: вью не рисовало
+        // ничего, и белые подписи рабочего стола лежали прямо на картинке
+        // пользователя. На светлых обоях контраст падал до 1,2:1 при пороге
+        // WCAG 4,5:1 — подписи не читались. Системные обои видны через
+        // прозрачное окно (windowShowWallpaper), поэтому скрим не «закрывает»
+        // их, а только притемняет под текстом.
+        if (wallpaperMode == Prefs.WALLPAPER_KURUMI_XIAOBAI) {
+            Bitmap bmp = wallpaperBitmap;
+            if (bmp != null && !bmp.isRecycled()) {
+                rebuildMatrixIfNeeded(bmp);
+                canvas.drawBitmap(bmp, drawMatrix, bmpPaint);
+            } else {
+                // Быстрая тёмно-ночная подложка, пока фоновый поток декодирует Bitmap (<15мс)
+                canvas.drawColor(styleMode == Prefs.STYLE_CYBER_ANIME ? 0xFF060814 : 0xFF07080F);
+            }
         }
         canvas.drawRect(0f, 0f, viewW, viewH, scrimPaint);
     }
