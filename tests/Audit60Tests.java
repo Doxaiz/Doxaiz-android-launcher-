@@ -129,7 +129,9 @@ public final class Audit60Tests {
 
         first.normalizeAllPages(4, false);
         String saved = prefs.getDesktopJson();
-        check(saved != null && !saved.isEmpty(), "раскладка сохранена в JSON");
+        check(saved != null && !saved.isEmpty(), "раскладка сохранена в JSON: " + saved
+                + " | журнал: " + Diagnostics.getAll().size() + " | "
+                + (Diagnostics.getAll().isEmpty() ? "" : Diagnostics.getAll().get(0).format()));
 
         Prefs prefs2 = newPrefs(store);
         DesktopModel second = new DesktopModel(prefs2);
