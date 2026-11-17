@@ -1597,6 +1597,9 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
         drawerAdapter = new DrawerAdapter();
         drawerGrid.setAdapter(drawerAdapter);
+        // Тап по элементу во время «замороженной» прокрутки не должен теряться:
+        // иконки в этот момент могут быть ещё пустыми, но нажатие работает.
+        drawerGrid.setScrollingCacheEnabled(false);
         drawerGrid.setOnItemClickListener((parent, view, position, id) -> {
             if (position >= 0 && position < filteredApps.size()) {
                 AppEntry entry = filteredApps.get(position);
@@ -1628,6 +1631,20 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             public void onScrollStateChanged(AbsListView view, int scrollState) {
                 if (scrollState == SCROLL_STATE_TOUCH_SCROLL && drawerSearchInput.hasFocus()) {
                     hideKeyboard();
+                }
+                // Пока список движется, иконки не декодируются: в кадр прокрутки
+                // попадали чтение с диска и постановка битмапа (в CI прокрутка
+                // давала 50-й перцентиль 97 мс против 16 мс на наборе текста).
+                // Когда движение закончилось — перерисовываем видимые элементы,
+                // чтобы недостающие иконки появились.
+                boolean moving = (scrollState == SCROLL_STATE_FLING
+                        || scrollState == SCROLL_STATE_TOUCH_SCROLL);
+                boolean wasFlinging = repository.isScrollFlinging();
+                repository.setScrollFlinging(moving);
+                if (wasFlinging && !moving && drawerAdapter != null) {
+                    // Повторная привязка видимых элементов: bindIcon() теперь не
+                    // пропускает иконки и заполняет те, что остались пустыми.
+                    drawerAdapter.notifyDataSetChanged();
                 }
             }
             @Override
