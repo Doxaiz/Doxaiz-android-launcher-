@@ -159,6 +159,11 @@ jobs:
     runs-on: ubuntu-latest
     needs: unit-tests
     timeout-minutes: 30
+    # Запись нужна только шагу «Обновить APK в единственном релизе»: по
+    # умолчанию GITHUB_TOKEN читает репозиторий и не может менять релизы.
+    # Шаг всё равно выполняется только для push в main.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v5
 
@@ -228,15 +233,21 @@ jobs:
         run: |
           set -euo pipefail
           TAG="doxaiz-test"
+          # Причина падения должна быть в аннотации, а не только в логе:
+          # первая попытка упала из-за прав GITHUB_TOKEN (contents: read).
+          fail() { echo "::error title=релиз::$1"; exit 1; }
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             echo "::notice title=релиз::релиза $TAG нет — APK не публикуется (создаётся вручную)"
             exit 0
           fi
           APK="$(find app/build/outputs/apk/debug -name '*.apk' | head -1)"
+          [ -f "$APK" ] || fail "APK не найден в app/build/outputs/apk/debug"
           cp "$APK" doxaiz-6.0-test.apk
-          gh release upload "$TAG" doxaiz-6.0-test.apk --clobber
+          gh release upload "$TAG" doxaiz-6.0-test.apk --clobber \
+            || fail "не удалось обновить APK в релизе $TAG"
           gh release upload "$TAG" apk-sha256.txt --clobber || true
-          gh release edit "$TAG" --notes-file RELEASE_NOTES.md
+          gh release edit "$TAG" --notes-file RELEASE_NOTES.md \
+            || fail "не удалось обновить заметки релиза $TAG"
           echo "::notice title=релиз::APK обновлён в $TAG (без нового тега)"
 
   emulator:
