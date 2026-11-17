@@ -561,16 +561,26 @@ public final class Prefs {
         }
     }
 
-    /** Копия карты запусков в JSON. Выполняется в фоновом потоке, вне блокировки. */
+    /**
+     * Копия карты запусков в JSON. Выполняется в фоновом потоке, вне блокировки.
+     *
+     * org.json в Android объявляет put() бросающим JSONException (проверяемое
+     * исключение), поэтому здесь оно перехватывается и возвращается null —
+     * вызывающий просто пропускает запись, как и раньше при любом сбое.
+     */
     private static String serializeUsage(Map<String, long[]> map) {
-        JSONObject root = new JSONObject();
-        for (Map.Entry<String, long[]> e : map.entrySet()) {
-            JSONObject obj = new JSONObject();
-            obj.put("c", (int) e.getValue()[0]);
-            obj.put("t", e.getValue()[1]);
-            root.put(e.getKey(), obj);
+        try {
+            JSONObject root = new JSONObject();
+            for (Map.Entry<String, long[]> e : map.entrySet()) {
+                JSONObject obj = new JSONObject();
+                obj.put("c", (int) e.getValue()[0]);
+                obj.put("t", e.getValue()[1]);
+                root.put(e.getKey(), obj);
+            }
+            return root.toString();
+        } catch (Throwable t) {
+            return null;
         }
-        return root.toString();
     }
 
     /** Исполнитель для редких фоновых записей настроек (журнал запусков, статистика). */
@@ -585,14 +595,16 @@ public final class Prefs {
         try {
             PERSIST_IO.execute(() -> {
                 try {
-                    sp.edit().putString(KEY_USAGE_JSON, serializeUsage(snapshot)).apply();
+                    String json = serializeUsage(snapshot);
+                    if (json != null) sp.edit().putString(KEY_USAGE_JSON, json).apply();
                 } catch (Throwable ignored) {
                 }
             });
         } catch (Throwable ignored) {
             // Пул уже остановлен (выход из процесса) — пишем синхронно, чтобы не потерять счётчик.
             try {
-                sp.edit().putString(KEY_USAGE_JSON, serializeUsage(snapshot)).apply();
+                String json = serializeUsage(snapshot);
+                if (json != null) sp.edit().putString(KEY_USAGE_JSON, json).apply();
             } catch (Throwable ignored2) {
             }
         }
