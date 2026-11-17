@@ -443,6 +443,14 @@ if [ "${ONLY_CRASH_SCENARIO:-0}" = "1" ]; then
 fi
 
 log "Рабочий стол: дерево интерфейса"
+# Сколько приложений вообще видит лаунчер: если 0, то пустой рабочий стол — это
+# не «не рисует», а «нечего рисовать», и причина в источнике данных, а не в UI.
+APPS_COUNT="$(adb shell cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER 2>/dev/null | grep -c "/" || true)"
+note "приложений-в-системе" "${APPS_COUNT:-0} activity с категорией LAUNCHER"
+# Что сохранено в раскладке после первого запуска: пустая страница здесь означает,
+# что автоматическая раскладка не построилась (это уже дефект приложения).
+LAYOUT="$(adb shell "run-as $PKG cat shared_prefs/doxaiz_prefs.xml" 2>/dev/null | grep -o 'desktop_layout_json[^<]*' | head -1)"
+note "раскладка" "${LAYOUT:-не сохранена}"
 dump_ui home "ui-home"
 if grep -q "нет ни одной подписи" "$OUT/ui-home.txt" 2>/dev/null; then
     note "ui-home" "подписей приложений нет — на чистой установке это ожидаемо"
