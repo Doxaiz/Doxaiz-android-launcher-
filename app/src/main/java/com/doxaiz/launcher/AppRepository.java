@@ -96,7 +96,10 @@ public final class AppRepository {
         if (task == null || iconExecutor.isShutdown()) return;
         try {
             iconExecutor.execute(task);
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            // RejectedExecutionException после shutdown штатен, но раньше сюда же
+            // попадали любые другие сбои очереди — теперь они видны в диагностике.
+            Diagnostics.record("AppRepository.iconQueue", t);
         }
     }
 
@@ -493,15 +496,25 @@ public final class AppRepository {
         }
         target.setImageDrawable(null);
         safeExecuteIcon(() -> {
-            // Пропускаем лишнюю работу, если ImageView уже переиспользован при быстром скролле
-            if (!entry.key.equals(target.getTag())) return;
-            final Drawable loaded = loadIconTwoLevel(entry.key);
-            if (loaded != null) {
-                mainHandler.post(() -> {
-                    if (entry.key.equals(target.getTag())) {
-                        target.setImageDrawable(loaded);
-                    }
-                });
+            try {
+                // Пропускаем лишнюю работу, если ImageView уже переиспользован при быстром скролле
+                if (!entry.key.equals(target.getTag())) return;
+                final Drawable loaded = loadIconTwoLevel(entry.key);
+                if (loaded != null) {
+                    mainHandler.post(() -> {
+                        try {
+                            if (entry.key.equals(target.getTag())) {
+                                target.setImageDrawable(loaded);
+                            }
+                        } catch (Throwable t) {
+                            Diagnostics.record("AppRepository.bindIcon.apply", t);
+                        }
+                    });
+                }
+            } catch (Throwable t) {
+                // Раньше сбой загрузки иконки был полностью невидим: пользователь
+                // видел пустую клетку без причины (F-07).
+                Diagnostics.record("AppRepository.bindIcon", t);
             }
         });
     }

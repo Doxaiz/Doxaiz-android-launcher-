@@ -21,12 +21,24 @@ public final class BackupHelper {
 
     private BackupHelper() {}
 
-    public static String exportBackupJson(Prefs prefs, DesktopModel desktop) {
+    /**
+     * Собирает JSON резервной копии.
+     *
+     * @param includeHidden включать ли список скрытых приложений, пользовательские
+     *                      категории и переименования. Это приватные данные: если
+     *                      пользователь хочет поделиться только раскладкой
+     *                      (скриншот, перенос на другой телефон), их не должно быть
+     *                      в файле вовсе — раньше они попадали туда всегда (F-06).
+     */
+    public static String exportBackupJson(Prefs prefs, DesktopModel desktop, boolean includeHidden) {
         try {
             desktop.save();
             JSONObject root = new JSONObject();
             root.put("app", "Doxaiz");
             root.put("format", 2);
+            // Явный признак для импорта и для человека, открывшего файл:
+            // отсутствие ключа не должно трактоваться как «скрытых приложений нет».
+            root.put("privacyIncluded", includeHidden);
 
             String desktopJson = prefs.getDesktopJson();
             if (desktopJson != null && !desktopJson.isEmpty()) {
@@ -71,7 +83,7 @@ public final class BackupHelper {
             s.put("autoNetworkAssist", prefs.isAutoNetworkAssist());
             s.put("autoNetMode", prefs.getAutoNetworkMode());
             s.put("autoNetWeakWifi", prefs.isAutoNetworkWeakWifi());
-            s.put("protectHidden", prefs.isProtectHiddenApps());
+            if (includeHidden) s.put("protectHidden", prefs.isProtectHiddenApps());
             s.put("showDrawerCategories", prefs.isShowDrawerCategories());
             s.put("showNotifDots", prefs.isShowNotificationDots());
             s.put("showRecent", prefs.isShowRecentApps());
@@ -90,7 +102,7 @@ public final class BackupHelper {
             s.put("dbarLowBattery", prefs.isDynamicBarLowBattery());
             s.put("dbarTimer", prefs.isDynamicBarTimer());
             s.put("dbarHotspot", prefs.isDynamicBarHotspot());
-            s.put("hiddenStdCats", prefs.getHiddenStdCategoriesRaw());
+            if (includeHidden) s.put("hiddenStdCats", prefs.getHiddenStdCategoriesRaw());
             s.put("hapticFeedback", prefs.isHapticFeedbackEnabled());
             root.put("settings", s);
 
@@ -99,16 +111,18 @@ public final class BackupHelper {
                 root.put("customSections", new JSONArray(customSecRaw));
             }
 
-            JSONArray hiddenArr = new JSONArray();
-            Set<String> hidden = prefs.getHiddenApps();
-            for (String k : hidden) hiddenArr.put(k);
-            root.put("hidden", hiddenArr);
+            if (includeHidden) {
+                JSONArray hiddenArr = new JSONArray();
+                Set<String> hidden = prefs.getHiddenApps();
+                for (String k : hidden) hiddenArr.put(k);
+                root.put("hidden", hiddenArr);
 
-            JSONObject renamesObj = new JSONObject();
-            for (Map.Entry<String, String> e : prefs.getCustomLabels().entrySet()) {
-                renamesObj.put(e.getKey(), e.getValue());
+                JSONObject renamesObj = new JSONObject();
+                for (Map.Entry<String, String> e : prefs.getCustomLabels().entrySet()) {
+                    renamesObj.put(e.getKey(), e.getValue());
+                }
+                root.put("renames", renamesObj);
             }
-            root.put("renames", renamesObj);
 
             JSONObject swipeUpObj = new JSONObject();
             for (Map.Entry<String, String> e : prefs.getAllIconSwipeUpTargets().entrySet()) {
@@ -128,8 +142,18 @@ public final class BackupHelper {
             }
             root.put("customCategories", customCatObj);
 
+            // Таблица переименований и категории собираются по именам пакетов,
+            // то есть тоже являются сведениями о приложениях пользователя.
+            // При экспорте «только раскладки» они не выгружаются.
+            if (!includeHidden) {
+                root.remove("renames");
+                root.remove("customCategories");
+            }
+
             return root.toString(2);
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            // Без этого пользователь видел «Ошибка формирования копии» без причины.
+            Diagnostics.record("BackupHelper.export", t);
             return null;
         }
     }
@@ -395,7 +419,10 @@ public final class BackupHelper {
             desktop.save(); // Queue a fresh recovery copy instead of retaining an older layout.
             prefs.invalidateCachesAfterImport();
             return true;
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            // Импорт откатился — раньше пользователь видел только «не удалось»,
+            // без понимания, на каком шаге и почему (F-07).
+            Diagnostics.record("BackupHelper.import", t);
             rollbackImportedState(prefs, desktop, rollback);
             return false;
         }
