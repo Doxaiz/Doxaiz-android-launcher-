@@ -49,6 +49,29 @@ jobs:
         if: failure()
         run: bash .github/scripts/gradle-failure.sh gradle-test.log
 
+      # Причина падения конкретного теста. Без этого в аннотациях видно только
+      # «LauncherChecksTest > X FAILED», а текст AssertionError остаётся в логе,
+      # который в части окружений недоступен.
+      - name: Причина падения теста
+        if: failure()
+        run: |
+          python3 - <<'PYEOF'
+          import glob, xml.etree.ElementTree as ET
+          def ann(level, title, text):
+              text = ' '.join(str(text).split())[:900]
+              print("::%s title=%s::%s" % (level, title, text))
+          found = False
+          for f in glob.glob('app/build/test-results/**/*.xml', recursive=True):
+              root = ET.parse(f).getroot()
+              for case in root.iter('testcase'):
+                  for bad in list(case.findall('failure')) + list(case.findall('error')):
+                      found = True
+                      msg = (bad.get('message') or '') + ' | ' + (bad.text or '')
+                      ann('error', case.get('name') or 'test', msg.strip()[:900])
+          if not found:
+              ann('warning', 'test-results', 'failure-элементы в XML не найдены — смотрите шаг gradle')
+          PYEOF
+
       - name: Сводка по тестам
         if: always()
         run: |
