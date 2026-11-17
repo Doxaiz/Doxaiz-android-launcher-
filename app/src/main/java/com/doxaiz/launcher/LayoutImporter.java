@@ -56,6 +56,14 @@ public final class LayoutImporter {
         public static Result notAttempted(int fallbackCols) {
             return new Result(false, "", 0, 0, fallbackCols);
         }
+
+        /**
+         * Есть ли что применять. Нужен вызывающему, чтобы не перестраивать
+         * рабочий стол впустую, когда чужая оболочка ничего не дала.
+         */
+        public boolean hasContent() {
+            return success || importedApps > 0 || importedFolders > 0;
+        }
     }
 
     private static final String[][] KNOWN_PROVIDERS = new String[][]{
@@ -460,6 +468,9 @@ public final class LayoutImporter {
             desktop.pages.add(new ArrayList<>());
         }
         desktop.normalizeAllPages(effectiveCols, false);
+        // Импорт — это тоже построенная раскладка: пустая страница после него
+        // не должна считаться «ещё не построенной» и перестраиваться.
+        desktop.markInitialized();
         desktop.save();
 
         return new Result(true, sourceName, importedApps, importedFolders, effectiveCols);

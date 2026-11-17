@@ -26,8 +26,33 @@ APK="$(find "${APK_PATH:-apk}" -name '*.apk' | head -1)"
 log() { echo "::group::$*"; }
 endlog() { echo "::endgroup::"; }
 
+# Метка прохода (см. SKIP_CRASH_SCENARIO/ONLY_CRASH_SCENARIO): два прохода
+# выполняются в одном job, и без метки их заметки в отчёте смешиваются —
+# непонятно, к какому проходу относится «узлов=23».
+PASS_TAG="стол"
+if [ "${ONLY_CRASH_SCENARIO:-0}" = "1" ]; then PASS_TAG="аварийный"; fi
+
+# GitHub показывает не больше 10 notice-аннотаций на шаг, остальные молча
+# отбрасываются: в прогоне 44041251960 из-за этого пропали ровно те заметки,
+# которые нужны для отчёта об отзывчивости («поиск-метрики»). Поэтому крупные
+# дампы интерфейса идут только в отчёт шага (summary), а в аннотации
+# отправляется короткая строка. summary() ниже пишет полный текст.
 note() {
-    echo "::notice title=$1::$(printf '%s' "$2" | tr '\r\n' '  ' | cut -c1-900)"
+    local text
+    text="$(printf '%s' "$2" | tr '\r\n' '  ' | cut -c1-${NOTE_MAX_CHARS:-240})"
+    echo "::notice title=[$PASS_TAG] $1::$text"
+}
+
+# Дописывает блок в отчёт шага: он не ограничен 10 записями и приложен к run.
+summary() {
+    if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+        {
+            echo "### [$PASS_TAG] $1"
+            echo '```'
+            printf '%s\n' "$2"
+            echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"
+    fi
 }
 
 # Системные диалоги («Pixel Launcher isn't responding», «System UI не отвечает»)
@@ -60,6 +85,39 @@ PYEOF
         note "system-dialog" "закрываю системный диалог ANR (${btn})"
         adb shell input tap $btn
         sleep 3
+        return 0
+    fi
+    return 1
+}
+
+# Нажатие по элементу с заданной подписью доступности.
+# Нужно, чтобы открывать каталог детерминированно: свайп по рабочему столу
+# эмулятор иногда "съедает" (это уже стоило нам четырёх попыток и красной
+# сборки), а кнопка в доке имеет contentDescription и находится всегда.
+tap_by_desc() {  # $1 = текст content-desc
+    adb shell uiautomator dump /sdcard/ui-tap.xml >/dev/null 2>&1 || true
+    adb shell cat /sdcard/ui-tap.xml > "$OUT/ui-tap.xml" 2>/dev/null || true
+    local xy
+    xy="$(python3 - "$OUT/ui-tap.xml" "$1" <<'PYEOF' 2>/dev/null || true
+import re, sys
+try:
+    xml = open(sys.argv[1], encoding='utf-8', errors='replace').read()
+except OSError:
+    raise SystemExit
+want = sys.argv[2]
+for nd in re.findall(r'<node [^>]*>', xml):
+    m = re.search(r'content-desc="([^"]*)"', nd)
+    if not m or want not in m.group(1):
+        continue
+    b = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', nd)
+    if b:
+        x1, y1, x2, y2 = map(int, b.groups())
+        print(f"{(x1+x2)//2} {(y1+y2)//2}")
+        break
+PYEOF
+)"
+    if [ -n "${xy:-}" ]; then
+        adb shell input tap $xy >/dev/null 2>&1 || true
         return 0
     fi
     return 1
@@ -99,13 +157,18 @@ for r in rows:
     cur += r + ' ; '
 if cur:
     chunks.append(cur)
-# Аннотаций на прогон немного (лимит GitHub), поэтому в аннотацию — только
-# счётчик и первый кусок, полный дамп пишется в отчёт шага и в файл.
-print(f"::notice title={title}::узлов={len(nodes)}; {chunks[0] if chunks else ''}")
+# Никаких аннотаций отсюда: GitHub показывает только 10 notice на шаг, и они
+# нужны для выводов («узлов в каталоге», «раскладка», метрики). Полный дамп
+# пишется в файл и в отчёт шага.
+print(chunks[0] if chunks else '')
 if not rows:
     print(f"::error title={title}::дерево пустое — на экране нет UI")
 PYEOF
-    cat "$OUT/ui-$1.txt"
+    local nodes first
+    nodes="$(sed -n 's/^узлов=//p' "$OUT/ui-$1.txt" 2>/dev/null | head -1)"
+    first="$(sed -n '2p' "$OUT/ui-$1.txt" 2>/dev/null)"
+    note "$1" "узлов=${nodes:-0}; ${first:0:170}"
+    summary "$1" "$(cat "$OUT/ui-$1.txt" 2>/dev/null | head -c 8000)"
 }
 
 # Проверка падений именно НАШЕГО процесса.
@@ -198,7 +261,8 @@ adb shell cmd role add-role-holder android.app.role.HOME "$PKG" >/dev/null 2>&1 
 adb shell cmd package set-home-activity "$PKG/.MainActivity" >/dev/null 2>&1 || true
 RESOLVED="$(adb shell cmd package resolve-activity --brief -c android.intent.category.HOME -a android.intent.action.MAIN 2>/dev/null | tr -d '\r' | tail -1)"
 echo "resolve HOME -> $RESOLVED" | tee "$OUT/home-role.txt"
-note "home-resolve" "$RESOLVED"
+# В аннотации лимит 10 на шаг — статичные строки уводим в отчёт шага.
+summary "home-resolve" "$RESOLVED"
 if echo "$RESOLVED" | grep -q "$PKG"; then
     note "home" "Doxaiz выбран системным HOME — манифест и intent-filter корректны"
 else
@@ -256,6 +320,15 @@ endlog
 
 check_crash "старт" || true
 
+if [ "${SKIP_CRASH_SCENARIO:-0}" = "1" ]; then
+    # Второй проход сценария (после аварийного): рабочий стол должен быть чистым.
+    # Аварийный сценарий специально подкладывает состояние сбоя и уводит фокус на
+    # штатный лаунчер — если выполнять его перед проверкой рабочего стола, все
+    # дальнейшие шаги смотрят на аварийный экран, а не на лаунчер (так и было:
+    # в отчёте «Рабочий стол» показывался экран «Doxaiz не запустился»).
+    summary "режим" "проход без аварийного сценария: проверяем рабочий стол и каталог"
+    endlog
+else
 log "Аварийный возврат: аварийный экран и уход на системный лаунчер"
 
 # Проверяем поведение, а не рассуждение. Состояние «предыдущий запуск рабочего
@@ -380,9 +453,30 @@ if [ "$scenario_ok" = "1" ]; then
     fi
     note "crash-restored" "$(tr '\n' ' ' < "$OUT/crash-restored-focus.txt" | cut -c1-300)"
 fi
-endlog
+fi
+
+if [ "${ONLY_CRASH_SCENARIO:-0}" = "1" ]; then
+    # Второй проход: интересует только аварийный возврат выше.
+    log "Итог (проход аварийного возврата)"
+    if [ -s "$OUT/failures.txt" ]; then
+        echo "ПРОВЕРКА НЕ ПРОЙДЕНА:"
+        cat "$OUT/failures.txt"
+        exit 1
+    fi
+    echo "Пройдено: аварийный экран после первого сбоя и возврат при втором."
+    exit 0
+fi
 
 log "Рабочий стол: дерево интерфейса"
+# Сколько приложений вообще видит лаунчер: если 0, то пустой рабочий стол — это
+# не «не рисует», а «нечего рисовать», и причина в источнике данных, а не в UI.
+APPS_COUNT="$(adb shell cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER 2>/dev/null | grep -c "/" || true)"
+note "приложений-в-системе" "${APPS_COUNT:-0} activity с категорией LAUNCHER"
+# Что сохранено в раскладке после первого запуска: пустая страница здесь означает,
+# что автоматическая раскладка не построилась (это уже дефект приложения).
+LAYOUT="$(adb shell "run-as $PKG cat shared_prefs/doxaiz_prefs.xml" 2>/dev/null | grep -o 'desktop_layout_json[^<]*' | head -1)"
+note "раскладка" "${LAYOUT:-не сохранена}"
+summary "раскладка" "${LAYOUT:-не сохранена}"
 dump_ui home "ui-home"
 if grep -q "нет ни одной подписи" "$OUT/ui-home.txt" 2>/dev/null; then
     note "ui-home" "подписей приложений нет — на чистой установке это ожидаемо"
@@ -396,7 +490,10 @@ log "Каталог приложений"
 # свайп, ожидание и дамп; повторы нужны из-за нестабильности эмулятора.
 DRAWER_NODES=0
 for attempt in 1 2 3 4; do
-    adb shell input swipe 540 1700 540 600 250
+    # Сначала кнопка «Все приложения» в доке (детерминированно), затем свайп.
+    if ! tap_by_desc "Все приложения"; then
+        adb shell input swipe 540 1700 540 600 250
+    fi
     sleep 4
     dump_ui drawer "ui-drawer"
     DRAWER_NODES="$(sed -n 's/^узлов=//p' "$OUT/ui-drawer.txt" 2>/dev/null | head -1)"
@@ -408,6 +505,7 @@ for attempt in 1 2 3 4; do
     sleep 2
 done
 note "drawer" "узлов в каталоге=${DRAWER_NODES:-0}"
+summary "попытки-каталога" "$(cat "$OUT/drawer-attempts.txt" 2>/dev/null)"
 # Открытие каталога свайпом на эмуляторе нестабильно: в прогонах, где жест
 # срабатывает, дерево каталога содержит 117 узлов (поиск, чипы категорий,
 # алфавитная полоса, сетка иконок), и это уже зафиксировано. Но загруженный
@@ -437,10 +535,48 @@ done
 adb shell dumpsys gfxinfo "$PKG" > "$OUT/gfxinfo-drawer.txt" 2>/dev/null || true
 grep -E "Total frames rendered|Janky frames:|50th percentile|90th percentile|95th percentile|Number Missed Vsync|Number Slow UI thread|Number Slow bitmap uploads" \
     "$OUT/gfxinfo-drawer.txt" | tee "$OUT/gfxinfo-summary.txt"
-note "gfxinfo-drawer" "$(tr '\n' ' ' < "$OUT/gfxinfo-summary.txt" | cut -c1-700)"
-note "gfxinfo-note" "эмулятор рисует через swiftshader: числа относительные, FPS на телефоне не подтверждают"
+note "gfxinfo-прокрутка" "$(tr '\n' ' ' < "$OUT/gfxinfo-summary.txt" | cut -c1-240)"
+summary "gfxinfo-прокрутка" "$(cat "$OUT/gfxinfo-summary.txt")"
+# swiftshader: числа сравнимы только между прогонами — пишем в summary, не в аннотацию:
+# каждая лишняя аннотация вытесняет заметку, которая важнее (см. note()).
 adb exec-out screencap -p > "$OUT/screen-drawer.png" 2>/dev/null || true
 check_crash "прокрутка" || true
+endlog
+
+log "Отзывчивость: набор текста в поиске каталога"
+# Измеряем не «на глаз», а по кадрам: gfxinfo собирает статистику по кадрам
+# нашего процесса. Набираем запрос в поиске каталога и смотрим, сколько кадров
+# пропущено и какая у них 90-я перцентиль длительности. Эмулятор рисует
+# программно, поэтому абсолютные числа не равны телефону — значение имеет
+# сравнение прогонов между собой и отсутствие «залипших» кадров на сотни мс.
+if [ "${DRAWER_NODES:-0}" -ge 40 ]; then
+    adb shell input swipe 540 1700 540 600 250 >/dev/null 2>&1 || true
+    sleep 3
+    adb shell dumpsys gfxinfo "$PKG" reset >/dev/null 2>&1 || true
+    # Поиск в каталоге — первый EditText в верхней части экрана.
+    adb shell input tap 540 300 >/dev/null 2>&1 || true
+    sleep 2
+    START_MS=$(date +%s%3N)
+    for ch in s e t t i n g; do
+        adb shell input text "$ch" >/dev/null 2>&1 || true
+        sleep 0.12
+    done
+    END_MS=$(date +%s%3N)
+    sleep 2
+    adb shell dumpsys gfxinfo "$PKG" > "$OUT/gfxinfo-search.txt" 2>/dev/null || true
+    grep -E "Total frames rendered|Janky frames:|50th percentile|90th percentile|95th percentile|Number Missed Vsync|Number Slow UI thread" \
+        "$OUT/gfxinfo-search.txt" | tee "$OUT/gfxinfo-search-summary.txt"
+    echo "ввод занял $((END_MS - START_MS)) мс" | tee -a "$OUT/gfxinfo-search-summary.txt"
+    # Ключевые числа — в аннотацию (их видно сразу в списке проверок), полный
+    # текст с оговоркой про swiftshader — в отчёт шага.
+    note "поиск-метрики" "$(tr '\n' ' ' < "$OUT/gfxinfo-search-summary.txt" | cut -c1-240)"
+    summary "поиск-метрики" "$(cat "$OUT/gfxinfo-search-summary.txt")
+swiftshader: числа сравнимы только между прогонами, не с телефоном."
+    adb shell input keyevent KEYCODE_BACK >/dev/null 2>&1 || true
+    sleep 1
+else
+    note "поиск-метрики" "каталог не открылся — замер набора текста пропущен"
+fi
 endlog
 
 log "Итог"
@@ -449,7 +585,7 @@ if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     {
         echo "## Doxaiz: проверка на эмуляторе API 34"
         echo
-        for f in ui-home.txt ui-drawer.txt ui-crash-safe.txt crash-fallback-focus.txt crash-restored-focus.txt gfxinfo-summary.txt device.txt focus-home.txt home-role.txt; do
+        for f in ui-home.txt ui-drawer.txt ui-crash-safe.txt crash-fallback-focus.txt crash-restored-focus.txt gfxinfo-summary.txt gfxinfo-search-summary.txt drawer-attempts.txt device.txt focus-home.txt home-role.txt home-resolve.txt; do
             [ -f "$OUT/$f" ] || continue
             echo "### $f"
             echo '```'

@@ -659,6 +659,8 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     @Override
     protected void onResume() {
         super.onResume();
+        // Роль HOME могла измениться в системном диалоге, пока мы были в фоне.
+        invalidateDefaultLauncherCache();
         if (animeBackdrop != null && prefs != null)
             animeBackdrop.applyConfig(prefs.getWallpaperMode(), prefs.getVisualStyle(), prefs.getWallpaperDimLevel());
         syncAmbientParticles();
@@ -861,6 +863,16 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             dynamicBarHelper.refresh();
         }
         rebuildDesktop();
+        // Диагностика для отчёта CI и для пользователя: если рабочий стол
+        // оказался пустым при живом списке приложений, причина должна быть
+        // видна, а не выясняться догадками. Это единственный случай, когда
+        // пустой стол — дефект, а не отсутствие приложений.
+        if (visibleApps.size() >= 2 && !desktop.hasContent()) {
+            Diagnostics.record("MainActivity.emptyDesktop",
+                    new IllegalStateException("приложений=" + visibleApps.size()
+                            + ", страниц=" + desktop.pages.size()
+                            + ", док=" + desktop.dock.size()));
+        }
         if (openFolderId != null && openFolderPage >= 0 && modalOverlay != null
                 && modalOverlay.getVisibility() == View.VISIBLE) {
             DesktopItem folder = desktop.findFolder(openFolderPage, openFolderId);
@@ -1285,7 +1297,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             @Override
             public void onTextChanged(CharSequence s, int a, int b, int c) {
                 drawerClearBtn.setVisibility(s.length() > 0 ? View.VISIBLE : View.GONE);
-                applyFilter(s.toString(), true);
+                scheduleDrawerFilter(s.toString());
             }
             @Override public void afterTextChanged(Editable s) {}
         });
@@ -1294,6 +1306,8 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                     || actionId == EditorInfo.IME_ACTION_GO
                     || (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER
                     && event.getAction() == KeyEvent.ACTION_DOWN)) {
+                // Enter — это «показать результат сейчас», без ожидания задержки.
+                flushPendingDrawerFilter();
                 if (!filteredApps.isEmpty()) {
                     launchAndReturnHome(filteredApps.get(0), v);
                 }
@@ -2430,8 +2444,15 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         }
         appsByKey.clear();
         appsByKey.putAll(byKey);
+        // Состав приложений изменился — порядок каталога и подпись панели
+        // категорий нужно построить заново.
+        invalidateDrawerSort();
+        appsCompositionSignature = null;
 
         boolean bottomAlign = prefs.isHomeBottomAligned();
+        // Пустая сохранённая раскладка (pages=[[]]) не считается готовой: иначе
+        // авто-раскладка не строилась бы никогда (см. DesktopModel.isInitialized)
+        // и рабочий стол оставался пустым при 19 установленных приложениях.
         if (!desktop.isInitialized() && !visible.isEmpty()) {
             // Базу штатной оболочки НЕ читаем в UI-потоке. Это запрос к чужому
             // ContentProvider: на Android 14 он обычно запрещён, а если провайдер
@@ -2483,6 +2504,17 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
         if (currentScreen == SCREEN_SETTINGS) {
             rebuildSettingsContent();
+        }
+    }
+
+    /** Приложение вместе с заранее посчитанной оценкой совпадения при поиске. */
+    private static final class ScoredEntry {
+        final AppEntry entry;
+        final int score;
+
+        ScoredEntry(AppEntry entry, int score) {
+            this.entry = entry;
+            this.score = score;
         }
     }
 
@@ -3847,6 +3879,9 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             }
             int next = (prefs.getDrawerSortMode() + 1) % 3;
             prefs.setDrawerSortMode(next);
+            // Режим сортировки входит в подпись панели категорий и в кэш порядка.
+            appsCompositionSignature = null;
+            invalidateDrawerSort();
             applyFilter(drawerSearchInput.getText().toString(), false);
         });
         drawerCategoryRow.addView(sortChip);
@@ -4026,15 +4061,134 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         return chip;
     }
 
+    /**
+     * Задержка пересчёта списка при наборе.
+     *
+     * Раньше каждое нажатие клавиши запускало полный пересчёт: проход по всем
+     * приложениям с подготовкой запроса, сортировку с matchScore на каждую пару,
+     * notifyDataSetChanged() для всего списка, пересборку чипов категорий,
+     * «частых» приложений и алфавитной полосы. На телефоне с 200–300
+     * приложениями набор текста отставал от пальца. 60 мс — меньше, чем разрыв
+     * между двумя нажатиями при обычном темпе, поэтому «мигания» нет, зато
+     * промежуточные буквы вообще не считаются.
+     */
+    /**
+     * Задержка перед пересчётом списка каталога после нажатия клавиши.
+     *
+     * 60 мс — это «через один кадр»: быстрое нажатие нескольких клавиш (а при
+     * наборе текста между кадрами их почти всегда несколько) даёт ОДИН пересчёт
+     * вместо одного на клавишу. Больше 80 мс делать нельзя: пауза начинает
+     * ощущаться как «поиск тормозит», хотя на самом деле это ожидание.
+     */
+    private static final long DRAWER_FILTER_DELAY_MS = 60L;
+
+    /**
+     * Максимальное время, которое один пересчёт списка каталога может занимать
+     * без перерыва. Набор продолжается, поэтому после этого бюджет задержки
+     * снижается: иначе при большой библиотеке и медленном устройстве задержка
+     * складывалась бы с самим пересчётом и текст «отставал» от пальца.
+     */
+    private static final long DRAWER_FILTER_TIME_BUDGET_NS = 6_000_000L;
+    private final Runnable pendingDrawerFilter = this::runPendingDrawerFilter;
+    /** Сколько занял последний пересчёт каталога: 0 — ещё не считали. */
+    private long lastDrawerFilterCostNs = 0L;
+    /** Запрос, который нужно посчитать после задержки; null — ничего не ждёт. */
+    private String pendingDrawerFilterQuery = null;
+
+    /** Порядок всех приложений каталога для текущего режима сортировки. */
+    private final List<AppEntry> sortedVisibleApps = new ArrayList<>();
+    private int sortedVisibleMode = -2;
+    private int sortedVisibleCount = -1;
+
+    /**
+     * Возвращает приложения в нужном порядке для текущего режима сортировки.
+     *
+     * Кэшируется порядок ПОЛНОГО списка (visibleApps), а не отфильтрованного:
+     * фильтрация сохраняет порядок, поэтому результат верен для любой выборки —
+     * раздела, категории или поискового запроса. Раньше на каждое нажатие
+     * клавиши выполнялась повторная сортировка ~250 элементов и построение Map
+     * счётчиков запусков, хотя порядок оставался прежним.
+     *
+     * Кэш сбрасывается при смене режима, изменении размера списка и явно
+     * (invalidateDrawerSort) — после запуска приложения и после установки/
+     * удаления.
+     */
+    private List<AppEntry> drawerOrderedApps() {
+        int sortMode = prefs.getDrawerSortMode();
+        if (sortMode != Prefs.DRAWER_SORT_FREQ && sortMode != Prefs.DRAWER_SORT_NEW) {
+            return visibleApps;
+        }
+        if (sortedVisibleMode == sortMode && sortedVisibleCount == visibleApps.size()) {
+            return sortedVisibleApps;
+        }
+        sortedVisibleApps.clear();
+        sortedVisibleApps.addAll(visibleApps);
+        if (sortMode == Prefs.DRAWER_SORT_FREQ) {
+            final Map<String, Integer> counts = prefs.getLaunchCountsMap();
+            Collections.sort(sortedVisibleApps, (a, b) -> {
+                int ca = counts.containsKey(a.key) ? counts.get(a.key) : 0;
+                int cb = counts.containsKey(b.key) ? counts.get(b.key) : 0;
+                if (ca != cb) return Integer.compare(cb, ca);
+                return a.displayLabel.compareToIgnoreCase(b.displayLabel);
+            });
+        } else {
+            Collections.sort(sortedVisibleApps, (a, b) -> {
+                int cmp = Long.compare(b.firstInstallTime, a.firstInstallTime);
+                if (cmp != 0) return cmp;
+                return a.displayLabel.compareToIgnoreCase(b.displayLabel);
+            });
+        }
+        sortedVisibleMode = sortMode;
+        sortedVisibleCount = visibleApps.size();
+        return sortedVisibleApps;
+    }
+
+    /** Сброс порядка каталога: после запуска приложения, установки или смены режима. */
+    private void invalidateDrawerSort() {
+        sortedVisibleMode = -2;
+        sortedVisibleCount = -1;
+    }
+
+    private void scheduleDrawerFilter(String query) {
+        pendingDrawerFilterQuery = query;
+        uiHandler.removeCallbacks(pendingDrawerFilter);
+        // Если предыдущий пересчёт не уложился в бюджет, следующий считаем сразу:
+        // задержка нужна, чтобы склеивать нажатия, а не чтобы добавлять лаг.
+        long delay = lastDrawerFilterCostNs > DRAWER_FILTER_TIME_BUDGET_NS
+                ? 0L : DRAWER_FILTER_DELAY_MS;
+        uiHandler.postDelayed(pendingDrawerFilter, delay);
+    }
+
+    private void runPendingDrawerFilter() {
+        final String q = pendingDrawerFilterQuery;
+        pendingDrawerFilterQuery = null;
+        if (q == null || isFinishing() || isDestroyed()) return;
+        // Пока шла задержка, экран мог смениться (пользователь ушёл в настройки) —
+        // тогда пересчитывать список незачем, он всё равно не виден.
+        if (currentScreen != SCREEN_DRAWER && currentScreen != SCREEN_HOME) return;
+        // Стоимость пересчёта нужна для решения «копить нажатия или считать сразу».
+        long startedNs = System.nanoTime();
+        applyFilter(q, true);
+        lastDrawerFilterCostNs = System.nanoTime() - startedNs;
+    }
+
+    /** Досчитывает отложенный фильтр немедленно (Enter, закрытие каталога). */
+    private void flushPendingDrawerFilter() {
+        if (pendingDrawerFilterQuery == null) return;
+        uiHandler.removeCallbacks(pendingDrawerFilter);
+        runPendingDrawerFilter();
+    }
+
     private void applyFilter(String rawQuery, boolean fromUserTyping) {
         filteredApps.clear();
         final String q = rawQuery != null ? rawQuery.trim() : "";
         String emptyMsg = "Ничего не найдено";
         if (q.isEmpty()) {
+            final List<AppEntry> ordered = drawerOrderedApps();
             if (prefs.isShowDrawerCategories() && selectedCustomSectionId != null) {
                 CustomSection sec = CustomSection.findById(prefs.getCustomSections(), selectedCustomSectionId);
                 if (sec != null) {
-                    for (AppEntry e : visibleApps) {
+                    for (AppEntry e : ordered) {
                         if (sec.packages.contains(e.packageName)) filteredApps.add(e);
                     }
                     if (filteredApps.isEmpty()) {
@@ -4042,43 +4196,35 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                     }
                 } else {
                     selectedCustomSectionId = null;
-                    filteredApps.addAll(visibleApps);
+                    filteredApps.addAll(ordered);
                 }
             } else if (prefs.isShowDrawerCategories() && selectedDrawerCategory != AppCategoryHelper.CAT_ALL) {
-                for (AppEntry e : visibleApps) {
+                for (AppEntry e : ordered) {
                     if (e.category == selectedDrawerCategory) filteredApps.add(e);
                 }
             } else {
-                filteredApps.addAll(visibleApps);
-            }
-            int sortMode = prefs.getDrawerSortMode();
-            if (sortMode == Prefs.DRAWER_SORT_FREQ) {
-                final Map<String, Integer> counts = prefs.getLaunchCountsMap();
-                Collections.sort(filteredApps, (a, b) -> {
-                    int ca = counts.containsKey(a.key) ? counts.get(a.key) : 0;
-                    int cb = counts.containsKey(b.key) ? counts.get(b.key) : 0;
-                    if (ca != cb) return Integer.compare(cb, ca);
-                    return a.displayLabel.compareToIgnoreCase(b.displayLabel);
-                });
-            } else if (sortMode == Prefs.DRAWER_SORT_NEW) {
-                Collections.sort(filteredApps, (a, b) -> {
-                    int cmp = Long.compare(b.firstInstallTime, a.firstInstallTime);
-                    if (cmp != 0) return cmp;
-                    return a.displayLabel.compareToIgnoreCase(b.displayLabel);
-                });
+                filteredApps.addAll(ordered);
             }
         } else {
             // Предвычисляем варианты запроса 1 раз вместо повторения на каждое приложение и каждую пару сортировки
             final SearchHelper.PreparedQuery pq = SearchHelper.prepare(q);
+            // Оценку совпадения считаем ОДИН раз на приложение. Раньше она
+            // вычислялась внутри компаратора, то есть дважды на каждое
+            // сравнение (O(n log n) вместо O(n) на каждое нажатие клавиши):
+            // при 200 приложениях это ~1500 лишних вычислений на букву, и они
+            // шли в главном потоке прямо во время набора.
+            final List<ScoredEntry> scored = new ArrayList<>();
             for (AppEntry e : visibleApps) {
-                if (SearchHelper.matches(e, pq)) filteredApps.add(e);
+                if (SearchHelper.matches(e, pq)) {
+                    scored.add(new ScoredEntry(e, SearchHelper.matchScore(e, pq)));
+                }
             }
-            Collections.sort(filteredApps, (a, b) -> {
-                int sa = SearchHelper.matchScore(a, pq);
-                int sb = SearchHelper.matchScore(b, pq);
-                if (sa != sb) return Integer.compare(sb, sa);
-                return a.labelLower.compareTo(b.labelLower);
+            Collections.sort(scored, (a, b) -> {
+                if (a.score != b.score) return Integer.compare(b.score, a.score);
+                return a.entry.labelLower.compareTo(b.entry.labelLower);
             });
+            filteredApps.clear();
+            for (ScoredEntry se : scored) filteredApps.add(se.entry);
         }
         boolean hasSmart = rebuildDrawerSmartBox(q);
         drawerEmptyText.setText(emptyMsg);
@@ -4090,6 +4236,9 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         boolean continuingSearch = (fromUserTyping && prevLen > 0 && q.length() > 0);
         // Во время продолжения набора текста в поиске не пересоздаём скрытые чипы категорий и блок частых приложений
         if (!continuingSearch) {
+            // «Частые» приложения зависят от нажатий, а не от текста запроса: при
+            // наборе пересобирать их незачем (это десятки View на каждое нажатие).
+            rebuildDrawerRecent();
             // Кэш чипов категорий: при простом переключении сортировки/поиска набор
             // категорий и их счётчики не меняются, а раньше панель пересоздавалась
             // целиком (десятки View + фоновые drawable) на каждое нажатие.
@@ -4098,7 +4247,6 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                 lastCategoryPanelSig = catSig;
                 rebuildDrawerCategories();
             }
-            rebuildDrawerRecent();
             refreshDrawerBgPill();
             rebuildAlphabetBar();
         }
@@ -4143,17 +4291,30 @@ public class MainActivity extends Activity implements AppRepository.Listener {
      * Подпись панели категорий. Учитывает только то, от чего зависит её отрисовка:
      * режим сортировки, выбранный раздел/категорию, число приложений и их категории.
      */
+    /** Состав приложений для кэша панели категорий (см. buildCategorySignature). */
+    private String appsCompositionSignature = null;
+
+    /**
+     * Подпись состояния панели категорий.
+     *
+     * Разделена на две части: состав приложений (меняется только в onAppsUpdated)
+     * и выбранный раздел/категория (меняется по нажатию). Раньше строка на ~250
+     * символов строилась заново на каждое нажатие переключателя в настройках —
+     * вместе с проходом по всему списку приложений.
+     */
     private String buildCategorySignature(String query) {
         if (drawerSearchInput != null && !query.isEmpty()) return "search";
-        StringBuilder sb = new StringBuilder(96);
-        sb.append(prefs.getDrawerSortMode()).append(':')
-                .append(prefs.isShowDrawerCategories())
-                .append(':').append(selectedCustomSectionId).append(':')
-                .append(selectedDrawerCategory).append(':').append(visibleApps.size());
-        for (AppEntry e : visibleApps) {
-            sb.append(',').append(e.category);
+        if (appsCompositionSignature == null) {
+            StringBuilder comp = new StringBuilder(320);
+            comp.append(prefs.getDrawerSortMode()).append(':')
+                    .append(prefs.isShowDrawerCategories()).append(':')
+                    .append(visibleApps.size());
+            for (AppEntry e : visibleApps) {
+                comp.append(',').append(e.category);
+            }
+            appsCompositionSignature = comp.toString();
         }
-        return sb.toString();
+        return appsCompositionSignature + ':' + selectedCustomSectionId + ':' + selectedDrawerCategory;
     }
 
     private void rebuildAlphabetBar() {
@@ -4182,10 +4343,6 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         // Набор приложений и их буквы не изменились — трогать полосу незачем.
         if (nextSig.equals(lastAlphabetBarSig)
                 && alphabetBar.getChildCount() == alphabetPositions.size() + 1) {
-            alphabetBar.setVisibility(View.VISIBLE);
-            return;
-        }
-        if (nextSig.equals(lastAlphabetBarSig) && alphabetBar.getChildCount() == alphabetPositions.size() + 1) {
             alphabetBar.setVisibility(View.VISIBLE);
             return;
         }
@@ -4234,6 +4391,9 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         }
         prefs.recordAppLaunch(entry.key);
         prefs.invalidateNewAppCache();
+        // Запуск меняет счётчик частоты: порядок «по частоте» пересчитается при
+        // следующем открытии каталога, а не будет взятым из устаревшего кэша.
+        invalidateDrawerSort();
         if (wasNew) {
             lastDrawerRecentSig = "";
             rebuildDesktop();
@@ -8544,16 +8704,46 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     // Системные переходы и хелперы
     // =========================================================================
 
+    /** Кэш ответа «мы ли домашняя оболочка»: resolveActivity — запрос к PackageManager. */
+    private static final long DEFAULT_LAUNCHER_TTL_MS = 3000L;
+    private Boolean defaultLauncherCached = null;
+    private long defaultLauncherCachedAtMs = 0L;
+
+    /**
+     * Является ли Doxaiz домашней оболочкой по умолчанию.
+     *
+     * resolveActivity() — это запрос к системному PackageManager. Настройки
+     * перестраиваются целиком на каждое нажатие переключателя (39 мест), и
+     * карточка готовности запрашивала его дважды за перестройку. Ответ кэшируется
+     * на 3 с и сбрасывается при возврате в onResume: за это время роль HOME
+     * измениться не может, а после системного диалога экран как раз возобновляется.
+     */
     private boolean isDefaultLauncher() {
+        long now = System.currentTimeMillis();
+        Boolean cached = defaultLauncherCached;
+        if (cached != null && (now - defaultLauncherCachedAtMs) <= DEFAULT_LAUNCHER_TTL_MS
+                && defaultLauncherCachedAtMs <= now) {
+            return cached;
+        }
+        boolean result;
         try {
             Intent intent = new Intent(Intent.ACTION_MAIN);
             intent.addCategory(Intent.CATEGORY_HOME);
             ResolveInfo ri = getPackageManager().resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY);
-            return ri != null && ri.activityInfo != null
+            result = ri != null && ri.activityInfo != null
                     && getPackageName().equals(ri.activityInfo.packageName);
         } catch (Throwable ignored) {
-            return false;
+            result = false;
         }
+        defaultLauncherCached = result;
+        defaultLauncherCachedAtMs = now;
+        return result;
+    }
+
+    /** Сброс кэша роли HOME (после системного диалога выбора оболочки). */
+    private void invalidateDefaultLauncherCache() {
+        defaultLauncherCached = null;
+        defaultLauncherCachedAtMs = 0L;
     }
 
     private void openDefaultHomeSettings() {
@@ -9786,7 +9976,10 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         // Флаг ставим и при неуспехе: повторять попытку каждый запуск бессмысленно,
         // а пользователь при желании запускает импорт вручную из настроек.
         prefs.setSystemLayoutImportDone(true);
-        if (!res.success) return;
+        // applySnapshot успевает записать раскладку и сам; если применять было
+        // нечего (меньше двух иконок), рабочий стол не перестраиваем — иначе
+        // пользователь видит мигание и тост «перенесено 0 иконок».
+        if (!res.success || !res.hasContent()) return;
         ensurePageExists();
         rebuildDesktop();
         Toast.makeText(this,
@@ -10159,6 +10352,8 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == REQ_ROLE_HOME) {
+            // Пользователь мог выбрать другую оболочку — перечитываем роль.
+            invalidateDefaultLauncherCache();
             if (currentScreen == SCREEN_SETTINGS) {
                 rebuildSettingsContent();
             }

@@ -45,6 +45,8 @@ public final class Audit60Tests {
         iconDownsampleOnlyForLargeFiles();
         importTwoPhaseSafety();
         diskStatsCacheIsIsolated();
+        importResultHasContent();
+        emptyLayoutIsNotInitialized();
 
         System.out.println("Audit60Tests: " + n + " проверок пройдено");
     }
@@ -272,6 +274,70 @@ public final class Audit60Tests {
         }
         //noinspection ResultOfMethodCallIgnored
         f.delete();
+    }
+
+    // ------------------------------------------- 7. применение импорта
+
+    /** Result.hasContent: «прочитали, но применять нечего» отличается от успеха. */
+    private static void importResultHasContent() {
+        LayoutImporter.Result empty = LayoutImporter.Result.notAttempted(4);
+        check(!empty.hasContent(), "notAttempted — применять нечего");
+
+        LayoutImporter.Result oneApp = new LayoutImporter.Result(true, "XOS", 1, 0, 5);
+        check(oneApp.hasContent(), "одна иконка — уже содержимое");
+
+        LayoutImporter.Result folderOnly = new LayoutImporter.Result(true, "XOS", 0, 1, 5);
+        check(folderOnly.hasContent(), "папка без приложений — тоже содержимое");
+
+        LayoutImporter.Result failure = new LayoutImporter.Result(false, "", 0, 0, 4);
+        check(!failure.hasContent(), "неуспех — применять нечего");
+    }
+
+    // ------------------------------- 8. пустая раскладка не «уже построена»
+
+    /**
+     * Главный дефект 6.0: на чистой установке рабочий стол оставался пустым.
+     *
+     * Модель, у которой нет ни дока, ни иконок, НЕ должна считать себя готовой —
+     * иначе авто-раскладка не строится никогда. И наоборот: пустой стол после
+     * того, как пользователь сам всё убрал (флаг built), перестраивать нельзя.
+     */
+    private static void emptyLayoutIsNotInitialized() throws Exception {
+        Prefs prefs = newPrefs(new FakePrefs());
+        DesktopModel fresh = new DesktopModel(prefs);
+        check(!fresh.isInitialized(), "новая модель — раскладка не построена");
+        check(!fresh.hasContent(), "новая модель — содержимого нет");
+
+        // Именно этот случай ломал установку: одна пустая страница, ноль иконок.
+        fresh.addPage();
+        check(!fresh.pages.isEmpty(), "страница добавлена");
+        check(!fresh.isInitialized(), "pages=[[]] — ещё НЕ готовая раскладка");
+        check(!fresh.hasContent(), "пустая страница — не содержимое");
+
+        // Построение по пустому списку не должно ничего закреплять.
+        fresh.buildInitialLayout(new ArrayList<>(), 4, false);
+        check(!fresh.isInitialized(), "buildInitialLayout([]) не закрепляет пустой стол");
+
+        // А по непустому — строится и становится готовым.
+        List<AppEntry> apps = new ArrayList<>();
+        apps.add(app("com.android.dialer", "Телефон"));
+        apps.add(app("com.android.settings", "Настройки"));
+        fresh.buildInitialLayout(apps, 4, false);
+        check(fresh.isInitialized(), "после построения раскладка готова");
+        check(fresh.hasContent(), "после построения есть содержимое");
+
+        // Пустой стол, помеченный построенным (пользователь убрал всё сам),
+        // остаётся готовым: его нельзя молча перезаполнить.
+        DesktopModel cleared = new DesktopModel(newPrefs(new FakePrefs()));
+        cleared.addPage();
+        cleared.markInitialized();
+        check(cleared.isInitialized(), "помеченная раскладка готова даже без иконок");
+        check(!cleared.hasContent(), "но содержимого в ней нет");
+    }
+
+    private static AppEntry app(String pkg, String label) {
+        return new AppEntry(new android.content.ComponentName(pkg, pkg + ".Main"),
+                null, 0L, label, null, true, true, 0, 0L);
     }
 
     // ------------------------------------------------------------ инфраструктура
