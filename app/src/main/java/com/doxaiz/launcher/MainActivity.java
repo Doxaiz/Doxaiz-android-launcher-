@@ -1655,6 +1655,10 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         drawerEmptyText.setText("Ничего не найдено");
         drawerEmptyText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         drawerEmptyText.setGravity(Gravity.CENTER);
+        // Подсказка, а не приговор: пустой результат чаще всего означает опечатку
+        // или не тот язык раскладки, и об этом стоит сказать прямо на экране.
+        drawerEmptyText.setPadding(dp(24), dp(24), dp(24), dp(24));
+        drawerEmptyText.setLineSpacing(dp(3), 1f);
         drawerEmptyText.setVisibility(View.GONE);
         listHolder.addView(drawerGrid);
         listHolder.addView(drawerEmptyText, new FrameLayout.LayoutParams(
@@ -4313,7 +4317,11 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     private void applyFilterBody(String rawQuery, boolean fromUserTyping) {
         filteredApps.clear();
         final String q = rawQuery != null ? rawQuery.trim() : "";
-        String emptyMsg = "Ничего не найдено";
+        // Подсказка вместо сухого «ничего не найдено»: поиск понимает и
+        // латиницу, и кириллицу в чужой раскладке, поэтому при пустом
+        // результате полезнее сказать, что можно сделать.
+        String emptyMsg = "Ничего не найдено.\nПопробуйте другое слово — поиск понимает "
+                + "русский и английский, а также текст, набранный в чужой раскладке.";
         if (q.isEmpty()) {
             final List<AppEntry> ordered = drawerOrderedApps();
             if (prefs.isShowDrawerCategories() && selectedCustomSectionId != null) {
