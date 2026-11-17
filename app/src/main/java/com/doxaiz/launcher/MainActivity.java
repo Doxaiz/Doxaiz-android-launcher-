@@ -2507,6 +2507,17 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         }
     }
 
+    /** Приложение вместе с заранее посчитанной оценкой совпадения при поиске. */
+    private static final class ScoredEntry {
+        final AppEntry entry;
+        final int score;
+
+        ScoredEntry(AppEntry entry, int score) {
+            this.entry = entry;
+            this.score = score;
+        }
+    }
+
     private static final class BadgeSlot {
         final FrameLayout container;
         final String singlePkg;
@@ -4061,8 +4072,26 @@ public class MainActivity extends Activity implements AppRepository.Listener {
      * между двумя нажатиями при обычном темпе, поэтому «мигания» нет, зато
      * промежуточные буквы вообще не считаются.
      */
+    /**
+     * Задержка перед пересчётом списка каталога после нажатия клавиши.
+     *
+     * 60 мс — это «через один кадр»: быстрое нажатие нескольких клавиш (а при
+     * наборе текста между кадрами их почти всегда несколько) даёт ОДИН пересчёт
+     * вместо одного на клавишу. Больше 80 мс делать нельзя: пауза начинает
+     * ощущаться как «поиск тормозит», хотя на самом деле это ожидание.
+     */
     private static final long DRAWER_FILTER_DELAY_MS = 60L;
+
+    /**
+     * Максимальное время, которое один пересчёт списка каталога может занимать
+     * без перерыва. Набор продолжается, поэтому после этого бюджет задержки
+     * снижается: иначе при большой библиотеке и медленном устройстве задержка
+     * складывалась бы с самим пересчётом и текст «отставал» от пальца.
+     */
+    private static final long DRAWER_FILTER_TIME_BUDGET_NS = 6_000_000L;
     private final Runnable pendingDrawerFilter = this::runPendingDrawerFilter;
+    /** Сколько занял последний пересчёт каталога: 0 — ещё не считали. */
+    private long lastDrawerFilterCostNs = 0L;
     /** Запрос, который нужно посчитать после задержки; null — ничего не ждёт. */
     private String pendingDrawerFilterQuery = null;
 
@@ -4123,7 +4152,11 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     private void scheduleDrawerFilter(String query) {
         pendingDrawerFilterQuery = query;
         uiHandler.removeCallbacks(pendingDrawerFilter);
-        uiHandler.postDelayed(pendingDrawerFilter, DRAWER_FILTER_DELAY_MS);
+        // Если предыдущий пересчёт не уложился в бюджет, следующий считаем сразу:
+        // задержка нужна, чтобы склеивать нажатия, а не чтобы добавлять лаг.
+        long delay = lastDrawerFilterCostNs > DRAWER_FILTER_TIME_BUDGET_NS
+                ? 0L : DRAWER_FILTER_DELAY_MS;
+        uiHandler.postDelayed(pendingDrawerFilter, delay);
     }
 
     private void runPendingDrawerFilter() {
@@ -4133,7 +4166,10 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         // Пока шла задержка, экран мог смениться (пользователь ушёл в настройки) —
         // тогда пересчитывать список незачем, он всё равно не виден.
         if (currentScreen != SCREEN_DRAWER && currentScreen != SCREEN_HOME) return;
+        // Стоимость пересчёта нужна для решения «копить нажатия или считать сразу».
+        long startedNs = System.nanoTime();
         applyFilter(q, true);
+        lastDrawerFilterCostNs = System.nanoTime() - startedNs;
     }
 
     /** Досчитывает отложенный фильтр немедленно (Enter, закрытие каталога). */
@@ -4172,15 +4208,24 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         } else {
             // Предвычисляем варианты запроса 1 раз вместо повторения на каждое приложение и каждую пару сортировки
             final SearchHelper.PreparedQuery pq = SearchHelper.prepare(q);
+            // Оценку совпадения считаем ОДИН раз на приложение. Раньше она
+            // вычислялась внутри компаратора, то есть дважды на каждое
+            // сравнение (O(n log n) вместо O(n) на каждое нажатие клавиши):
+            // при 200 приложениях это ~1500 лишних вычислений на букву, и они
+            // шли в главном потоке прямо во время набора.
+            final List<ScoredEntry> scored = new ArrayList<>();
             for (AppEntry e : visibleApps) {
-                if (SearchHelper.matches(e, pq)) filteredApps.add(e);
+                if (SearchHelper.matches(e, pq)) {
+                    scored.add(new ScoredEntry(e, SearchHelper.matchScore(e, pq)));
+                }
             }
-            Collections.sort(filteredApps, (a, b) -> {
-                int sa = SearchHelper.matchScore(a, pq);
-                int sb = SearchHelper.matchScore(b, pq);
-                if (sa != sb) return Integer.compare(sb, sa);
-                return a.labelLower.compareTo(b.labelLower);
+            Collections.sort(scored, (a, b) -> {
+                if (a.score != b.score) return Integer.compare(b.score, a.score);
+                return a.entry.labelLower.compareTo(b.entry.labelLower);
             });
+            filteredApps.clear();
+            filteredApps.ensureCapacity(scored.size());
+            for (ScoredEntry se : scored) filteredApps.add(se.entry);
         }
         boolean hasSmart = rebuildDrawerSmartBox(q);
         drawerEmptyText.setText(emptyMsg);
