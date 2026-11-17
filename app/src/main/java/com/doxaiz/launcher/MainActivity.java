@@ -2056,6 +2056,9 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     private void showScreen(int screen) {
         dismissModal();
         hideKeyboard();
+        // Смена экрана — это не прокрутка: если список остался «замороженным»
+        // после прерванного флинга, иконки каталога не отрисовались бы вовсе.
+        repository.setScrollFlinging(false);
         int prevScreen = currentScreen;
         boolean changed = (prevScreen != screen);
         currentScreen = screen;
@@ -4529,6 +4532,8 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
             vh.label.setText(formatAppLabel(entry));
             vh.label.setTextColor(theme.textPrimary);
+            // Во время прокрутки bindIcon() не декодирует иконку, а берёт готовую
+            // из ОЗУ-кэша: кадр прокрутки не должен ждать диск и распаковку WEBP.
             repository.bindIcon(entry, vh.icon);
 
             if (drawerBatchMode) {
