@@ -132,7 +132,8 @@ public final class DiagnosticsTests {
         resetGlobals();
         FakePrefs store = new FakePrefs();
         Diagnostics.init(store);
-        int flushInterval = (Integer) staticField("FLUSH_INTERVAL_MS");
+        // FLUSH_INTERVAL_MS объявлен как long — рефлексия отдаёт Long, не Integer.
+        long flushInterval = (Long) staticField("FLUSH_INTERVAL_MS");
         // Первая запись сбрасывается сразу, но троттлинг мог уже сработать —
         // поэтому сериализуем напрямую, как это делает persistAsync().
         Diagnostics.record("Persist.one", new RuntimeException("saved-1"));
