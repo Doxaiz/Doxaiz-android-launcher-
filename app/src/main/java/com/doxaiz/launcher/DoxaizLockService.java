@@ -429,14 +429,9 @@ public final class DoxaizLockService extends AccessibilityService {
         DoxaizNotificationService.stopActiveMediaExcept(this, lockedPkgs);
         DoxaizNotificationService.clearAllClearableExcept(lockedPkgs);
         svcPrefs.markAllRecentTabsClearedExcept(lockedPkgs);
-        MemoryHelper.BoostResult res = MemoryHelper.boostRam(this, null, lockedPkgs);
-        updateOverlayNumbers();
-        try {
-            Toast.makeText(getApplicationContext(), res.message, Toast.LENGTH_SHORT).show();
-        } catch (Throwable ignored) {
-        }
 
-        // 3. Возвращаемся на чистый рабочий стол и прячем оверлей.
+        // 3. Возвращаемся на чистый рабочий стол и прячем оверлей сразу: очистка
+        // ОЗУ идёт в фоне и не должна задерживать выход из «Недавних».
         handler.postDelayed(() -> {
             hideOverlay();
             if (!systemCleared) {
@@ -446,6 +441,20 @@ public final class DoxaizLockService extends AccessibilityService {
                 }
             }
         }, 420L);
+
+        // 4. Сама очистка ОЗУ — в фоне. boostRam() опрашивает ActivityManager и
+        // вызывает killBackgroundProcesses() для каждого пакета: это сотни
+        // Binder-вызовов. Раньше они выполнялись прямо здесь, в потоке
+        // AccessibilityService, и кнопка корзины «залипала» на устройствах с
+        // большим числом приложений (а служба специальных возможностей обязана
+        // отвечать быстро, иначе система начинает её ограничивать).
+        MemoryHelper.boostRamAsync(this, null, lockedPkgs, result -> {
+            updateOverlayNumbers();
+            try {
+                Toast.makeText(getApplicationContext(), result.message, Toast.LENGTH_SHORT).show();
+            } catch (Throwable ignored) {
+            }
+        });
     }
 
     /**
@@ -466,35 +475,84 @@ public final class DoxaizLockService extends AccessibilityService {
             return findAndClickClearAll(root, 0, visited);
         } catch (Throwable ignored) {
             return false;
+        } finally {
+            // Корень получен нами и больше не нужен (см. recycleNode).
+            recycleNode(root);
         }
     }
 
+    /**
+     * Обход дерева «Недавних» в поисках кнопки «Очистить всё».
+     *
+     * Каждый getChild()/getParent() возвращает НОВУЮ обёртку над нативным узлом,
+     * которую нужно освобождать явно: без этого дерево из ~180 узлов на каждое
+     * нажатие корзины оставляло занятыми нативные объекты, а служба специальных
+     * возможностей живёт долго — это накопительная утечка памяти, из-за которой
+     * система в итоге отключает службу «за нестабильность».
+     */
     private boolean findAndClickClearAll(AccessibilityNodeInfo node, int depth, int[] visited) {
         if (node == null || depth > 12 || visited[0] > 180) return false;
         visited[0]++;
 
         if (isClearAllNode(node)) {
-            AccessibilityNodeInfo target = node;
-            int hops = 0;
-            while (target != null && !target.isClickable() && hops < 4) {
-                target = target.getParent();
-                hops++;
+            // Поднимаемся к ближайшему нажимаемому предку. Начальный узел
+            // принадлежит вызывающему и не освобождается; каждый следующий
+            // получен нами через getParent() и освобождается ровно один раз —
+            // либо когда уходим выше, либо после выхода из цикла.
+            AccessibilityNodeInfo current = node;
+            boolean clicked = false;
+            for (int hops = 0; hops <= 4; hops++) {
+                if (current.isClickable() && current.isEnabled() && safeClick(current)) {
+                    clicked = true;
+                    break;
+                }
+                if (hops == 4) break;
+                AccessibilityNodeInfo parent = current.getParent();
+                if (current != node) recycleNode(current);
+                if (parent == null) {
+                    current = null;
+                    break;
+                }
+                current = parent;
             }
-            if (target != null && target.isClickable() && target.isEnabled()) {
-                return target.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-            }
+            if (current != null && current != node) recycleNode(current);
+            if (clicked) return true;
         }
 
         int childCount = node.getChildCount();
         for (int i = 0; i < childCount; i++) {
-            AccessibilityNodeInfo child = node.getChild(i);
-            if (child != null) {
-                if (findAndClickClearAll(child, depth + 1, visited)) {
+            AccessibilityNodeInfo child = null;
+            try {
+                child = node.getChild(i);
+                if (child != null && findAndClickClearAll(child, depth + 1, visited)) {
                     return true;
                 }
+            } finally {
+                recycleNode(child);
             }
         }
         return false;
+    }
+
+    /** Нажатие на узел без исключений (дерево могло измениться между вызовами). */
+    private static boolean safeClick(AccessibilityNodeInfo target) {
+        try {
+            return target.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    /**
+     * Освобождение узла. Начиная с API 33 этот вызов ничего не делает (объекты
+     * собирает GC), а на старых версиях он обязателен, поэтому версия проверяется.
+     */
+    private static void recycleNode(AccessibilityNodeInfo node) {
+        if (node == null) return;
+        try {
+            if (Build.VERSION.SDK_INT < 33) node.recycle();
+        } catch (Throwable ignored) {
+        }
     }
 
     private static boolean isClearAllNode(AccessibilityNodeInfo node) {
