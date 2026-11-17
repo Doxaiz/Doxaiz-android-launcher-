@@ -323,10 +323,17 @@ if [ "$scenario_ok" = "1" ]; then
         sleep 5
         focus_now > "$OUT/crash-fallback-focus.txt" 2>/dev/null || true
         note "crash-fallback" "$(tr '\n' ' ' < "$OUT/crash-fallback-focus.txt" | cut -c1-300)"
+        # Пустой mCurrentFocus — особенность эмулятора, а не доказательство.
+        # Возврат считается подтверждённым только если фокус есть и он НЕ наш:
+        # именно это видит пользователь вместо чёрного экрана.
         if grep -q "$PKG" "$OUT/crash-fallback-focus.txt" 2>/dev/null; then
             echo "::warning title=аварийный возврат::Doxaiz остался на переднем плане после второго сбоя — переход на системный лаунчер не подтверждён"
+        elif grep -q "mCurrentFocus=null" "$OUT/crash-fallback-focus.txt" 2>/dev/null; then
+            note "crash-fallback-result" "фокус не назначен (особенность эмулятора) — переход не подтверждён и не опровергнут"
+        elif grep -q "mCurrentFocus=Window" "$OUT/crash-fallback-focus.txt" 2>/dev/null; then
+            note "crash-fallback-result" "после второго сбоя на переднем плане другой лаунчер — возврат работает"
         else
-            note "crash-fallback-result" "после второго сбоя на переднем плане системный лаунчер — возврат работает"
+            note "crash-fallback-result" "состояние фокуса не распознано — смотрите артефакт"
         fi
         check_crash "возврат на системный лаунчер" || true
     fi
