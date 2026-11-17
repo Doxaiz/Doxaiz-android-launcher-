@@ -86,6 +86,13 @@ public class MainActivity extends Activity implements AppRepository.Listener {
      * Значение сбрасывается после использования и при отмене биометрии.
      */
     private boolean pendingExportIncludesPrivate = false;
+
+    /**
+     * Сколько сбоев подряд было до этого запуска (см. {@link CrashGuard}).
+     * 0 — обычный запуск. Значение нужно, чтобы не обнулить счётчик, пока
+     * рабочий стол ещё не показан.
+     */
+    private int startupCrashStreak = 0;
     private static final int REQ_IMPORT_BACKUP = 1002;
     private static final int REQ_ROLE_HOME = 1003;
 
@@ -339,6 +346,28 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         // Журнал сбоев поднимается ДО загрузки раскладки: иначе ошибки чтения
         // desktop_layout_json (битый JSON, сбой миграции) некуда записать (F-07).
         Diagnostics.init(prefs.getSharedPreferences());
+
+        // Аварийный перехват (F-22). Проверяемся до построения интерфейса: если
+        // предыдущий запуск упал, рабочий стол может упасть снова, а показать
+        // пользователю объяснение нужно в любом случае.
+        int crashStreak = CrashGuard.onDesktopLaunchStart(prefs);
+        if (crashStreak > 0) {
+            startupCrashStreak = crashStreak;
+            if (crashStreak >= CrashGuard.CRASHES_TO_FALLBACK) {
+                // Второй сбой подряд: пользователь уже дважды остался без
+                // рабочего стола. Возвращаем его на штатный лаунчер, а если
+                // такого нет — показываем аварийный экран.
+                if (CrashGuard.isEnabled(prefs)
+                        && CrashGuard.switchToSystemLauncher(this, prefs)) {
+                    finish();
+                    return;
+                }
+            }
+            SafeModeActivity.show(this, startupCrashReason());
+            finish();
+            return;
+        }
+
         theme = GlassTheme.create(prefs.getVisualStyle(), prefs.getGlassOpacity(), false);
         desktop = new DesktopModel(this, prefs);
         currentPage = getEffectiveHomePageIndex();
@@ -433,6 +462,30 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
         applyTheme();
         showScreen(SCREEN_HOME);
+
+        // Рабочий стол построен и показан: запуск удался. Снимаем отметку
+        // «запуск идёт». Если же перед этим был обнаружен сбой, счётчик
+        // сохраняется — следующий запуск должен знать о повторяющейся проблеме.
+        // Отложено на кадр: успешным считается показ, а не начало onCreate.
+        final boolean keepStreak = startupCrashStreak > 0;
+        rootContainer.post(() -> {
+            if (isFinishing() || isDestroyed()) return;
+            CrashGuard.onStartupComplete(prefs, keepStreak);
+        });
+    }
+
+    /**
+     * Причина последнего сбоя для аварийного экрана: берём самую свежую запись
+     * журнала диагностики. null, если журнал пуст.
+     */
+    private String startupCrashReason() {
+        try {
+            java.util.List<Diagnostics.Entry> entries = Diagnostics.getAll();
+            if (entries.isEmpty()) return null;
+            return entries.get(0).format();
+        } catch (Throwable t) {
+            return null;
+        }
     }
 
     @SuppressWarnings("deprecation")
@@ -7999,6 +8052,16 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                 sysMem.oneLineSummary,
                 this::openStorageSettings);
         addDivider(sysCard);
+        addToggleRow(sysCard, "Аварийный возврат на штатный лаунчер",
+                "Если Doxaiz дважды подряд не запустится — открыть системный рабочий стол "
+                        + "и показать причину",
+                CrashGuard.isEnabled(prefs),
+                checked -> {
+                    CrashGuard.setEnabled(prefs, checked);
+                    rebuildSettingsContent();
+                });
+
+        addDivider(sysCard);
         int diagCount = Diagnostics.size();
         addActionRow(sysCard, "Диагностика",
                 diagCount == 0
@@ -9775,9 +9838,40 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                     ViewGroup.LayoutParams.MATCH_PARENT, Math.max(wanted, rowHeight)));
         }
 
+        // Состояние аварийного возврата: видно, сколько сбоев подряд и куда
+        // лаунчер переключался. Без этого пользователь не понимает, почему
+        // после падения открылся чужой рабочий стол.
+        int streak = prefs.getCrashGuardStreak();
+        String fallbackPkg = prefs.getCrashGuardFallback();
+        long lastFallback = prefs.getCrashGuardLastFallback();
+        TextView guard = new TextView(this);
+        StringBuilder guardText = new StringBuilder();
+        guardText.append("Аварийный возврат: ")
+                .append(CrashGuard.isEnabled(prefs) ? "включён" : "выключен");
+        if (streak > 0) guardText.append(" • сбоев подряд: ").append(streak);
+        if (lastFallback > 0L && fallbackPkg != null && !fallbackPkg.isEmpty()) {
+            guardText.append("\nПоследний возврат: ").append(fallbackPkg);
+        }
+        guard.setText(guardText.toString());
+        guard.setTextColor(theme.textSecondary);
+        guard.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
+        guard.setLineSpacing(dp(2), 1.0f);
+        LinearLayout.LayoutParams gLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        gLp.topMargin = dp(4);
+        gLp.bottomMargin = dp(4);
+        box.addView(guard, gLp);
+
         LinearLayout btns = new LinearLayout(this);
         btns.setOrientation(LinearLayout.HORIZONTAL);
         btns.setGravity(Gravity.END);
+        if (streak > 0) {
+            addDialogButton(btns, "Сбросить сбои", 0xFFFBBF24, () -> {
+                CrashGuard.resetStreak(prefs);
+                dismissModal();
+                Toast.makeText(this, "Счётчик сбоев сброшен", Toast.LENGTH_SHORT).show();
+            });
+        }
         if (!entries.isEmpty()) {
             addDialogButton(btns, "Очистить", 0xFFF87171, () -> {
                 Diagnostics.clear();
