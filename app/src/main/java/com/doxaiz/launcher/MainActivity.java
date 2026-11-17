@@ -2668,6 +2668,12 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         cell.setOrientation(LinearLayout.VERTICAL);
         cell.setGravity(Gravity.CENTER);
         cell.setPadding(dp(2), dp(1), dp(2), dp(1));
+        // Клетка — единый элемент для TalkBack: без этого подписи под иконкой
+        // остаются отдельными TextView, а сама иконка — «безымянной картинкой».
+        // Подпись нужна и в поиске по интерфейсу (uiautomator), иначе рабочий
+        // стол выглядит пустым и проверки, и вспомогательные технологии слепы.
+        String a11yLabel = formatAppLabel(entry);
+        cell.setContentDescription(a11yLabel);
 
         FrameLayout iconWrap = new FrameLayout(this);
         iconWrap.setLayoutParams(new LinearLayout.LayoutParams(dp(iconDp), dp(iconDp)));
@@ -2792,6 +2798,12 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         cell.setOrientation(LinearLayout.VERTICAL);
         cell.setGravity(Gravity.CENTER);
         cell.setPadding(dp(2), dp(1), dp(2), dp(1));
+
+        // Папка тоже должна быть одним именованным элементом: иначе TalkBack
+        // читает превью как набор картинок, а поиск по интерфейсу не видит её.
+        int folderCount = folder.folderApps.size();
+        cell.setContentDescription(folder.folderName
+                + (folderCount > 0 ? ", приложений: " + folderCount : ""));
 
         // AMOLED-стеклянная плитка папки: крупная 2x2 сетка оригинальных иконок (видно с главного экрана!)
         FrameLayout boxWrap = new FrameLayout(this);
