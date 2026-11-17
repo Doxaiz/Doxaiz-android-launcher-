@@ -2672,8 +2672,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         // остаются отдельными TextView, а сама иконка — «безымянной картинкой».
         // Подпись нужна и в поиске по интерфейсу (uiautomator), иначе рабочий
         // стол выглядит пустым и проверки, и вспомогательные технологии слепы.
-        String a11yLabel = formatAppLabel(entry);
-        cell.setContentDescription(a11yLabel);
+        cell.setContentDescription(formatAppLabel(entry));
 
         FrameLayout iconWrap = new FrameLayout(this);
         iconWrap.setLayoutParams(new LinearLayout.LayoutParams(dp(iconDp), dp(iconDp)));
