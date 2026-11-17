@@ -1552,8 +1552,11 @@ public final class QuickShadeHelper {
             for (Map.Entry<String, Integer> e : appCounts.entrySet()) {
                 final String pkg = e.getKey();
                 final int cnt = e.getValue();
+                // Раньше здесь было ручное обрезание по 14 символам: кириллица
+                // и латиница разной ширины, поэтому «Яндекс.Карты» теряли букву
+                // при свободном месте, а латинские названия обрезались зря.
+                // Теперь обрезку делает TextView по реальной ширине чипа.
                 String lbl = loadAppLabelCached(pkg);
-                if (lbl.length() > 14) lbl = lbl.substring(0, 13) + "…";
                 boolean active = (notifFilterMode == FILTER_APP && pkg.equals(notifFilterPackage));
                 row.addView(makeNotifFilterChip(
                         lbl + (cnt > 1 ? (" " + cnt) : ""),
@@ -1581,6 +1584,12 @@ public final class QuickShadeHelper {
         tv.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         tv.setBackground(GlassTheme.makePill(active ? activeColor : 0xFF1F1F24));
         tv.setPadding(dp(12), dp(6), dp(12), dp(6));
+        // Длинное название приложения не должно растягивать ряд чипов за экран:
+        // ограничиваем ширину и отдаём обрезку TextView (многоточие по метрикам
+        // шрифта, а не по числу символов).
+        tv.setSingleLine(true);
+        tv.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        tv.setMaxWidth(dp(150));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.rightMargin = dp(7);
