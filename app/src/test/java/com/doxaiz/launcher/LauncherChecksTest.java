@@ -29,6 +29,11 @@ public class LauncherChecksTest {
     }
 
     @Test
+    public void diagnosticsJournal() {
+        run("DiagnosticsTests", () -> DiagnosticsTests.main(new String[0]));
+    }
+
+    @Test
     public void perf56Responsiveness() {
         run("Perf56Tests", () -> Perf56Tests.main(new String[0]));
     }

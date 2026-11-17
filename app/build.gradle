@@ -10,8 +10,8 @@ android {
         applicationId "com.doxaiz.launcher"
         minSdk 26
         targetSdk 34
-        versionCode 40
-        versionName "5.7-test"
+        versionCode 41
+        versionName "5.8-test"
     }
 
     buildTypes {

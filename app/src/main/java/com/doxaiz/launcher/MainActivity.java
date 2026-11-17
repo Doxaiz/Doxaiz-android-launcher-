@@ -79,6 +79,13 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     private static final int SCREEN_SETTINGS = 2;
 
     private static final int REQ_EXPORT_BACKUP = 1001;
+
+    /**
+     * Выбранный состав резервной копии: true — с приватными данными (скрытые
+     * приложения, переименования, категории), false — только раскладка (F-06).
+     * Значение сбрасывается после использования и при отмене биометрии.
+     */
+    private boolean pendingExportIncludesPrivate = false;
     private static final int REQ_IMPORT_BACKUP = 1002;
     private static final int REQ_ROLE_HOME = 1003;
 
@@ -329,6 +336,9 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         super.onCreate(savedInstanceState);
 
         prefs = new Prefs(this);
+        // Журнал сбоев поднимается ДО загрузки раскладки: иначе ошибки чтения
+        // desktop_layout_json (битый JSON, сбой миграции) некуда записать (F-07).
+        Diagnostics.init(prefs.getSharedPreferences());
         theme = GlassTheme.create(prefs.getVisualStyle(), prefs.getGlassOpacity(), false);
         desktop = new DesktopModel(this, prefs);
         currentPage = getEffectiveHomePageIndex();
@@ -7840,7 +7850,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
         addDivider(layoutSafeCard);
         addActionRow(layoutSafeCard, "Сохранить раскладку в файл (.json)",
-                "JSON без шифрования: содержит раскладку и список скрытых приложений. Храните файл в безопасном месте.",
+                "JSON без шифрования. Можно сохранить только раскладку или копию со скрытыми приложениями.",
                 this::startExportBackup);
 
         addDivider(layoutSafeCard);
@@ -7988,6 +7998,13 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         addActionRow(sysCard, "Память и хранилище телефона",
                 sysMem.oneLineSummary,
                 this::openStorageSettings);
+        addDivider(sysCard);
+        int diagCount = Diagnostics.size();
+        addActionRow(sysCard, "Диагностика",
+                diagCount == 0
+                        ? "Журнал сбоев пуст — ошибок не зафиксировано"
+                        : ("Записей в журнале: " + diagCount + " • ошибки, которые лаунчер пережил молча"),
+                this::showDiagnosticsScreen);
         addDivider(sysCard);
         addActionRow(sysCard, "Сменить обои", "Системный выбор обоев", this::openWallpaperChooser);
         addDivider(sysCard);
@@ -9627,20 +9644,180 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         showModalCard(box, Gravity.CENTER, false);
     }
 
+    /**
+     * Экспорт резервной копии.
+     *
+     * Раньше файл ВСЕГДА содержал список скрытых приложений, переименования и
+     * категории — даже если пользователь хотел сохранить только раскладку
+     * (например, чтобы показать её кому-то). Теперь сначала выбирается состав
+     * копии, и приватные данные попадают в файл только по явному выбору (F-06).
+     */
     private void startExportBackup() {
+        showExportScopeChooser();
+    }
+
+    /** Диалог выбора состава копии. */
+    private void showExportScopeChooser() {
+        LinearLayout box = createModalBox();
+        TextView title = new TextView(this);
+        title.setText("Что сохранить в копию");
+        title.setTextColor(theme.textPrimary);
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
+        title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        box.addView(title);
+
+        TextView msg = new TextView(this);
+        msg.setText("Раскладка — это сетка иконок, док и папки. Скрытые приложения, "
+                + "переименования и категории — отдельные данные о ваших программах.");
+        msg.setTextColor(theme.textSecondary);
+        msg.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f);
+        msg.setLineSpacing(dp(2), 1.0f);
+        LinearLayout.LayoutParams mLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        mLp.topMargin = dp(10);
+        mLp.bottomMargin = dp(12);
+        box.addView(msg, mLp);
+
+        addActionRow(box, "Только раскладка",
+                "Без скрытых приложений, переименований и категорий — файл можно передавать",
+                () -> {
+                    dismissModal();
+                    beginExportFlow(false);
+                });
+        addActionRow(box, "Полная копия",
+                "Включая скрытые приложения, переименования и категории",
+                () -> {
+                    dismissModal();
+                    beginExportFlow(true);
+                });
+
+        LinearLayout btns = new LinearLayout(this);
+        btns.setOrientation(LinearLayout.HORIZONTAL);
+        btns.setGravity(Gravity.END);
+        addDialogButton(btns, "Отмена", theme.textSecondary, this::dismissModal);
+        LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        btnLp.topMargin = dp(10);
+        box.addView(btns, btnLp);
+        showModalCard(box, Gravity.CENTER, true);
+    }
+
+    /**
+     * Экран диагностики: журнал проглоченных сбоев (F-07).
+     *
+     * Показывать больше нечего, поэтому это простой список: время, компонент,
+     * тип исключения и короткое сообщение. Журнал переживает перезапуск, пока
+     * пользователь сам не нажмёт «Очистить».
+     */
+    private void showDiagnosticsScreen() {
+        LinearLayout box = createModalBox();
+
+        java.util.List<Diagnostics.Entry> entries = Diagnostics.getAll();
+
+        LinearLayout head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView title = new TextView(this);
+        title.setText("Диагностика");
+        title.setTextColor(theme.textPrimary);
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
+        title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        head.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView badge = new TextView(this);
+        badge.setText(entries.isEmpty() ? "Чисто" : (entries.size() + " записей"));
+        badge.setTextColor(entries.isEmpty() ? 0xFF4ADE80 : 0xFFFBBF24);
+        badge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f);
+        head.addView(badge);
+        box.addView(head);
+
+        TextView hint = new TextView(this);
+        hint.setText(entries.isEmpty()
+                ? "Сбоев не зафиксировано. Сюда попадают ошибки, которые лаунчер "
+                  + "переживает молча: иконка не записалась в кэш, копия не прочиталась, "
+                  + "раскладка не сохранилась."
+                : "Ошибки, которые лаунчер пережил молча. Новые сверху. Журнал не "
+                  + "содержит имён скрытых приложений и путей к файлам.");
+        hint.setTextColor(theme.textSecondary);
+        hint.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
+        hint.setLineSpacing(dp(2), 1.0f);
+        LinearLayout.LayoutParams hLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        hLp.topMargin = dp(8);
+        hLp.bottomMargin = dp(10);
+        box.addView(hint, hLp);
+
+        if (!entries.isEmpty()) {
+            ScrollView scroller = new ScrollView(this);
+            LinearLayout list = new LinearLayout(this);
+            list.setOrientation(LinearLayout.VERTICAL);
+            for (int i = 0; i < entries.size(); i++) {
+                TextView row = new TextView(this);
+                row.setText(entries.get(i).format());
+                row.setTextColor(theme.textSecondary);
+                row.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f);
+                row.setTypeface(Typeface.MONOSPACE);
+                row.setLineSpacing(dp(1), 1.0f);
+                LinearLayout.LayoutParams rLp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                rLp.bottomMargin = dp(7);
+                list.addView(row, rLp);
+            }
+            scroller.addView(list, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            // Сам ScrollView не умеет maxHeight: ограничиваем высоту вручную.
+            // Для короткого журнала карточка не должна пустовать, поэтому высота
+            // считается по числу записей, но не больше 260dp.
+            int rowHeight = dp(30);
+            int wanted = Math.min(entries.size() * rowHeight, dp(260));
+            box.addView(scroller, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, Math.max(wanted, rowHeight)));
+        }
+
+        LinearLayout btns = new LinearLayout(this);
+        btns.setOrientation(LinearLayout.HORIZONTAL);
+        btns.setGravity(Gravity.END);
+        if (!entries.isEmpty()) {
+            addDialogButton(btns, "Очистить", 0xFFF87171, () -> {
+                Diagnostics.clear();
+                dismissModal();
+                Toast.makeText(this, "Журнал диагностики очищен", Toast.LENGTH_SHORT).show();
+            });
+        }
+        addDialogButton(btns, "Закрыть", theme.textPrimary, this::dismissModal);
+        LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        btnLp.topMargin = dp(12);
+        box.addView(btns, btnLp);
+
+        showModalCard(box, Gravity.CENTER, true);
+    }
+
+    /** Продолжение экспорта после выбора состава: биометрия нужна только для приватных данных. */
+    private void beginExportFlow(boolean includePrivate) {
+        pendingExportIncludesPrivate = includePrivate;
+        if (!includePrivate) {
+            launchExportBackupPicker();
+            return;
+        }
         if (!prefs.isProtectHiddenApps()) {
             launchExportBackupPicker();
             return;
         }
         if (!BiometricHelper.isDeviceSecure(this)) {
             Toast.makeText(this, "Для сохранения защищённой копии сначала установите PIN или пароль экрана", Toast.LENGTH_LONG).show();
+            pendingExportIncludesPrivate = false;
             return;
         }
         pendingPrivateSpaceAction = this::launchExportBackupPicker;
         BiometricHelper.authenticate(this, "Сохранение копии",
                 "Файл содержит список скрытых приложений. Подтвердите отпечатком или PIN.",
                 () -> { pendingPrivateSpaceAction = null; launchExportBackupPicker(); },
-                () -> pendingPrivateSpaceAction = null);
+                () -> {
+                    pendingPrivateSpaceAction = null;
+                    pendingExportIncludesPrivate = false;
+                });
     }
 
     /**
@@ -9733,8 +9910,11 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         Uri uri = data.getData();
 
         if (requestCode == REQ_EXPORT_BACKUP) {
-            // Snapshot is taken on the UI thread; slow provider I/O is never performed there.
-            final String json = BackupHelper.exportBackupJson(prefs, desktop);
+            // Состав копии выбирается до открытия системного диалога (F-06).
+            final boolean includePrivate = pendingExportIncludesPrivate;
+            pendingExportIncludesPrivate = false;
+            // Снимок делается на UI-потоке (Prefs), а ввод-вывод провайдера — нет.
+            final String json = BackupHelper.exportBackupJson(prefs, desktop, includePrivate);
             if (json == null) {
                 Toast.makeText(this, "Ошибка формирования копии", Toast.LENGTH_SHORT).show();
                 return;
@@ -9757,11 +9937,18 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                             out.flush();
                             ok = true;
                         }
-                    } catch (Exception ignored) { }
+                    } catch (Exception e) {
+                        // Раньше здесь был пустой catch: пользователь видел только
+                        // «Не удалось записать файл» без причины (F-07).
+                        Diagnostics.record("backup.export.write", e);
+                    }
                     final boolean result = ok;
                     runOnUiThread(() -> {
                         if (!isFinishing() && !isDestroyed()) Toast.makeText(this,
-                                result ? "Раскладка сохранена в файл" : "Не удалось записать файл",
+                                result ? (includePrivate
+                                        ? "Копия сохранена (включая скрытые приложения)"
+                                        : "Раскладка сохранена в файл")
+                                        : "Не удалось записать файл",
                                 Toast.LENGTH_SHORT).show();
                     });
                 });
@@ -9788,7 +9975,9 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                             }
                             if (!tooLarge) json = new String(out.toByteArray(), StandardCharsets.UTF_8);
                         }
-                    } catch (Exception ignored) { }
+                    } catch (Exception e) {
+                        Diagnostics.record("backup.import.read", e);
+                    }
                     final boolean oversized = tooLarge;
                     final String input = json;
                     // Предварительная проверка в фоновом потоке: для чужого/битого файла

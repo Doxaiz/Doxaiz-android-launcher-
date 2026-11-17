@@ -151,7 +151,10 @@ public final class DesktopModel {
                 }
             }
             return true;
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            // Битый JSON раскладки приводил к тихому сбросу на пустой рабочий стол.
+            // Теперь факт и причина видны на экране диагностики.
+            Diagnostics.record("DesktopModel.load", t);
             dock.clear();
             pages.clear();
             return false;
@@ -165,6 +168,10 @@ public final class DesktopModel {
      * повреждённый или устаревший JSON поверх свежего.
      */
     public synchronized void save() {
+        // F-15: здесь остаётся только построение JSON в памяти и подписка на
+        // хранилище. Кодирование в UTF-8 и запись guard-файла выполняются в
+        // фоновом потоке GUARD_WRITER (см. writeGuardFile), поэтому UI-поток не
+        // блокируется на вводе-выводе даже при частых перетаскиваниях иконок.
         try {
             JSONObject root = new JSONObject();
             root.put("seq", nextFolderSeq);
@@ -199,7 +206,10 @@ public final class DesktopModel {
             String json = root.toString();
             if (prefs != null) prefs.setDesktopJson(json);
             scheduleGuardWrite(json);
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            // Сбой сохранения раскладки раньше был полностью невидим: иконки
+            // «переезжали» или пропадали после перезапуска без следов в логах.
+            Diagnostics.record("DesktopModel.save", t);
         }
     }
 
@@ -314,6 +324,9 @@ public final class DesktopModel {
         try {
             File target = new File(appContext.getFilesDir(), GUARD_FILE);
             File tmp = new File(appContext.getFilesDir(), GUARD_FILE + ".tmp");
+            // Кодирование в UTF-8 (это проход по всей строке раскладки) тоже
+            // выполняется здесь, в фоновом потоке: раньше getBytes() вызывался
+            // из save() на UI-потоке рядом с файловым вводом-выводом (F-15).
             try (FileOutputStream fos = new FileOutputStream(tmp)) {
                 fos.write(json.getBytes(StandardCharsets.UTF_8));
                 fos.flush();
@@ -323,7 +336,8 @@ public final class DesktopModel {
                 //noinspection ResultOfMethodCallIgnored
                 tmp.delete();
             }
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            Diagnostics.record("DesktopModel.guardWrite", t);
         }
     }
 

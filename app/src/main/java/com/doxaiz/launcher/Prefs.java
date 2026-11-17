@@ -118,6 +118,13 @@ public final class Prefs {
         this.sp = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
     }
 
+    /**
+     * Прямой доступ к хранилищу настроек. Нужен только диагностическому журналу
+     * (см. {@link Diagnostics}): он живёт в тех же prefs и должен подняться
+     * раньше, чем будет загружена раскладка.
+     */
+    public SharedPreferences getSharedPreferences() { return sp; }
+
     public int getGlassOpacity() { return sp.getInt(KEY_OPACITY, OPACITY_BALANCED); }
     public void setGlassOpacity(int opacity) { sp.edit().putInt(KEY_OPACITY, opacity).apply(); }
 

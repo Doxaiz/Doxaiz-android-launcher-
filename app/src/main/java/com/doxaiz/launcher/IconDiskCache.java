@@ -173,7 +173,10 @@ public final class IconDiskCache {
                     }
                 }
             }
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            // Раньше здесь был пустой catch: иконка молча не кэшировалась, и
+            // пользователь видел «иконки долго грузятся» без объяснения (F-07).
+            Diagnostics.record("IconDiskCache.save", t);
         }
     }
 
