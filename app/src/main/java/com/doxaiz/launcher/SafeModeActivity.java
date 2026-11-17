@@ -15,6 +15,8 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.util.List;
+
 /**
  * Аварийный экран: показывается вместо рабочего стола, если лаунчер дважды
  * подряд не смог стартовать (см. {@link CrashGuard}).
@@ -173,9 +175,19 @@ public class SafeModeActivity extends Activity {
                     }
                 });
 
+        addButton(root, "Скопировать журнал диагностики",
+                "Все записи сбоев — чтобы приложить их к сообщению об ошибке",
+                textPrimary, false, () -> {
+                    if (!copyDiagnostics()) {
+                        Toast.makeText(this, "Журнал пуст или скопировать не удалось",
+                                Toast.LENGTH_LONG).show();
+                    }
+                });
+
         TextView footer = new TextView(this);
         footer.setText("Если этот экран появляется снова, вернитесь на системный лаунчер "
-                + "и сообщите об ошибке: журнал диагностики доступен в настройках Doxaiz.");
+                + "и скопируйте журнал диагностики кнопкой выше — он понадобится, "
+                + "чтобы найти причину.");
         footer.setTextColor(textSecondary);
         footer.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f);
         footer.setLineSpacing(dp(2), 1.0f);
@@ -187,6 +199,43 @@ public class SafeModeActivity extends Activity {
         scroller.addView(root, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         return scroller;
+    }
+
+    /**
+     * Кладёт журнал диагностики в буфер обмена.
+     *
+     * Раньше подвал обещал «журнал доступен в настройках Doxaiz», но
+     * пользователь с аварийным экраном именно в настройки попасть и не может:
+     * рабочий стол не запускается. Единственный способ передать причину — не
+     * уходить с этого экрана.
+     *
+     * @return false, если журнал пуст или буфер недоступен
+     */
+    private boolean copyDiagnostics() {
+        try {
+            List<Diagnostics.Entry> entries = Diagnostics.getAll();
+            if (entries == null || entries.isEmpty()) return false;
+            StringBuilder sb = new StringBuilder(256 + entries.size() * 96);
+            sb.append("Doxaiz, журнал диагностики\n");
+            sb.append("версия: ").append(BuildConfig.VERSION_NAME)
+                    .append(" (").append(BuildConfig.VERSION_CODE).append(")\n");
+            sb.append("устройство: ").append(Build.MANUFACTURER).append(' ')
+                    .append(Build.MODEL).append(", Android ").append(Build.VERSION.RELEASE)
+                    .append(" (API ").append(Build.VERSION.SDK_INT).append(")\n\n");
+            // Новые записи — первыми: причина сбоя почти всегда последняя.
+            for (int i = entries.size() - 1; i >= 0; i--) {
+                sb.append(entries.get(i).format()).append('\n');
+            }
+            android.content.ClipboardManager cm = (android.content.ClipboardManager)
+                    getSystemService(CLIPBOARD_SERVICE);
+            if (cm == null) return false;
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("Doxaiz diagnostics", sb));
+            Toast.makeText(this, "Журнал скопирован", Toast.LENGTH_SHORT).show();
+            return true;
+        } catch (Throwable t) {
+            Diagnostics.record("SafeMode.copyDiagnostics", t);
+            return false;
+        }
     }
 
     /** Кнопка на всю ширину: попадать по ней должно быть легко и с крупным шрифтом. */

@@ -46,11 +46,42 @@ public final class DiagnosticsTests {
         messagesAreSanitised();
         persistenceRoundTrip();
         clearWipesMemoryAndStorage();
+        originNamesTheFile();
 
         System.out.println("DiagnosticsTests: " + checks + " проверок пройдено");
     }
 
     // ---------------------------------------------------------------- сценарии
+
+    /**
+     * Место сбоя определяется по стеку: в коде много пустых catch, и без этого
+     * в журнале остаётся только текст исключения — по нему не найти виновника.
+     */
+    private static void originNamesTheFile() {
+        resetGlobals();
+        // Исключение, созданное здесь, имеет в стеке этот же файл.
+        String where = Diagnostics.origin(new IllegalStateException("проверка"));
+        check(where.startsWith("DiagnosticsTests.java:"),
+                "место сбоя — файл из стека, получено: " + where);
+
+        // Без стека — «unknown», но не исключение.
+        IllegalStateException noTrace = new IllegalStateException("без стека");
+        noTrace.setStackTrace(new StackTraceElement[0]);
+        toStringEquals("unknown", Diagnostics.origin(noTrace), "пустой стек");
+
+        toStringEquals("unknown", Diagnostics.origin(null), "null-исключение");
+
+        // Чужой класс в стеке не должен выдаваться за наш.
+        Throwable foreign = new RuntimeException("чужой");
+        foreign.setStackTrace(new StackTraceElement[]{
+                new StackTraceElement("java.lang.Thread", "run", "Thread.java", 748)});
+        toStringEquals("Thread.java:748", Diagnostics.origin(foreign),
+                "чужой стек — берётся первый доступный файл");
+    }
+
+    private static void toStringEquals(String expected, String actual, String label) {
+        check(expected.equals(actual), label + ": ожидалось " + expected + ", получено " + actual);
+    }
 
     private static void exceptionsAreSwallowed() {
         resetGlobals();

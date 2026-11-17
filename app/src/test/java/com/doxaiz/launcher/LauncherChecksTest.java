@@ -44,6 +44,11 @@ public class LauncherChecksTest {
     }
 
     @Test
+    public void contrastOnUnknownWallpaper() {
+        run("ContrastTest", () -> ContrastTest.main(new String[0]));
+    }
+
+    @Test
     public void audit60LayoutAndImport() {
         run("Audit60Tests", () -> Audit60Tests.main(new String[0]));
     }

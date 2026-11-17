@@ -113,6 +113,38 @@ public final class Diagnostics {
         }
     }
 
+    /**
+     * Определяет, где именно произошёл сбой — по стеку исключения.
+     *
+     * Зачем: в коде 178 пустых catch (Throwable). Пустой catch сам по себе
+     * уместен (чужой ContentProvider может не ответить), но без следа он
+     * превращает реальный дефект в тишину: так уже «молча пропали» setprop и
+     * файл замеров. Теперь в журнал можно записать файл и строку, а не только
+     * текст исключения.
+     *
+     * @return "Файл.java:123" или "unknown"
+     */
+    public static String origin(Throwable error) {
+        if (error == null) return "unknown";
+        try {
+            StackTraceElement[] trace = error.getStackTrace();
+            if (trace == null) return "unknown";
+            for (StackTraceElement el : trace) {
+                String cls = el.getClassName();
+                if (cls == null || !cls.startsWith("com.doxaiz.launcher.")) continue;
+                String file = el.getFileName();
+                if (file == null) continue;
+                return file + ":" + el.getLineNumber();
+            }
+            if (trace.length > 0 && trace[0].getFileName() != null) {
+                return trace[0].getFileName() + ":" + trace[0].getLineNumber();
+            }
+        } catch (Throwable ignored) {
+            // Определение места сбоя не имеет права падать.
+        }
+        return "unknown";
+    }
+
     /** Привязывает хранилище и поднимает журнал с диска (вызывается один раз при старте). */
     public static void init(SharedPreferences prefs) {
         if (prefs == null) return;
