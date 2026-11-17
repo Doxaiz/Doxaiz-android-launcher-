@@ -243,67 +243,6 @@ endlog
 
 check_crash "старт" || true
 
-log "Рабочий стол: дерево интерфейса"
-dump_ui home "ui-home"
-if grep -q "нет ни одной подписи" "$OUT/ui-home.txt" 2>/dev/null; then
-    note "ui-home" "подписей приложений нет — на чистой установке это ожидаемо"
-fi
-endlog
-
-log "Каталог приложений"
-# Жест — тот же, что у пользователя: свайп вверх по рабочему столу.
-# Важно: перед свайпом нельзя перезапускать активность — на эмуляторе жест
-# приходит во время старта и теряется (проверено в CI). Поэтому здесь только
-# свайп, ожидание и дамп; повторы нужны из-за нестабильности эмулятора.
-DRAWER_NODES=0
-for attempt in 1 2 3 4; do
-    adb shell input swipe 540 1700 540 600 250
-    sleep 4
-    dump_ui drawer "ui-drawer"
-    DRAWER_NODES="$(sed -n 's/^узлов=//p' "$OUT/ui-drawer.txt" 2>/dev/null | head -1)"
-    echo "attempt $attempt: узлов ${DRAWER_NODES:-0}" >> "$OUT/drawer-attempts.txt"
-    if [ "${DRAWER_NODES:-0}" -ge 40 ]; then
-        break
-    fi
-    adb shell input keyevent KEYCODE_BACK
-    sleep 2
-done
-note "drawer" "узлов в каталоге=${DRAWER_NODES:-0}"
-# Открытие каталога свайпом на эмуляторе нестабильно: в прогонах, где жест
-# срабатывает, дерево каталога содержит 117 узлов (поиск, чипы категорий,
-# алфавитная полоса, сетка иконок), и это уже зафиксировано. Но загруженный
-# эмулятор теряет часть вводов, поэтому неудачный жест — предупреждение, а не
-# провал: иначе CI краснеет от нестабильности эмулятора, а не от кода.
-if [ "${DRAWER_NODES:-0}" -lt 40 ]; then
-    if grep -qE "isn't responding|не отвечает" "$OUT/ui-drawer.xml" 2>/dev/null; then
-        note "drawer" "экран перекрыт системным диалогом — результат недостоверен"
-    else
-        note "drawer" "жест не сработал за 4 попытки (известная нестабильность эмулятора)"
-    fi
-    echo "::warning title=каталог::каталог не открылся за 4 попытки (узлов=${DRAWER_NODES:-0}); это нестабильность эмулятора, не провал сборки"
-fi
-check_crash "каталог" || true
-endlog
-
-log "Прокрутка каталога и метрики кадров"
-# Эмулятор рисует программно: числа показывают, что кадры вообще идут и
-# насколько тяжёлые шаги, но не FPS на телефоне.
-adb shell dumpsys gfxinfo "$PKG" reset >/dev/null 2>&1 || true
-for _ in 1 2 3; do
-    adb shell input swipe 540 1700 540 700 150
-    sleep 1
-    adb shell input swipe 540 700 540 1700 150
-    sleep 1
-done
-adb shell dumpsys gfxinfo "$PKG" > "$OUT/gfxinfo-drawer.txt" 2>/dev/null || true
-grep -E "Total frames rendered|Janky frames:|50th percentile|90th percentile|95th percentile|Number Missed Vsync|Number Slow UI thread|Number Slow bitmap uploads" \
-    "$OUT/gfxinfo-drawer.txt" | tee "$OUT/gfxinfo-summary.txt"
-note "gfxinfo-drawer" "$(tr '\n' ' ' < "$OUT/gfxinfo-summary.txt" | cut -c1-700)"
-note "gfxinfo-note" "эмулятор рисует через swiftshader: числа относительные, FPS на телефоне не подтверждают"
-adb exec-out screencap -p > "$OUT/screen-drawer.png" 2>/dev/null || true
-check_crash "прокрутка" || true
-endlog
-
 log "Аварийный возврат: аварийный экран и уход на системный лаунчер"
 
 # Проверяем поведение, а не рассуждение. Состояние «предыдущий запуск рабочего
@@ -401,6 +340,67 @@ if [ "$scenario_ok" = "1" ]; then
     focus_now > "$OUT/crash-restored-focus.txt" 2>/dev/null || true
     note "crash-restored" "$(tr '\n' ' ' < "$OUT/crash-restored-focus.txt" | cut -c1-300)"
 fi
+endlog
+
+log "Рабочий стол: дерево интерфейса"
+dump_ui home "ui-home"
+if grep -q "нет ни одной подписи" "$OUT/ui-home.txt" 2>/dev/null; then
+    note "ui-home" "подписей приложений нет — на чистой установке это ожидаемо"
+fi
+endlog
+
+log "Каталог приложений"
+# Жест — тот же, что у пользователя: свайп вверх по рабочему столу.
+# Важно: перед свайпом нельзя перезапускать активность — на эмуляторе жест
+# приходит во время старта и теряется (проверено в CI). Поэтому здесь только
+# свайп, ожидание и дамп; повторы нужны из-за нестабильности эмулятора.
+DRAWER_NODES=0
+for attempt in 1 2 3 4; do
+    adb shell input swipe 540 1700 540 600 250
+    sleep 4
+    dump_ui drawer "ui-drawer"
+    DRAWER_NODES="$(sed -n 's/^узлов=//p' "$OUT/ui-drawer.txt" 2>/dev/null | head -1)"
+    echo "attempt $attempt: узлов ${DRAWER_NODES:-0}" >> "$OUT/drawer-attempts.txt"
+    if [ "${DRAWER_NODES:-0}" -ge 40 ]; then
+        break
+    fi
+    adb shell input keyevent KEYCODE_BACK
+    sleep 2
+done
+note "drawer" "узлов в каталоге=${DRAWER_NODES:-0}"
+# Открытие каталога свайпом на эмуляторе нестабильно: в прогонах, где жест
+# срабатывает, дерево каталога содержит 117 узлов (поиск, чипы категорий,
+# алфавитная полоса, сетка иконок), и это уже зафиксировано. Но загруженный
+# эмулятор теряет часть вводов, поэтому неудачный жест — предупреждение, а не
+# провал: иначе CI краснеет от нестабильности эмулятора, а не от кода.
+if [ "${DRAWER_NODES:-0}" -lt 40 ]; then
+    if grep -qE "isn't responding|не отвечает" "$OUT/ui-drawer.xml" 2>/dev/null; then
+        note "drawer" "экран перекрыт системным диалогом — результат недостоверен"
+    else
+        note "drawer" "жест не сработал за 4 попытки (известная нестабильность эмулятора)"
+    fi
+    echo "::warning title=каталог::каталог не открылся за 4 попытки (узлов=${DRAWER_NODES:-0}); это нестабильность эмулятора, не провал сборки"
+fi
+check_crash "каталог" || true
+endlog
+
+log "Прокрутка каталога и метрики кадров"
+# Эмулятор рисует программно: числа показывают, что кадры вообще идут и
+# насколько тяжёлые шаги, но не FPS на телефоне.
+adb shell dumpsys gfxinfo "$PKG" reset >/dev/null 2>&1 || true
+for _ in 1 2 3; do
+    adb shell input swipe 540 1700 540 700 150
+    sleep 1
+    adb shell input swipe 540 700 540 1700 150
+    sleep 1
+done
+adb shell dumpsys gfxinfo "$PKG" > "$OUT/gfxinfo-drawer.txt" 2>/dev/null || true
+grep -E "Total frames rendered|Janky frames:|50th percentile|90th percentile|95th percentile|Number Missed Vsync|Number Slow UI thread|Number Slow bitmap uploads" \
+    "$OUT/gfxinfo-drawer.txt" | tee "$OUT/gfxinfo-summary.txt"
+note "gfxinfo-drawer" "$(tr '\n' ' ' < "$OUT/gfxinfo-summary.txt" | cut -c1-700)"
+note "gfxinfo-note" "эмулятор рисует через swiftshader: числа относительные, FPS на телефоне не подтверждают"
+adb exec-out screencap -p > "$OUT/screen-drawer.png" 2>/dev/null || true
+check_crash "прокрутка" || true
 endlog
 
 log "Итог"
