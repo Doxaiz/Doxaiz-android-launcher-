@@ -524,7 +524,7 @@ public final class Prefs {
     public void recordAppLaunch(String appKey) {
         if (appKey == null || appKey.isEmpty()) return;
         try {
-            final String serialized;
+            final Map<String, long[]> copy;
             synchronized (usageLock) {
                 Map<String, long[]> map = ensureUsageCacheLocked();
                 long[] rec = map.get(appKey);
@@ -545,18 +545,32 @@ public final class Prefs {
                     if (oldestKey != null) map.remove(oldestKey);
                 }
 
-                JSONObject root = new JSONObject();
+                // Под блокировкой только копия карты (до 80 записей). Построение
+                // JSON раньше шло здесь же, в UI-потоке, на каждое нажатие иконки
+                // — то есть прямо в момент, когда пользователь ждёт запуска
+                // приложения. Теперь строка собирается в фоновом потоке, а копия
+                // защищает от изменений карты под нами.
+                copy = new java.util.HashMap<>(map.size() * 2);
                 for (Map.Entry<String, long[]> e : map.entrySet()) {
-                    JSONObject obj = new JSONObject();
-                    obj.put("c", (int) e.getValue()[0]);
-                    obj.put("t", e.getValue()[1]);
-                    root.put(e.getKey(), obj);
+                    long[] v = e.getValue();
+                    copy.put(e.getKey(), new long[]{v[0], v[1]});
                 }
-                serialized = root.toString();
             }
-            persistUsageAsync(serialized);
+            persistUsageAsync(copy);
         } catch (Throwable ignored) {
         }
+    }
+
+    /** Копия карты запусков в JSON. Выполняется в фоновом потоке, вне блокировки. */
+    private static String serializeUsage(Map<String, long[]> map) {
+        JSONObject root = new JSONObject();
+        for (Map.Entry<String, long[]> e : map.entrySet()) {
+            JSONObject obj = new JSONObject();
+            obj.put("c", (int) e.getValue()[0]);
+            obj.put("t", e.getValue()[1]);
+            root.put(e.getKey(), obj);
+        }
+        return root.toString();
     }
 
     /** Исполнитель для редких фоновых записей настроек (журнал запусков, статистика). */
@@ -567,17 +581,20 @@ public final class Prefs {
                 return t;
             });
 
-    private void persistUsageAsync(final String json) {
+    private void persistUsageAsync(final Map<String, long[]> snapshot) {
         try {
             PERSIST_IO.execute(() -> {
                 try {
-                    sp.edit().putString(KEY_USAGE_JSON, json).apply();
+                    sp.edit().putString(KEY_USAGE_JSON, serializeUsage(snapshot)).apply();
                 } catch (Throwable ignored) {
                 }
             });
         } catch (Throwable ignored) {
             // Пул уже остановлен (выход из процесса) — пишем синхронно, чтобы не потерять счётчик.
-            sp.edit().putString(KEY_USAGE_JSON, json).apply();
+            try {
+                sp.edit().putString(KEY_USAGE_JSON, serializeUsage(snapshot)).apply();
+            } catch (Throwable ignored2) {
+            }
         }
     }
 

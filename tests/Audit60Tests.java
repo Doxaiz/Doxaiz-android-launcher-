@@ -45,6 +45,7 @@ public final class Audit60Tests {
         iconDownsampleOnlyForLargeFiles();
         importTwoPhaseSafety();
         diskStatsCacheIsIsolated();
+        importResultHasContent();
 
         System.out.println("Audit60Tests: " + n + " проверок пройдено");
     }
@@ -272,6 +273,23 @@ public final class Audit60Tests {
         }
         //noinspection ResultOfMethodCallIgnored
         f.delete();
+    }
+
+    // ------------------------------------------- 7. применение импорта
+
+    /** Result.hasContent: «прочитали, но применять нечего» отличается от успеха. */
+    private static void importResultHasContent() {
+        LayoutImporter.Result empty = LayoutImporter.Result.notAttempted(4);
+        check(!empty.hasContent(), "notAttempted — применять нечего");
+
+        LayoutImporter.Result oneApp = new LayoutImporter.Result(true, "XOS", 1, 0, 5);
+        check(oneApp.hasContent(), "одна иконка — уже содержимое");
+
+        LayoutImporter.Result folderOnly = new LayoutImporter.Result(true, "XOS", 0, 1, 5);
+        check(folderOnly.hasContent(), "папка без приложений — тоже содержимое");
+
+        LayoutImporter.Result failure = new LayoutImporter.Result(false, "", 0, 0, 4);
+        check(!failure.hasContent(), "неуспех — применять нечего");
     }
 
     // ------------------------------------------------------------ инфраструктура

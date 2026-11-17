@@ -9919,7 +9919,10 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         // Флаг ставим и при неуспехе: повторять попытку каждый запуск бессмысленно,
         // а пользователь при желании запускает импорт вручную из настроек.
         prefs.setSystemLayoutImportDone(true);
-        if (!res.success) return;
+        // applySnapshot успевает записать раскладку и сам; если применять было
+        // нечего (меньше двух иконок), рабочий стол не перестраиваем — иначе
+        // пользователь видит мигание и тост «перенесено 0 иконок».
+        if (!res.success || !res.hasContent()) return;
         ensurePageExists();
         rebuildDesktop();
         Toast.makeText(this,

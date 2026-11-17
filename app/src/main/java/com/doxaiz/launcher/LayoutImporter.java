@@ -56,6 +56,14 @@ public final class LayoutImporter {
         public static Result notAttempted(int fallbackCols) {
             return new Result(false, "", 0, 0, fallbackCols);
         }
+
+        /**
+         * Есть ли что применять. Нужен вызывающему, чтобы не перестраивать
+         * рабочий стол впустую, когда чужая оболочка ничего не дала.
+         */
+        public boolean hasContent() {
+            return success || importedApps > 0 || importedFolders > 0;
+        }
     }
 
     private static final String[][] KNOWN_PROVIDERS = new String[][]{
