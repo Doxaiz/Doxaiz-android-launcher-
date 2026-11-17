@@ -47,6 +47,15 @@ public final class LayoutImporter {
             this.importedFolders = importedFolders;
             this.detectedCols = detectedCols;
         }
+
+        /**
+         * Результат «импорт не выполнялся»: нужен, когда чужую базу штатной
+         * оболочки уже спрашивали раньше и получили отказ. Отличается от
+         * неуспеха тем, что ничего не читает и ничего не меняет.
+         */
+        public static Result notAttempted(int fallbackCols) {
+            return new Result(false, "", 0, 0, fallbackCols);
+        }
     }
 
     private static final String[][] KNOWN_PROVIDERS = new String[][]{
@@ -87,21 +96,24 @@ public final class LayoutImporter {
         return tryImportFromSystemLauncher(ctx, appsByKey, desktop, prefs, fallbackCols);
     }
 
-    private static Result tryImportFromSystemLauncher(
+    /**
+     * Шаг 1 из 2: ЧИТАЕТ базу штатной оболочки. Может блокироваться надолго
+     * (IPC к чужому ContentProvider), поэтому вызывать только из фонового потока.
+     *
+     * @return снимок прочитанных строк или null, если прочитать не удалось
+     */
+    public static Snapshot readSystemLauncher(
             Context ctx,
             Map<String, AppEntry> appsByKey,
-            DesktopModel desktop,
-            Prefs prefs,
-            int initialCols
+            Prefs prefs
     ) {
-        if (ctx == null || appsByKey == null || appsByKey.isEmpty() || desktop == null) {
-            return new Result(false, "", 0, 0, initialCols);
-        }
+        int fallbackCols = (prefs != null) ? prefs.getColumns() : 4;
+        if (ctx == null || appsByKey == null || appsByKey.isEmpty()) return null;
 
-        // Индексы для точного и резервного сопоставления приложений
         Map<String, String> byComponent = new HashMap<>();
         Map<String, String> byPackage = new HashMap<>();
         for (AppEntry e : appsByKey.values()) {
+            if (e == null || e.componentName == null) continue;
             String cmpKey = e.componentName.flattenToString();
             if (!byComponent.containsKey(cmpKey) || e.isMainProfile) {
                 byComponent.put(cmpKey, e.key);
@@ -112,34 +124,52 @@ public final class LayoutImporter {
         }
 
         List<String[]> candidates = buildProviderCandidates(ctx);
-
         for (String[] provider : candidates) {
             Cursor cursor = null;
             try {
                 cursor = ctx.getContentResolver().query(
                         Uri.parse(provider[0]), null, null, null, null
                 );
-                if (cursor == null || cursor.getCount() == 0) {
-                    continue;
-                }
-                Result res = parseFavoritesCursor(
-                        cursor, provider[1], byComponent, byPackage, desktop, prefs, initialCols
-                );
-                if (res.success) {
-                    return res;
-                }
+                if (cursor == null || cursor.getCount() == 0) continue;
+                Snapshot snap = readFavoritesCursor(cursor, provider[1], byComponent, byPackage, fallbackCols);
+                if (snap != null && snap.hasContent()) return snap;
             } catch (Throwable ignored) {
-                // Android 14+ может ограничивать доступ к БД OEM-лаунчера — переходим к следующему
+                // Android 14+ ограничивает доступ к БД OEM-лаунчера — идём дальше.
             } finally {
                 if (cursor != null) {
-                    try {
-                        cursor.close();
-                    } catch (Throwable ignored) {
-                    }
+                    try { cursor.close(); } catch (Throwable ignored) { }
                 }
             }
         }
-        return new Result(false, "", 0, 0, initialCols);
+        return null;
+    }
+
+    /**
+     * Шаг 2 из 2: ПРИМЕНЯЕТ прочитанный снимок к модели рабочего стола.
+     * Чистая работа с памятью — безопасно вызывать в UI-потоке.
+     */
+    public static Result applySnapshot(Snapshot snap, DesktopModel desktop, Prefs prefs) {
+        int fallbackCols = (prefs != null) ? prefs.getColumns() : 4;
+        if (snap == null || desktop == null) return new Result(false, "", 0, 0, fallbackCols);
+        return applyRows(snap, desktop, prefs, fallbackCols);
+    }
+
+    private static Result tryImportFromSystemLauncher(
+            Context ctx,
+            Map<String, AppEntry> appsByKey,
+            DesktopModel desktop,
+            Prefs prefs,
+            int initialCols
+    ) {
+        if (ctx == null || appsByKey == null || appsByKey.isEmpty() || desktop == null) {
+            return new Result(false, "", 0, 0, initialCols);
+        }
+        // Старый синхронный путь оставлен для кнопки «Импортировать» в настройках,
+        // где пользователь сам инициировал действие. Автоматический импорт при
+        // первом запуске идёт через readSystemLauncher() в фоновом потоке.
+        Snapshot snap = readSystemLauncher(ctx, appsByKey, prefs);
+        if (snap == null) return new Result(false, "", 0, 0, initialCols);
+        return applyRows(snap, desktop, prefs, initialCols);
     }
 
     /**
@@ -224,13 +254,33 @@ public final class LayoutImporter {
         }
     }
 
-    private static Result parseFavoritesCursor(
+    /** Снимок прочитанной базы: строки + уже сопоставленные ключи приложений. */
+    public static final class Snapshot {
+        final String sourceName;
+        final List<RawRow> rows;
+        final Map<String, String> byComponent;
+        final Map<String, String> byPackage;
+        final int initialCols;
+
+        Snapshot(String sourceName, List<RawRow> rows, Map<String, String> byComponent,
+                 Map<String, String> byPackage, int initialCols) {
+            this.sourceName = sourceName;
+            this.rows = rows;
+            this.byComponent = byComponent;
+            this.byPackage = byPackage;
+            this.initialCols = initialCols;
+        }
+
+        boolean hasContent() {
+            return rows != null && !rows.isEmpty();
+        }
+    }
+
+    private static Snapshot readFavoritesCursor(
             Cursor c,
             String sourceName,
             Map<String, String> byComponent,
             Map<String, String> byPackage,
-            DesktopModel desktop,
-            Prefs prefs,
             int initialCols
     ) {
         int idxId = c.getColumnIndex("_id");
@@ -243,7 +293,7 @@ public final class LayoutImporter {
         int idxCellY = c.getColumnIndex("cellY");
 
         if (idxIntent < 0 || idxContainer < 0) {
-            return new Result(false, sourceName, 0, 0, initialCols);
+            return null;
         }
 
         // Проход 1: вычитываем все строки и определяем реальную ширину сетки (4 или 5 столбцов)
@@ -269,7 +319,26 @@ public final class LayoutImporter {
             }
         }
 
-        int effectiveCols = detectGridColumns(maxDesktopCellX, initialCols);
+        return new Snapshot(sourceName, rows, byComponent, byPackage,
+                detectGridColumns(maxDesktopCellX, initialCols));
+    }
+
+    /**
+     * Применяет прочитанные строки к модели: раскладывает док, папки и страницы
+     * по точным координатам (cellX, cellY). Только память, без ввода-вывода.
+     */
+    private static Result applyRows(
+            Snapshot snap,
+            DesktopModel desktop,
+            Prefs prefs,
+            int fallbackCols
+    ) {
+        final String sourceName = snap.sourceName;
+        final List<RawRow> rows = snap.rows;
+        final Map<String, String> byComponent = snap.byComponent;
+        final Map<String, String> byPackage = snap.byPackage;
+        int initialCols = (snap.initialCols > 0) ? snap.initialCols : fallbackCols;
+        int effectiveCols = initialCols;
 
         // Проход 2: раскладываем док, папки и страницы по точным координатам
         class HotseatSlot {

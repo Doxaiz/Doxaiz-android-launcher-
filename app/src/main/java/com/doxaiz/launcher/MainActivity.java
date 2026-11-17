@@ -2399,6 +2399,8 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     @Override
     public void onAppsUpdated(List<AppEntry> visible, List<AppEntry> hidden,
                               Map<String, AppEntry> byKey, String newlyInstalledPkg) {
+        // Новое поколение данных: незавершённый фоновый импорт уже неактуален.
+        final int generation = ++appsGeneration;
         lastDrawerRecentSig = "";
         lastAlphabetBarSig = "";
         visibleApps.clear();
@@ -2414,18 +2416,21 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
         boolean bottomAlign = prefs.isHomeBottomAligned();
         if (!desktop.isInitialized() && !visible.isEmpty()) {
-            // Пробуем бережно перенести раскладку и точные координаты (включая 5 столбцов XOS)
-            LayoutImporter.Result imp = LayoutImporter.tryImportFromSystemLauncher(this, appsByKey, desktop, prefs);
+            // Базу штатной оболочки НЕ читаем в UI-потоке. Это запрос к чужому
+            // ContentProvider: на Android 14 он обычно запрещён, а если провайдер
+            // завис — вызов не возвращается вовсе, и пользователь видит чёрный
+            // экран или ANR. Раньше это происходило при каждом старте с пустым
+            // рабочим столом (то есть на каждом запуске после неудачного импорта).
+            //
+            // Поэтому: сразу показываем обычную раскладку, а импорт со штатного
+            // экрана пытаемся сделать в фоне ОДИН раз за всё время — и только
+            // если пользователь сам его ещё не запускал из настроек.
             int effectiveCols = prefs.getColumns();
-            if (!imp.success) {
-                desktop.buildInitialLayout(visible, effectiveCols, bottomAlign);
-            } else {
-                Toast.makeText(
-                        this,
-                        "Перенесено из " + imp.sourceName + ": " + imp.importedApps + " иконок (" + imp.detectedCols + " ст.)",
-                        Toast.LENGTH_SHORT
-                ).show();
-            }
+            // «Стол был пуст» нужно решить ДО построения раскладки: после него
+            // containsAnyDesktopItem() всегда true, и импорт не запустился бы никогда.
+            boolean desktopWasEmpty = !desktop.containsAnyDesktopItem();
+            desktop.buildInitialLayout(visible, effectiveCols, bottomAlign);
+            maybeImportSystemLayoutInBackground(byKey, desktopWasEmpty, generation);
         } else {
             // ВАЖНО: восстанавливаем ключи переименованных Activity на тех же клетках (col, row),
             // никогда не удаляя и не сдвигая расставленные пользователем иконки!
@@ -4399,6 +4404,13 @@ public class MainActivity extends Activity implements AppRepository.Listener {
      */
     private void beginPendingDrawerDrag(AppEntry entry, View sourceTile) {
         if (entry == null) return;
+        // Приложение уже есть на рабочем столе (в том числе внутри папки или в
+        // доке) — перетаскивать нечего. Иначе второй экземпляр появлялся бы на
+        // другой клетке, а dropItemOnCell() при этом не видит дублей и не мешает.
+        if (desktop.containsAppAnywhere(entry.key)) {
+            Toast.makeText(this, "Уже на рабочем столе", Toast.LENGTH_SHORT).show();
+            return;
+        }
         dragPending = true;
         dragging = false;
         dragFromDrawerEntry = entry;
@@ -4626,6 +4638,12 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         cancelDragCleanup();
 
         if (drawerEntry != null) {
+            // Дубль мог появиться, пока палец вёл иконку (например, приложение
+            // добавилось со страницы «Все приложения» в фоне): не создаём второй.
+            if (!remove && desktop.containsAppAnywhere(drawerEntry.key)) {
+                rebuildDesktop();
+                return;
+            }
             if (remove || toCol < 0 || toRow < 0) {
                 if (hadAutoPage && desktop.pruneTrailingEmptyPage()) {
                     currentPage = Math.max(0, Math.min(currentPage, desktop.pages.size() - 1));
@@ -9658,23 +9676,151 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         }
     }
 
-    private void runSystemLayoutImport() {
-        LayoutImporter.Result res = LayoutImporter.tryImportFromSystemLauncher(
-                this, appsByKey, desktop, prefs
-        );
-        if (res.success) {
-            currentPage = 0;
-            rebuildDesktop();
-            Toast.makeText(
-                    this,
-                    "Перенесено из " + res.sourceName + ": иконок " + res.importedApps
-                            + ", папок " + res.importedFolders + " (" + res.detectedCols + " ст.)",
-                    Toast.LENGTH_LONG
-            ).show();
-            showScreen(SCREEN_HOME);
+    /** Защищает от повторного запуска фонового импорта в одном процессе. */
+    private boolean systemLayoutImportInFlight = false;
+
+    /**
+     * Номер поколения данных о приложениях. Увеличивается при каждом
+     * onAppsUpdated(): импорт со штатного экрана, прочитанный в фоне, нельзя
+     * применять к уже устаревшей карте приложений — иначе иконки получат
+     * подписи и ключи от предыдущего сканирования.
+     */
+    private int appsGeneration = 0;
+
+    /**
+     * Однократная попытка перенести раскладку со штатного экрана — в фоне.
+     *
+     * Порядок важен: пользователь уже видит рабочий стол (обычная раскладка),
+     * чтение чужого провайдера идёт в отдельном потоке, а применение — в UI.
+     * Если импорт удался, он заменяет только что построенную раскладку; если нет,
+     * об этом не сообщаем (так и было задумано: это неявная помощь, а не ошибка).
+     */
+    private void maybeImportSystemLayoutInBackground(Map<String, AppEntry> byKey,
+                                                     boolean desktopWasEmpty,
+                                                     int generation) {
+        if (systemLayoutImportInFlight) return;
+        if (prefs.isSystemLayoutImportDone()) return;
+        // Импортируем только в пустой рабочий стол: незачем перетирать
+        // расставленные пользователем иконки результатом чужой базы.
+        if (!desktopWasEmpty) {
+            prefs.setSystemLayoutImportDone(true);
             return;
         }
+        systemLayoutImportInFlight = true;
+        final Map<String, AppEntry> snapshotApps = new HashMap<>(byKey);
+        // Запомним состояние до: репозиторий сканирует пакеты в единственном фоновом
+        // потоке, и результат импорта должен попасть в уже собранные данные. Если
+        // за время чтения база успела обновиться — импорт применится к устаревшей
+        // карте, и иконки получат устаревшие подписи. Поэтому применяем только
+        // когда onAppsUpdated() не перезапускался (проверка по счётчику ниже).
+        final boolean onBgThread = repository != null && repository.isBackgroundThread();
+        try {
+            if (onBgThread) {
+                // Импорт уже идёт внутри фонового сканирования: ждать себя же нельзя,
+                // иначе задача встанет в очередь за самой собой и не выполнится.
+                // Это не ошибка, а нормальный признак повторного входа, поэтому в
+                // журнал диагностики ничего не пишем — иначе он заполнялся бы
+                // «исключениями», которых не было.
+                systemLayoutImportInFlight = false;
+                return;
+            }
+            repository.executeInBackground(() -> {
+                LayoutImporter.Snapshot snap =
+                        LayoutImporter.readSystemLauncher(MainActivity.this, snapshotApps, prefs);
+                uiHandler.post(() -> finishSystemLayoutImport(snap, generation));
+            });
+        } catch (Throwable t) {
+            systemLayoutImportInFlight = false;
+            Diagnostics.record("MainActivity.systemImport", t);
+        }
+    }
 
+    /** Применяет прочитанную базу штатной оболочки к рабочим страницам (UI-поток). */
+    private void finishSystemLayoutImport(LayoutImporter.Snapshot snap, int generation) {
+        systemLayoutImportInFlight = false;
+        if (isFinishing() || isDestroyed()) return;
+        if (generation != appsGeneration) {
+            // Пока читали чужую базу, список приложений успел обновиться — снимок
+            // ссылается на устаревшие ключи. Не применяем и попробуем позже.
+            return;
+        }
+        if (snap == null) {
+            // Не удалось прочитать — остаётся раскладка, построенная при старте.
+            prefs.setSystemLayoutImportDone(true);
+            return;
+        }
+        LayoutImporter.Result res = LayoutImporter.applySnapshot(snap, desktop, prefs);
+        // Флаг ставим и при неуспехе: повторять попытку каждый запуск бессмысленно,
+        // а пользователь при желании запускает импорт вручную из настроек.
+        prefs.setSystemLayoutImportDone(true);
+        if (!res.success) return;
+        ensurePageExists();
+        rebuildDesktop();
+        Toast.makeText(this,
+                "Перенесено из " + res.sourceName + ": " + res.importedApps
+                        + " иконок (" + res.detectedCols + " ст.)",
+                Toast.LENGTH_SHORT).show();
+    }
+
+    /** Гарантирует, что в модели есть хотя бы одна страница (после импорта). */
+    private void ensurePageExists() {
+        if (desktop.pages.isEmpty()) desktop.pages.add(new ArrayList<>());
+    }
+
+    /**
+     * Импорт по кнопке в настройках.
+     *
+     * Раньше этот вызов читал чужой ContentProvider прямо в UI-потоке: если
+     * провайдер не отвечает, приложение замирало до ANR. Теперь чтение идёт в
+     * фоне; на время чтения показываем «Читаю…», чтобы ожидание было понятным.
+     */
+    private void runSystemLayoutImport() {
+        if (systemLayoutImportInFlight) return;
+        systemLayoutImportInFlight = true;
+        final Map<String, AppEntry> snapshotApps = new HashMap<>(appsByKey);
+        final int generation = appsGeneration;
+        Toast.makeText(this, "Читаю штатный экран…", Toast.LENGTH_SHORT).show();
+        try {
+            repository.executeInBackground(() -> {
+                LayoutImporter.Snapshot snap =
+                        LayoutImporter.readSystemLauncher(this, snapshotApps, prefs);
+                uiHandler.post(() -> {
+                    systemLayoutImportInFlight = false;
+                    if (isFinishing() || isDestroyed()) return;
+                    if (generation != appsGeneration) return;
+                    if (snap == null) {
+                        showImportUnavailableDialog();
+                        return;
+                    }
+                    LayoutImporter.Result res = LayoutImporter.applySnapshot(snap, desktop, prefs);
+                    if (!res.success) {
+                        showImportUnavailableDialog();
+                        return;
+                    }
+                    // Ручной импорт удался — значит, автоматическую попытку при
+                    // следующем запуске делать уже незачем.
+                    prefs.setSystemLayoutImportDone(true);
+                    currentPage = 0;
+                    ensurePageExists();
+                    rebuildDesktop();
+                    Toast.makeText(
+                            this,
+                            "Перенесено из " + res.sourceName + ": иконок " + res.importedApps
+                                    + ", папок " + res.importedFolders + " (" + res.detectedCols + " ст.)",
+                            Toast.LENGTH_LONG
+                    ).show();
+                    showScreen(SCREEN_HOME);
+                });
+            });
+        } catch (Throwable t) {
+            systemLayoutImportInFlight = false;
+            Diagnostics.record("MainActivity.runSystemLayoutImport", t);
+            showImportUnavailableDialog();
+        }
+    }
+
+    /** Объяснение, почему перенос со штатного экрана невозможен. */
+    private void showImportUnavailableDialog() {
         LinearLayout box = createModalBox();
         TextView title = new TextView(this);
         title.setText("Импорт со штатного экрана");

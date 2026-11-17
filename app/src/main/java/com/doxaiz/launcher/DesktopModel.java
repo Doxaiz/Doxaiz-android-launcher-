@@ -341,10 +341,25 @@ public final class DesktopModel {
         }
     }
 
+    /**
+     * Директория guard-файла. Отдельный метод нужен, чтобы JVM-тесты могли
+     * подставить временный каталог: подмена через android.content.Context
+     * в обычном unit-тесте недоступна.
+     */
+    File guardDir() {
+        return (appContext != null) ? appContext.getFilesDir() : null;
+    }
+
+    /** @return путь к guard-файлу или null, если файловой системы нет (unit-тест). */
+    File guardFile() {
+        File dir = guardDir();
+        return (dir != null) ? new File(dir, GUARD_FILE) : null;
+    }
+
     private String readGuardFile() {
-        if (appContext == null) return null;
+        File target = guardFile();
+        if (target == null) return null;
         try {
-            File target = new File(appContext.getFilesDir(), GUARD_FILE);
             if (!target.isFile() || target.length() <= 2L || target.length() > BackupHelper.MAX_BACKUP_BYTES) {
                 return null;
             }
@@ -564,9 +579,20 @@ public final class DesktopModel {
                                     }
                                 }
                                 if (!placed) {
-                                    // Все MAX_PAGES страниц заполнены до предела — сохраняем в списке без потери
+                                    // Все MAX_PAGES страниц заполнены до предела. Иконку нельзя
+                                    // выбросить (это потеря данных пользователя), но и ставить её
+                                    // на занятую клетку нельзя: findItemIndexAt() ищет элемент по
+                                    // координатам и вернул бы ПЕРВЫЙ попавшийся, то есть второй
+                                    // элемент на той же клетке стал бы недоступен для перетаскивания
+                                    // и нажатий. Даём ей собственную строку за пределами видимой
+                                    // сетки: иконка сохранена, координаты уникальны.
+                                    //
+                                    // Свободную строку ищем по фактическому содержимому страницы,
+                                    // а не по счётчику в памяти: счётчик обнулялся при каждом
+                                    // запуске процесса, и после перезапуска две переполненные
+                                    // иконки снова получили бы одну и ту же координату.
                                     ov.col = cols - 1;
-                                    ov.row = GRID_ROWS - 1;
+                                    ov.row = firstFreeHiddenRow(page, ov.col);
                                     page.add(ov);
                                 }
                             }
@@ -576,6 +602,26 @@ public final class DesktopModel {
             }
         }
         if (changed) save();
+    }
+
+    /**
+     * Первая строка за пределами видимой сетки, свободная по колонке {@code col}.
+     * Нужна только для переполнения при MAX_PAGES — там же, где вызывается.
+     */
+    private int firstFreeHiddenRow(List<DesktopItem> page, int col) {
+        int row = GRID_ROWS;
+        boolean busy = true;
+        while (busy && row < GRID_ROWS + page.size() + 1) {
+            busy = false;
+            for (DesktopItem it : page) {
+                if (it.col == col && it.row == row) {
+                    busy = true;
+                    break;
+                }
+            }
+            if (busy) row++;
+        }
+        return row;
     }
 
     private int[] findFirstFreeInMatrix(boolean[][] occ, int cols, boolean preferBottom) {
@@ -820,6 +866,14 @@ public final class DesktopModel {
         if (newPageCount <= 1) return 0;
         int next = (removedPage < oldHome) ? (oldHome - 1) : oldHome;
         return Math.max(0, Math.min(next, newPageCount - 1));
+    }
+
+    /** Есть ли на рабочем столе хоть одна иконка или папка (док не считается). */
+    public boolean containsAnyDesktopItem() {
+        for (List<DesktopItem> page : pages) {
+            if (page != null && !page.isEmpty()) return true;
+        }
+        return false;
     }
 
     public boolean containsAppAnywhere(String appKey) {

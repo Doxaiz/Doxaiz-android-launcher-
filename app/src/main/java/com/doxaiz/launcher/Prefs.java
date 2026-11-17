@@ -140,6 +140,25 @@ public final class Prefs {
     private static final String KEY_CRASH_LAST_FALLBACK = "crash_guard_last_fallback";
     private static final String KEY_CRASH_ENABLED = "crash_guard_enabled";
 
+    // ---------------------------------------------------- Импорт со штатного экрана
+
+    /**
+     * Спрашивали ли уже базу штатной оболочки при первом запуске.
+     *
+     * Зачем: LayoutImporter читает ContentProvider чужого лаунчера (XOS/HiOS/
+     * Launcher3). На Android 14 такой доступ обычно запрещён, и каждый старт с
+     * пустым рабочим столом заново шёл в IPC к провайдеру, который мог не
+     * ответить вовсе — это блокировало UI-поток. Теперь неудачная попытка тоже
+     * запоминается: спросили один раз — и хватит.
+     */
+    private static final String KEY_SYSTEM_IMPORT_DONE = "system_layout_import_done";
+
+    public boolean isSystemLayoutImportDone() { return sp.getBoolean(KEY_SYSTEM_IMPORT_DONE, false); }
+
+    public void setSystemLayoutImportDone(boolean done) {
+        sp.edit().putBoolean(KEY_SYSTEM_IMPORT_DONE, done).apply();
+    }
+
     public boolean isCrashGuardEnabled() { return sp.getBoolean(KEY_CRASH_ENABLED, true); }
 
     public void setCrashGuardEnabled(boolean enabled) {
