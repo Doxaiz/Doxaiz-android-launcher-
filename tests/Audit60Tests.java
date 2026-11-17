@@ -44,6 +44,7 @@ public final class Audit60Tests {
         systemImportFlagRoundTrip();
         iconDownsampleOnlyForLargeFiles();
         importTwoPhaseSafety();
+        diskStatsCacheIsIsolated();
 
         System.out.println("Audit60Tests: " + n + " проверок пройдено");
     }
@@ -232,6 +233,45 @@ public final class Audit60Tests {
 
         // Модель после таких вызовов не должна потерять страницы.
         check(!desktop.pages.isEmpty(), "страницы не тронуты неудачным импортом");
+    }
+
+    // ------------------------------------------- 6. кэш статистики диска
+
+    /**
+     * getStats() кэшируется на 5 с, но отдаёт КОПИЮ: вызывающий не должен
+     * иметь возможности испортить кэш, изменив массив.
+     */
+    private static void diskStatsCacheIsIsolated() throws Exception {
+        java.io.File dir = new java.io.File(System.getProperty("java.io.tmpdir"),
+                "doxaiz-audit60-" + System.nanoTime());
+        check(dir.mkdirs() || dir.isDirectory(), "временный каталог кэша создан");
+        IconDiskCache cache = new IconDiskCache(dir);
+
+        long[] first = cache.getStats();
+        check(first.length == 2, "статистика — два числа");
+        check(first[0] == 0 && first[1] == 0, "пустой каталог — нули");
+
+        first[0] = 999; // портим полученный массив
+        first[1] = 999;
+        long[] second = cache.getStats();
+        check(second[0] == 0 && second[1] == 0, "кэш не изменился через возвращённый массив");
+
+        // После явного сброса (так делают save/prune/clearAll) значения пересчитаны.
+        cache.invalidateStats();
+        long[] third = cache.getStats();
+        check(third[0] == 0, "после сброса — снова ноль файлов");
+
+        deleteRecursively(dir);
+    }
+
+    private static void deleteRecursively(java.io.File f) {
+        if (f == null || !f.exists()) return;
+        java.io.File[] kids = f.listFiles();
+        if (kids != null) {
+            for (java.io.File k : kids) deleteRecursively(k);
+        }
+        //noinspection ResultOfMethodCallIgnored
+        f.delete();
     }
 
     // ------------------------------------------------------------ инфраструктура

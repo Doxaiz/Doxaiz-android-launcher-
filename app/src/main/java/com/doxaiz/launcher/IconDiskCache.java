@@ -38,6 +38,18 @@ public final class IconDiskCache {
     // раньше это было гонкой «++ / --» без атомарности → неверный учёт и лишние обходы каталога.
     private final AtomicInteger knownFileCount = new AtomicInteger(0);
 
+    /**
+     * Конструктор для JVM-тестов: работает с обычным каталогом без Android.
+     * В приложении используется только вариант с Context (ниже).
+     */
+    IconDiskCache(File cacheDir) {
+        this.cacheDir = cacheDir;
+        if (cacheDir != null && !cacheDir.exists()) {
+            //noinspection ResultOfMethodCallIgnored
+            cacheDir.mkdirs();
+        }
+    }
+
     public IconDiskCache(Context context) {
         File rootCache = context.getApplicationContext().getCacheDir();
         this.cacheDir = new File(rootCache, DIR_NAME);
@@ -183,6 +195,7 @@ public final class IconDiskCache {
                 // двух одинаковых иконок счётчик не «уедет» вверх: увеличит его
                 // ровно тот поток, который первым создал целевой файл.
                 if (!existed) knownFileCount.incrementAndGet();
+                invalidateStats();
                 if (hadExistingFiles) cleanupStaleVersions(prefix, target.getName());
                 // Держим лимит и во время долгой сессии, а не только при старте.
                 int over = knownFileCount.get() - MAX_CACHE_FILES;
@@ -269,6 +282,10 @@ public final class IconDiskCache {
             if (files == null) return;
             for (File f : files) removeCacheFile(f);
         } catch (Throwable ignored) {
+        } finally {
+            // Даже если что-то удалить не удалось, показанное число должно
+            // пересчитаться — иначе «0 файлов» останется от кэша.
+            invalidateStats();
         }
     }
 
@@ -294,8 +311,10 @@ public final class IconDiskCache {
     }
 
     private synchronized void removeCacheFile(File f) {
-        if (f != null && f.delete() && f.getName().endsWith(".img"))
-            decrementCount();
+        if (f == null) return;
+        boolean deleted = f.delete();
+        if (deleted && f.getName().endsWith(".img")) decrementCount();
+        if (deleted) invalidateStats();
     }
 
     /** Атомарное уменьшение счётчика без ухода в минус. */
@@ -314,7 +333,37 @@ public final class IconDiskCache {
     /**
      * Возвращает массив {fileCount, totalBytes}.
      */
+    /**
+     * Статистика дискового кэша: количество файлов и занятые байты.
+     *
+     * Пересчёт — обход всего каталога кэша через listFiles() и length(). Он
+     * вызывается из экрана настроек, а тот перестраивается целиком на каждое
+     * нажатие переключателя (39 мест), поэтому обход повторялся без нужды.
+     * Результат кэшируется на 5 с; изменения кэша (save/prune/clear) сбрасывают
+     * кэш явно, так что после очистки число обновится сразу.
+     */
+    private volatile long[] statsCache;
+    private volatile long statsCacheAtMs;
+
+    private static final long STATS_TTL_MS = 5000L;
+
+    void invalidateStats() {
+        statsCache = null;
+    }
+
     public long[] getStats() {
+        long[] cached = statsCache;
+        long now = System.currentTimeMillis();
+        if (cached != null && (now - statsCacheAtMs) <= STATS_TTL_MS && statsCacheAtMs <= now) {
+            return new long[]{cached[0], cached[1]};
+        }
+        long[] fresh = computeStats();
+        statsCache = fresh;
+        statsCacheAtMs = now;
+        return new long[]{fresh[0], fresh[1]};
+    }
+
+    private long[] computeStats() {
         long count = 0L;
         long bytes = 0L;
         try {

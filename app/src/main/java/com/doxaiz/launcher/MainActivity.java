@@ -2230,20 +2230,14 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     }
 
     private void refreshDrawerMemory(boolean force) {
+        MemoryHelper.Snapshot snap = memorySnapshot(force);
+        if (snap == null) return;
         if (drawerMemoryCard == null) return;
         if (!prefs.isShowDrawerMemory()) {
             drawerMemoryCard.setVisibility(View.GONE);
             return;
         }
         drawerMemoryCard.setVisibility(View.VISIBLE);
-        final long now = System.currentTimeMillis();
-        MemoryHelper.Snapshot snap = cachedMemorySnapshot;
-        if (force || snap == null || (now - cachedMemorySnapshotAtMs) > MEMORY_SNAPSHOT_TTL_MS
-                || cachedMemorySnapshotAtMs > now) {
-            snap = MemoryHelper.read(this);
-            cachedMemorySnapshot = snap;
-            cachedMemorySnapshotAtMs = now;
-        }
         lastRamPct = snap.ramUsedPercent;
         lastStoragePct = snap.storageUsedPercent;
         drawerRamValue.setText(snap.ramShortText);
@@ -2251,6 +2245,29 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         drawerRamTrack.post(() -> applyProgressBarWidth(drawerRamTrack, drawerRamFill, lastRamPct));
         drawerStorageTrack.post(() -> applyProgressBarWidth(drawerStorageTrack, drawerStorageFill, lastStoragePct));
         refreshDrawerBgPill();
+    }
+
+    /**
+     * Снимок ОЗУ/ПЗУ с общим кэшем на 1,5 с.
+     *
+     * Нужен потому, что экран «Недавние» и меню приложений запрашивают память
+     * одновременно (например, после очистки): без общего кэша один и тот же
+     * IPC в ActivityManager и StatFs выполнялся трижды подряд в одном кадре.
+     *
+     * @return снимок или null, если показатели сейчас не нужны (нет ни одного
+     *         виджета памяти) — тогда вызывающий ничего не обновляет
+     */
+    private MemoryHelper.Snapshot memorySnapshot(boolean force) {
+        final long now = System.currentTimeMillis();
+        MemoryHelper.Snapshot snap = cachedMemorySnapshot;
+        if (!force && snap != null && (now - cachedMemorySnapshotAtMs) <= MEMORY_SNAPSHOT_TTL_MS
+                && cachedMemorySnapshotAtMs <= now) {
+            return snap;
+        }
+        snap = MemoryHelper.read(this);
+        cachedMemorySnapshot = snap;
+        cachedMemorySnapshotAtMs = now;
+        return snap;
     }
 
     private void refreshDrawerBgPill() {
@@ -5439,7 +5456,8 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
     private void addModalMemoryLine(LinearLayout box) {
         TextView memSub = new TextView(this);
-        memSub.setText(MemoryHelper.read(this).oneLineSummary);
+        MemoryHelper.Snapshot modalMem = memorySnapshot(false);
+        memSub.setText((modalMem != null ? modalMem : MemoryHelper.read(this)).oneLineSummary);
         memSub.setTextColor(theme.textHint);
         memSub.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f);
         LinearLayout.LayoutParams mLp = new LinearLayout.LayoutParams(
@@ -8062,7 +8080,8 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         // 6. Система
         addSectionTitle("Система и быстродействие");
         LinearLayout sysCard = createGlassSectionCard();
-        MemoryHelper.Snapshot sysMem = MemoryHelper.read(this);
+        MemoryHelper.Snapshot sysMem = memorySnapshot(false);
+        if (sysMem == null) sysMem = MemoryHelper.read(this);
         addActionRow(sysCard, "Быстрая очистка ОЗУ",
                 "Освободить фоновые кэш-процессы • " + sysMem.ramShortText,
                 this::runQuickRamBoost);
@@ -8791,7 +8810,8 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         strip.setLayoutTransition(stripTrans);
 
         // Нижняя капсула ОЗУ (объявляем заранее, чтобы обновлять при закрытии окон и нажатии мусорки)
-        MemoryHelper.Snapshot mem = MemoryHelper.read(this);
+        MemoryHelper.Snapshot mem = memorySnapshot(false);
+        if (mem == null) mem = MemoryHelper.read(this);
         final TextView ramPillText = new TextView(this);
         ramPillText.setText(mem.recentsHeadline);
         ramPillText.setTextColor(0xF0FFFFFF);
@@ -9030,7 +9050,8 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             final int lockedVisibleFinal = lockedVisible;
             MemoryHelper.boostRamAsync(this, visibleApps, lockedPkgs, res -> {
                 if (isFinishing() || isDestroyed()) return;
-                ramPillText.setText(MemoryHelper.read(this).recentsHeadline);
+                MemoryHelper.Snapshot afterBoost = memorySnapshot(true);
+                if (afterBoost != null) ramPillText.setText(afterBoost.recentsHeadline);
                 refreshDrawerMemory();
                 refreshDrawerBgPill();
                 if (allLocked) {
@@ -9592,7 +9613,8 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                 .withEndAction(() -> {
                     if (isFinishing() || isDestroyed() || !strip.isAttachedToWindow()) return;
                     strip.removeView(cardWrap);
-                    ramLine.setText(MemoryHelper.read(this).recentsHeadline);
+                    MemoryHelper.Snapshot afterClose = memorySnapshot(true);
+                    if (afterClose != null) ramLine.setText(afterClose.recentsHeadline);
                     refreshDrawerMemory();
                     refreshDrawerBgPill();
                     int left = strip.getChildCount();
