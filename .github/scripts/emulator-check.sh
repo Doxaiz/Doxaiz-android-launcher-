@@ -304,6 +304,72 @@ adb exec-out screencap -p > "$OUT/screen-drawer.png" 2>/dev/null || true
 check_crash "прокрутка" || true
 endlog
 
+log "Аварийный возврат: два аварийных запуска подряд"
+
+# Проверяем не рассуждением, а поведением: подкладываем состояние «предыдущий
+# запуск рабочего стола упал» и просим Android открыть HOME. Второй такой запуск
+# обязан увести пользователя на системный лаунчер, а не оставить его без
+# рабочего стола. Роль HOME снимается через RoleManager, поэтому смотрим, кто
+# реально оказался на переднем плане, и какой пакет держит роль.
+CRASH_PREFS=/data/data/$PKG/shared_prefs/doxaiz_prefs.xml
+alt_home=""
+
+# Первый шаг: убеждаемся, что система действительно отдаёт HOME нашему лаунчеру.
+# Без этого сценарий проверял бы не возврат, а установку по умолчанию.
+if adb shell dumpsys role 2>/dev/null | grep -q "$PKG"; then
+    note "crash-guard" "Doxaiz держит роль HOME — сценарий возврата применим"
+else
+    note "crash-guard" "Doxaiz не держит роль HOME — сценарий возврата пропущен"
+    alt_home="skip"
+fi
+
+if [ "$alt_home" != "skip" ]; then
+    for attempt in 1 2; do
+        # force-stop обязателен: RoleManager снимает роль только у остановленного
+        # приложения, а «аварийный» запуск должен начаться с чистого процесса.
+        adb shell am force-stop "$PKG" >/dev/null 2>&1 || true
+        sleep 1
+        start_ts=$(( $(date +%s) * 1000 - 5000 ))
+        adb shell "run-as $PKG sh -c 'mkdir -p shared_prefs'" >/dev/null 2>&1 || true
+        adb shell "run-as $PKG sh -c 'cat > shared_prefs/doxaiz_prefs.xml <<XMLEOF
+<?xml version=\'1.0\' encoding=\'utf-8\' standalone=\'yes\' ?>
+<map>
+    <int name=\"crash_guard_streak\" value=\"1\" />
+    <long name=\"crash_guard_pending\" value=\"$start_ts\" />
+</map>
+XMLEOF'" >/dev/null 2>&1 || true
+        adb shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1 || true
+        sleep 4
+        adb shell dumpsys window 2>/dev/null | grep -m1 mCurrentFocus > "$OUT/crash-attempt-$attempt.txt" 2>/dev/null || true
+        adb shell dumpsys role 2>/dev/null | grep -i "home" > "$OUT/crash-role-$attempt.txt" 2>/dev/null || true
+        if grep -q "$PKG" "$OUT/crash-attempt-$attempt.txt" 2>/dev/null; then
+            note "crash-attempt-$attempt" "Doxaiz на переднем плане (попытка $attempt)"
+        else
+            note "crash-attempt-$attempt" "$(tr '\n' ' ' < "$OUT/crash-attempt-$attempt.txt" | cut -c1-300)"
+        fi
+    done
+
+    # После второго сбоя роль HOME должна уйти от Doxaiz: либо на системный
+    # лаунчер, либо (если система не дала снять) остаться — тогда это отмечается
+    # предупреждением, а не провалом: на части эмуляторов RoleManager не
+    # освобождает роль без действия пользователя.
+    if adb shell dumpsys role 2>/dev/null | grep -q "$PKG"; then
+        echo "::warning title=аварийный возврат::роль HOME осталась у Doxaiz — системный диалог не подтверждён (ограничение эмулятора)"
+        note "crash-guard-result" "роль HOME у Doxaiz: автоматический возврат требует подтверждения системного диалога"
+    else
+        note "crash-guard-result" "роль HOME снята с Doxaiz после двух сбоев"
+    fi
+
+    # Возвращаем лаунчер в рабочее состояние: дальнейшие шаги отчёта не должны
+    # зависеть от состояния «после аварии».
+    adb shell cmd role add-role-holder android.app.role.HOME "$PKG" >/dev/null 2>&1 || true
+    adb shell "run-as $PKG sh -c 'rm -f shared_prefs/doxaiz_prefs.xml'" >/dev/null 2>&1 || true
+    adb shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1 || true
+    sleep 3
+fi
+check_crash "аварийный возврат" || true
+endlog
+
 log "Итог"
 # Полные дампы и метрики — в отчёт шага: он приложен к run и читается глазами.
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then

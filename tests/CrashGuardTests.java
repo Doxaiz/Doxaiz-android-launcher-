@@ -86,8 +86,10 @@ public final class CrashGuardTests {
 
         // Рабочий стол показан и сбой был разовым — метки стираются целиком.
         CrashGuard.onStartupComplete(prefs, false);
-        check(store.getInt("crash_guard_streak", -1) == 0, "счётчик обнулён");
-        check(store.getLong("crash_guard_pending", -1L) == 0L, "отметка запуска снята");
+        // Ключи именно удаляются, поэтому читаем через геттеры Prefs: они
+        // возвращают 0 как значение по умолчанию, а не признак отсутствия.
+        check(prefs.getCrashGuardStreak() == 0, "счётчик обнулён");
+        check(prefs.getCrashGuardPending() == 0L, "отметка запуска снята");
 
         int after = CrashGuard.onDesktopLaunchStart(prefs);
         check(after == 0, "после успешного старта следующий запуск чистый");
@@ -101,7 +103,7 @@ public final class CrashGuardTests {
         long stale = System.currentTimeMillis() - CrashGuard.CRASH_WINDOW_MS - 60_000L;
         store.putLong("crash_guard_pending", stale);
         check(CrashGuard.onDesktopLaunchStart(prefs) == 0, "старая отметка — не падение");
-        check(store.getInt("crash_guard_streak", -1) == 0, "счётчик сброшен, а не увеличен");
+        check(prefs.getCrashGuardStreak() == 0, "счётчик сброшен, а не увеличен");
     }
 
     private static void disabledGuardIsSilent() throws Exception {
@@ -110,12 +112,13 @@ public final class CrashGuardTests {
 
         CrashGuard.onDesktopLaunchStart(prefs);
         CrashGuard.onDesktopLaunchStart(prefs);
-        check(store.getInt("crash_guard_streak", 0) == 1, "сбой зафиксирован до отключения");
+        check(prefs.getCrashGuardStreak() == 1, "сбой зафиксирован до отключения");
 
         CrashGuard.setEnabled(prefs, false);
         check(!CrashGuard.isEnabled(prefs), "настройка выключена");
         int streak = CrashGuard.onDesktopLaunchStart(prefs);
         check(streak == 0, "выключенный возврат не считает сбои");
+        check(prefs.getCrashGuardStreak() == 1, "счётчик не тронут отключённой настройкой");
     }
 
     private static void resetClearsEverything() throws Exception {
