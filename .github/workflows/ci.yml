@@ -239,7 +239,12 @@ jobs:
           name: doxaiz-debug-apk
           path: apk
 
-      - name: Запустить эмулятор и проверить лаунчер
+      # Проверки разделены на два прохода намеренно. Аварийный сценарий
+      # подкладывает состояние сбоя и уводит фокус на штатный лаунчер, поэтому
+      # после него рабочий стол и каталог уже не проверить — в отчёте появлялся
+      # аварийный экран вместо лаунчера. Сначала проверяем рабочий стол и
+      # каталог на чистом состоянии, затем отдельно — аварийный возврат.
+      - name: Эмулятор — рабочий стол и каталог
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
@@ -253,6 +258,23 @@ jobs:
           script: bash .github/scripts/emulator-check.sh
         env:
           APK_PATH: apk
+          SKIP_CRASH_SCENARIO: '1'
+
+      - name: Эмулятор — аварийный возврат на штатный лаунчер
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: false
+          emulator-options: >-
+            -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect
+            -camera-back none -camera-front none
+          script: bash .github/scripts/emulator-check.sh
+        env:
+          APK_PATH: apk
+          ONLY_CRASH_SCENARIO: '1'
 
       - name: Сохранить отчёты эмулятора
         if: always()
