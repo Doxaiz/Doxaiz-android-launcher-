@@ -544,36 +544,84 @@ check_crash "прокрутка" || true
 endlog
 
 log "Отзывчивость: набор текста в поиске каталога"
-# Измеряем не «на глаз», а по кадрам: gfxinfo собирает статистику по кадрам
-# нашего процесса. Набираем запрос в поиске каталога и смотрим, сколько кадров
-# пропущено и какая у них 90-я перцентиль длительности. Эмулятор рисует
-# программно, поэтому абсолютные числа не равны телефону — значение имеет
-# сравнение прогонов между собой и отсутствие «залипших» кадров на сотни мс.
-if [ "${DRAWER_NODES:-0}" -ge 40 ]; then
-    adb shell input swipe 540 1700 540 600 250 >/dev/null 2>&1 || true
+
+# Один замер на эмуляторе недостоверен: в соседних прогонах при одном и том же
+# коде 50-й перцентиль выходил 16 мс и 85 мс. Это разброс программного
+# рендеринга (swiftshader) и загрузки CPU раннера, а не свойство приложения.
+# Поэтому делаем три раунда и публикуем все три: важен устойчивый диапазон.
+search_round() {  # $1 = номер раунда
+    local round="$1"
+    adb shell input keyevent KEYCODE_BACK >/dev/null 2>&1 || true
+    sleep 1
+    # Каталог открываем заново и очищаем поиск: иначе второй раунд набирает
+    # «setting» поверх «setting» и меряет уже не ввод, а дописывание.
+    tap_by_desc "Все приложения" || adb shell input swipe 540 1700 540 600 250
     sleep 3
-    adb shell dumpsys gfxinfo "$PKG" reset >/dev/null 2>&1 || true
-    # Поиск в каталоге — первый EditText в верхней части экрана.
     adb shell input tap 540 300 >/dev/null 2>&1 || true
-    sleep 2
-    START_MS=$(date +%s%3N)
+    sleep 1
+    for _ in 1 2 3 4 5 6 7 8; do
+        adb shell input keyevent KEYCODE_DEL >/dev/null 2>&1 || true
+    done
+    sleep 1
+    adb shell dumpsys gfxinfo "$PKG" reset >/dev/null 2>&1 || true
+    local start_ms end_ms
+    start_ms=$(date +%s%3N)
     for ch in s e t t i n g; do
         adb shell input text "$ch" >/dev/null 2>&1 || true
         sleep 0.12
     done
-    END_MS=$(date +%s%3N)
+    end_ms=$(date +%s%3N)
     sleep 2
-    adb shell dumpsys gfxinfo "$PKG" > "$OUT/gfxinfo-search.txt" 2>/dev/null || true
-    grep -E "Total frames rendered|Janky frames:|50th percentile|90th percentile|95th percentile|Number Missed Vsync|Number Slow UI thread" \
-        "$OUT/gfxinfo-search.txt" | tee "$OUT/gfxinfo-search-summary.txt"
-    echo "ввод занял $((END_MS - START_MS)) мс" | tee -a "$OUT/gfxinfo-search-summary.txt"
-    # Ключевые числа — в аннотацию (их видно сразу в списке проверок), полный
-    # текст с оговоркой про swiftshader — в отчёт шага.
-    note "поиск-метрики" "$(tr '\n' ' ' < "$OUT/gfxinfo-search-summary.txt" | cut -c1-240)"
-    summary "поиск-метрики" "$(cat "$OUT/gfxinfo-search-summary.txt")
-swiftshader: числа сравнимы только между прогонами, не с телефоном."
-    adb shell input keyevent KEYCODE_BACK >/dev/null 2>&1 || true
-    sleep 1
+    adb shell dumpsys gfxinfo "$PKG" > "$OUT/gfxinfo-search-$round.txt" 2>/dev/null || true
+    {
+        echo "раунд=$round"
+        grep -E "Total frames rendered|Janky frames:|50th percentile|90th percentile|95th percentile|Number Missed Vsync|Number Slow UI thread" \
+            "$OUT/gfxinfo-search-$round.txt"
+        echo "ввод занял $((end_ms - start_ms)) мс"
+    } >> "$OUT/gfxinfo-search-summary.txt"
+}
+
+if [ "${DRAWER_NODES:-0}" -ge 40 ]; then
+    : > "$OUT/gfxinfo-search-summary.txt"
+    for round in 1 2 3; do
+        search_round "$round" || note "поиск-метрики" "раунд $round не выполнен"
+    done
+    # В аннотацию — компактная строка по всем раундам: медиана 50-го перцентиля
+    # и худший кадр. Полные строки раундов — в отчёт шага.
+    python3 - "$OUT/gfxinfo-search-summary.txt" > "$OUT/gfxinfo-search-compact.txt" <<'PYEOF' || true
+import re, sys
+try:
+    text = open(sys.argv[1], encoding='utf-8', errors='replace').read()
+except OSError:
+    raise SystemExit
+p50 = [int(m) for m in re.findall(r'50th percentile: (\d+)ms', text)]
+p90 = [int(m) for m in re.findall(r'90th percentile: (\d+)ms', text)]
+inputs = [int(m) for m in re.findall(r'ввод занял (\d+) мс', text)]
+if not p50:
+    print("замер не удался")
+    raise SystemExit
+p50.sort(); p90.sort(); inputs.sort()
+def med(v):
+    return v[len(v) // 2]
+print("раундов=%d; 50th медиана=%d мс (все: %s); 90th худший=%d мс; ввод медиана=%d мс"
+      % (len(p50), med(p50), ",".join(map(str, p50)), max(p90), med(inputs) if inputs else 0))
+PYEOF
+    note "поиск-метрики" "$(cut -c1-240 < "$OUT/gfxinfo-search-compact.txt")"
+    # Собственный замер приложения: сколько главный поток тратит на пересчёт
+    # каталога после нажатия клавиши. В отличие от кадровых метрик эмулятора он
+    # слабо зависит от загрузки раннера. Публикуется приложением в файл
+    # files/doxaiz_filter_stats.txt (setprop обычному приложению запрещён).
+    FILTER_STATS="$(adb shell "run-as $PKG cat files/doxaiz_filter_stats.txt" 2>/dev/null | tr -d '\r\n')"
+    # Если файла нет — в отчёт шага кладём список files/, чтобы причина была
+    # видна (не создан / создан под другим именем / run-as не работает).
+    adb shell "run-as $PKG ls -l files/" > "$OUT/app-files.txt" 2>&1 || true
+    summary "файлы-приложения" "$(cat "$OUT/app-files.txt")"
+    if [ -n "$FILTER_STATS" ]; then
+        note "пересчёт-каталога" "$FILTER_STATS"
+        summary "пересчёт-каталога" "$FILTER_STATS (время applyFilter() на нажатие клавиши)"
+    else
+        note "пересчёт-каталога" "файл замера не создан (менее 8 пересчётов или не debug)"
+    fi
 else
     note "поиск-метрики" "каталог не открылся — замер набора текста пропущен"
 fi

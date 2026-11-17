@@ -546,6 +546,27 @@ public final class AppRepository {
         return loaded;
     }
 
+    /**
+     * Прокрутка каталога «летит» (fling). В этом режиме иконки не декодируются:
+     * элемент списка показывает то, что уже в ОЗУ-кэше, а иначе остаётся пустым.
+     *
+     * Зачем: декодирование WEBP с диска и постановка битмапа в ImageView — это
+     * работа, которая попадает в кадр прокрутки. В прогоне 44043440911
+     * прокрутка давала 50-й перцентиль 97 мс при 9 «Slow UI thread» и 2
+     * «Slow bitmap uploads» на 18 кадров, тогда как набор в поиске уложился в
+     * 16 мс. Прокрутка должна быть такой же дешёвой, как поиск: во время
+     * движения нужен только текст и уже готовые иконки.
+     */
+    private volatile boolean scrollFlinging = false;
+
+    public void setScrollFlinging(boolean flinging) {
+        this.scrollFlinging = flinging;
+    }
+
+    public boolean isScrollFlinging() {
+        return scrollFlinging;
+    }
+
     public void bindIcon(final AppEntry entry, final ImageView target) {
         if (entry == null || target == null) return;
         target.setTag(entry.key);
@@ -555,6 +576,12 @@ public final class AppRepository {
             return;
         }
         target.setImageDrawable(null);
+        if (scrollFlinging) {
+            // Прокрутка ещё идёт: ничего не декодируем. Когда она остановится,
+            // GridView заново привяжет видимые элементы (см. onScrollStateChanged),
+            // и иконки появятся без пропусков.
+            return;
+        }
         safeExecuteIcon(() -> {
             try {
                 // Пропускаем лишнюю работу, если ImageView уже переиспользован при быстром скролле

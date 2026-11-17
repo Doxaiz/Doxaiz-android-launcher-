@@ -24,6 +24,12 @@ android {
         }
     }
 
+    // BuildConfig нужен, чтобы замеры отзывчивости публиковались только в
+    // debug-сборке (debug.doxaiz.filter_ms): в релизе лишний setprop не нужен.
+    buildFeatures {
+        buildConfig true
+    }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8

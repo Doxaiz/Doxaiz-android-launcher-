@@ -1597,6 +1597,9 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
         drawerAdapter = new DrawerAdapter();
         drawerGrid.setAdapter(drawerAdapter);
+        // Тап по элементу во время «замороженной» прокрутки не должен теряться:
+        // иконки в этот момент могут быть ещё пустыми, но нажатие работает.
+        drawerGrid.setScrollingCacheEnabled(false);
         drawerGrid.setOnItemClickListener((parent, view, position, id) -> {
             if (position >= 0 && position < filteredApps.size()) {
                 AppEntry entry = filteredApps.get(position);
@@ -1628,6 +1631,20 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             public void onScrollStateChanged(AbsListView view, int scrollState) {
                 if (scrollState == SCROLL_STATE_TOUCH_SCROLL && drawerSearchInput.hasFocus()) {
                     hideKeyboard();
+                }
+                // Пока список движется, иконки не декодируются: в кадр прокрутки
+                // попадали чтение с диска и постановка битмапа (в CI прокрутка
+                // давала 50-й перцентиль 97 мс против 16 мс на наборе текста).
+                // Когда движение закончилось — перерисовываем видимые элементы,
+                // чтобы недостающие иконки появились.
+                boolean moving = (scrollState == SCROLL_STATE_FLING
+                        || scrollState == SCROLL_STATE_TOUCH_SCROLL);
+                boolean wasFlinging = repository.isScrollFlinging();
+                repository.setScrollFlinging(moving);
+                if (wasFlinging && !moving && drawerAdapter != null) {
+                    // Повторная привязка видимых элементов: bindIcon() теперь не
+                    // пропускает иконки и заполняет те, что остались пустыми.
+                    drawerAdapter.notifyDataSetChanged();
                 }
             }
             @Override
@@ -2039,6 +2056,9 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     private void showScreen(int screen) {
         dismissModal();
         hideKeyboard();
+        // Смена экрана — это не прокрутка: если список остался «замороженным»
+        // после прерванного флинга, иконки каталога не отрисовались бы вовсе.
+        repository.setScrollFlinging(false);
         int prevScreen = currentScreen;
         boolean changed = (prevScreen != screen);
         currentScreen = screen;
@@ -4092,6 +4112,17 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     private final Runnable pendingDrawerFilter = this::runPendingDrawerFilter;
     /** Сколько занял последний пересчёт каталога: 0 — ещё не считали. */
     private long lastDrawerFilterCostNs = 0L;
+    /**
+     * Суммарное время пересчёта каталога за последние замеры: median/max, мс.
+     *
+     * Кадровые метрики эмулятора зависят от загрузки раннера: один и тот же код
+     * в соседних прогонах давал 50-й перцентиль 16 и 93 мс. Время самого
+     * фильтра от загрузки CPU зависит гораздо меньше и показывает, сколько
+     * главный поток реально тратит на нажатие клавиши. Публикуется в системное
+     * свойство debug.doxaiz.filter_ms, откуда его читает сценарий CI.
+     */
+    private final long[] recentFilterCostMs = new long[16];
+    private int recentFilterCostCount = 0;
     /** Запрос, который нужно посчитать после задержки; null — ничего не ждёт. */
     private String pendingDrawerFilterQuery = null;
 
@@ -4166,10 +4197,43 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         // Пока шла задержка, экран мог смениться (пользователь ушёл в настройки) —
         // тогда пересчитывать список незачем, он всё равно не виден.
         if (currentScreen != SCREEN_DRAWER && currentScreen != SCREEN_HOME) return;
-        // Стоимость пересчёта нужна для решения «копить нажатия или считать сразу».
-        long startedNs = System.nanoTime();
         applyFilter(q, true);
-        lastDrawerFilterCostNs = System.nanoTime() - startedNs;
+    }
+
+    /**
+     * Запоминает стоимость пересчёта и раз в 4 замера публикует сводку.
+     *
+     * Публикуем в файл приложения, а не в системное свойство: у обычного
+     * приложения нет прав на setprop (первая попытка с debug.doxaiz.filter_ms
+     * молча не сработала — CI увидел пустое значение). Файл читается из CI через
+     * `run-as <пакет> cat files/doxaiz_filter_stats.txt`.
+     *
+     * Строка длиной ~40 байт пишется синхронно: это дешевле, чем передача задачи
+     * в пул (первая версия шла через executeInBackground и файла не появлялось
+     * вовсе — задача молча терялась). Раз в 4 замера — не в каждом кадре.
+     */
+    private void recordFilterCost(long costNs) {
+        try {
+            if (!BuildConfig.DEBUG) return;
+            int slot = recentFilterCostCount % recentFilterCostMs.length;
+            recentFilterCostMs[slot] = Math.max(0L, costNs / 1_000_000L);
+            recentFilterCostCount++;
+            if (recentFilterCostCount % 4 != 0) return;
+            long[] sorted = new long[recentFilterCostMs.length];
+            System.arraycopy(recentFilterCostMs, 0, sorted, 0, sorted.length);
+            java.util.Arrays.sort(sorted);
+            long median = sorted[sorted.length / 2];
+            long max = sorted[sorted.length - 1];
+            String line = "median=" + median + " max=" + max
+                    + " samples=" + Math.min(recentFilterCostCount, sorted.length) + "\n";
+            java.io.File f = new java.io.File(getFilesDir(), "doxaiz_filter_stats.txt");
+            try (java.io.FileOutputStream out = new java.io.FileOutputStream(f, false)) {
+                out.write(line.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            }
+        } catch (Throwable t) {
+            // Диагностика не имеет права мешать набору текста.
+            Diagnostics.record("MainActivity.recordFilterCost", t);
+        }
     }
 
     /** Досчитывает отложенный фильтр немедленно (Enter, закрытие каталога). */
@@ -4180,6 +4244,18 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     }
 
     private void applyFilter(String rawQuery, boolean fromUserTyping) {
+        // Стоимость пересчёта: и для решения «копить нажатия или считать сразу»,
+        // и для отчёта CI (files/doxaiz_filter_stats.txt).
+        long filterStartedNs = System.nanoTime();
+        try {
+            applyFilterBody(rawQuery, fromUserTyping);
+        } finally {
+            lastDrawerFilterCostNs = System.nanoTime() - filterStartedNs;
+            recordFilterCost(lastDrawerFilterCostNs);
+        }
+    }
+
+    private void applyFilterBody(String rawQuery, boolean fromUserTyping) {
         filteredApps.clear();
         final String q = rawQuery != null ? rawQuery.trim() : "";
         String emptyMsg = "Ничего не найдено";
@@ -4512,6 +4588,8 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
             vh.label.setText(formatAppLabel(entry));
             vh.label.setTextColor(theme.textPrimary);
+            // Во время прокрутки bindIcon() не декодирует иконку, а берёт готовую
+            // из ОЗУ-кэша: кадр прокрутки не должен ждать диск и распаковку WEBP.
             repository.bindIcon(entry, vh.icon);
 
             if (drawerBatchMode) {
