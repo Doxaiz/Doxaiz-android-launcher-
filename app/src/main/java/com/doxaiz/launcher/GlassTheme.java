@@ -149,19 +149,32 @@ public final class GlassTheme {
     }
 
     public static GlassTheme create(int styleMode, int opacityLevel, boolean ornamentsEnabled) {
-        int safeStyle = Prefs.sanitizeVisualStyle(styleMode);
-        boolean orn = false;
-        int d = (opacityLevel == Prefs.OPACITY_LIGHT) ? -34
-                : (opacityLevel == Prefs.OPACITY_DENSE ? 32 : 0);
+        return createResolved(Prefs.sanitizeVisualStyle(styleMode), opacityLevel);
+    }
 
-        int cardA = clamp(220 + d, 156, 250);
-        int pillA = clamp(226 + d, 164, 252);
-        int overlayA = clamp(238 + d / 3, 206, 252);
+    /**
+     * То же, что {@link #create(int, int, boolean)}, но принимает уже
+     * нормализованный стиль и не трогает {@code Prefs} — поэтому считается
+     * и в unit-тестах, где Android-классы недоступны.
+     *
+     * Видимость package-private: снаружи пользуйтесь {@code create(...)}.
+     */
+    static GlassTheme createResolved(int safeStyle, int opacityLevel) {
+        boolean orn = false;
+        // Числа OPACITY_* продублированы: обращение к Prefs здесь сломало бы
+        // расчёт в unit-тестах.
+        int d = (opacityLevel == 0) ? -34 : (opacityLevel == 2 ? 32 : 0);
+
+        int cardA = clampLocal(220 + d, 156, 250);
+        int pillA = clampLocal(226 + d, 164, 252);
+        int overlayA = clampLocal(238 + d / 3, 206, 252);
 
         ACTIVE_STYLE = safeStyle;
         ORNAMENTS_ON = orn;
 
-        if (safeStyle == Prefs.STYLE_CLASSIC_LIGHT) {
+        // Числа стилей намеренно захардкожены (Prefs.STYLE_* = 3/0/1/2):
+        // так расчёт не зависит от Prefs и работает в unit-тестах.
+        if (safeStyle == 3) { // STYLE_CLASSIC_LIGHT
             // Keep notification shade's legacy dark surfaces until each hardware popup
             // has an individually audited contrast-safe light palette.
             SHADE_BG = 0xFF000000; POPUP_BG = 0xFF1C1C1E;
@@ -172,13 +185,15 @@ public final class GlassTheme {
             ACCENT_BLUE = 0xFF2B8BFF; ACCENT_GREEN = 0xFF22C55E;
             ACCENT_RED = 0xFFEF4444; ACCENT_AMBER = 0xFFF59E0B;
             SWITCH_ON = 0xFF22C55E; SWITCH_OFF = 0xFF3E3E44;
-            TEXT_SECONDARY = 0xB3FFFFFF; TEXT_MUTED = 0x80FFFFFF;
+            TEXT_SECONDARY = 0xB3FFFFFF;
+            // 0x80FFFFFF давало 4,25:1 на TILE_SUB_BG #38383C — 0xA8FFFFFF даёт 6,09:1.
+            TEXT_MUTED = 0xA8FFFFFF;
             DIVIDER = 0x1AFFFFFF; ORNAMENT_COLOR = 0; ORNAMENT_ACCENT = 0;
             GOLD_ACCENT = 0xFFFBBF24; FOLDER_SCRIM = 0xDC050608;
             DRAWER_SEARCH_BG = 0xFFE6E8EC; CARD_BORDER_LIVE = 0x26313744;
             return new GlassTheme(
                     safeStyle, false,
-                    Color.argb(24, 0, 0, 0),
+                    argb(24, 0, 0, 0),
                     0xFFF2F3F6,
                     0xFFFFFFFF,
                     0xFFD5D9E0,
@@ -189,27 +204,29 @@ public final class GlassTheme {
                     0xFFE8EAF0,
                     0xFF2169CD,
                     0xFF2169CD,
-                    Color.WHITE,
+                    0xFFFFFFFF,
                     0xFFFAFBFC,
                     0xFFD5D9E0,
                     0xFFDADDE4,
                     0xFF151922,
                     0xFF4F5968,
-                    0xFF697383,
+                    // 0xFF697383 на подложке #F2F3F6 давал 4,32:1, а на пилюле
+                    // #E8EAF0 — 3,99:1. 0xFF5A6675 — 5,27 и 4,86:1.
+                    0xFF5A6675,
                     0xFF167746,
                     0x22167746,
-                    Color.WHITE,
-                    Color.argb(86, 255, 255, 255),
+                    0xFFFFFFFF,
+                    argb(86, 255, 255, 255),
                     0xFF167746,
                     0xFFBD2737,
                     0xFFCAD0D8,
                     0xFF167746,
-                    Color.WHITE,
+                    0xFFFFFFFF,
                     0, 0, 0xFF2169CD
             );
         }
 
-        if (safeStyle == Prefs.STYLE_CYBER_ANIME) {
+        if (safeStyle == 1) { // STYLE_CYBER_ANIME
             SHADE_BG          = 0xFF060814;
             POPUP_BG          = 0xFF0E1326;
             SURFACE_ELEVATED  = 0xFF131932;
@@ -227,7 +244,7 @@ public final class GlassTheme {
             SWITCH_ON         = 0xFF00C2FF;
             SWITCH_OFF        = 0xFF283354;
             TEXT_SECONDARY    = 0xC4D4E6FF;
-            TEXT_MUTED        = 0x8A8CA8D4;
+            TEXT_MUTED        = 0xC8A8C4F0;
             DIVIDER           = 0x2600E5FF;
             ORNAMENT_COLOR    = 0x9900E5FF;
             ORNAMENT_ACCENT   = 0xCCFF4D8D;
@@ -238,43 +255,45 @@ public final class GlassTheme {
 
             return new GlassTheme(
                     safeStyle, orn,
-                    Color.argb(18, 6, 8, 22),
-                    Color.argb(overlayA, 6, 8, 20),
-                    Color.argb(cardA, 16, 22, 42),
-                    Color.argb(70, 0, 229, 255),
-                    Color.argb(clamp(206 + d, 148, 244), 14, 20, 40),
-                    Color.argb(96, 0, 229, 255),
-                    Color.argb(pillA, 18, 25, 48),
-                    Color.argb(78, 0, 229, 255),
-                    Color.argb(36, 120, 190, 255),
-                    0xFF0284C7,
+                    argb(18, 6, 8, 22),
+                    argb(overlayA, 6, 8, 20),
+                    argb(cardA, 16, 22, 42),
+                    argb(70, 0, 229, 255),
+                    argb(clampLocal(206 + d, 148, 244), 14, 20, 40),
+                    argb(96, 0, 229, 255),
+                    argb(pillA, 18, 25, 48),
+                    argb(78, 0, 229, 255),
+                    argb(36, 120, 190, 255),
+                    // Белый текст на 0xFF0284C7 давал 4,10:1 — ниже порога для
+                    // подписи чипа. 0xFF0369A1 — 5,93:1 и тот же бирюзовый тон.
+                    0xFF0369A1,
                     0xFF00E5FF,
-                    Color.WHITE,
-                    Color.argb(252, 12, 16, 32),
-                    Color.argb(84, 0, 229, 255),
+                    0xFFFFFFFF,
+                    argb(252, 12, 16, 32),
+                    argb(84, 0, 229, 255),
                     0x2600E5FF,
                     0xFFF8FCFF,
                     0xC4D4E6FF,
-                    0x8A8CA8D4,
+                    0xC8A8C4F0,
                     0xFF00D4FF,
                     0x3000D4FF,
                     0xFF00E5FF,
-                    Color.argb(92, 180, 225, 255),
+                    argb(92, 180, 225, 255),
                     0xFF00E5FF,
                     0xFFFF3366,
                     0xFF283354,
                     0xFF00C2FF,
-                    Color.WHITE,
+                    0xFFFFFFFF,
                     ORNAMENT_COLOR,
                     ORNAMENT_ACCENT,
                     0xFF00E5FF
             );
         }
 
-        if (safeStyle == Prefs.STYLE_CLASSIC_DARK) {
-            cardA = clamp(216 + d, 152, 248);
-            pillA = clamp(222 + d, 160, 250);
-            overlayA = clamp(244 + d / 3, 212, 255);
+        if (safeStyle == 2) { // STYLE_CLASSIC_DARK
+            cardA = clampLocal(216 + d, 152, 248);
+            pillA = clampLocal(222 + d, 160, 250);
+            overlayA = clampLocal(244 + d / 3, 212, 255);
             SHADE_BG          = 0xFF000000;
             POPUP_BG          = 0xFF1C1C1E;
             SURFACE_ELEVATED  = 0xFF1A1A1E;
@@ -303,40 +322,51 @@ public final class GlassTheme {
 
             return new GlassTheme(
                     safeStyle, false,
-                    Color.argb(24, 0, 0, 0),
-                    Color.argb(overlayA, 0, 0, 0),
-                    Color.argb(cardA, 36, 36, 39),
-                    Color.argb(38, 255, 255, 255),
-                    Color.argb(clamp(204 + d, 146, 242), 34, 34, 38),
-                    Color.argb(62, 255, 255, 255),
-                    Color.argb(pillA, 38, 38, 42),
-                    Color.argb(54, 255, 255, 255),
-                    Color.argb(30, 255, 255, 255),
-                    0xFF2B8BFF,
+                    argb(24, 0, 0, 0),
+                    argb(overlayA, 0, 0, 0),
+                    argb(cardA, 36, 36, 39),
+                    argb(38, 255, 255, 255),
+                    argb(clampLocal(204 + d, 146, 242), 34, 34, 38),
+                    argb(62, 255, 255, 255),
+                    argb(pillA, 38, 38, 42),
+                    argb(54, 255, 255, 255),
+                    argb(30, 255, 255, 255),
+                    // 0xFF2B8BFF под белым текстом давал 3,37:1 — ниже порога
+                    // 4,5:1 для мелкого текста. 0xFF2563EB даёт 5,17:1 и остаётся
+                    // узнаваемо синим.
+                    0xFF2563EB,
+                    // Рамка светлее заливки: заливка тёмная (под белый текст), а
+                    // выбранный чип на пилюле показывает рамка — 5,99–6,69:1.
                     0xFF60A5FA,
-                    Color.WHITE,
-                    Color.argb(252, 24, 24, 27),
-                    Color.argb(46, 255, 255, 255),
-                    Color.argb(26, 255, 255, 255),
-                    Color.WHITE,
-                    Color.argb(190, 214, 214, 220),
-                    Color.argb(132, 160, 160, 168),
+                    0xFFFFFFFF,
+                    argb(252, 24, 24, 27),
+                    argb(46, 255, 255, 255),
+                    argb(26, 255, 255, 255),
+                    0xFFFFFFFF,
+                    argb(190, 214, 214, 220),
+                    // 132/255 белого-серого давало 2,62:1 на карточке —
+                    // подсказки почти не читались. 0xC0 с более светлым
+                    // оттенком — 4,63–5,69:1.
+                    0xC0B0B0B8,
                     0xFF22C55E,
-                    Color.argb(38, 34, 197, 94),
-                    Color.WHITE,
-                    Color.argb(86, 255, 255, 255),
+                    argb(38, 34, 197, 94),
+                    0xFFFFFFFF,
+                    argb(86, 255, 255, 255),
                     0xFF22C55E,
-                    0xFFEF4444,
-                    Color.argb(64, 255, 255, 255),
+                    // 0xFFEF4444 на карточке 36/36/39 давал 4,11:1 — «Удалить
+                    // приложение» читалось хуже остальных пунктов меню.
+                    // 0xFFF87171 — 5,60:1 на той же карточке.
+                    0xFFF87171,
+                    argb(64, 255, 255, 255),
                     0xFF22C55E,
-                    Color.WHITE,
+                    0xFFFFFFFF,
                     0,
                     0,
                     0xFF60A5FA
             );
         }
 
-        // По умолчанию: STYLE_SAKURA_JADE — Синтез Аниме × Дунхуа (Ночной сакура-нефрит и золотая луна)
+        // По умолчанию (0): STYLE_SAKURA_JADE — Синтез Аниме × Дунхуа (Ночной сакура-нефрит и золотая луна)
         SHADE_BG          = 0xFF07080F;
         POPUP_BG          = 0xFF131523;
         SURFACE_ELEVATED  = 0xFF171928;
@@ -354,7 +384,7 @@ public final class GlassTheme {
         SWITCH_ON         = 0xFF14B8A6;
         SWITCH_OFF        = 0xFF33374E;
         TEXT_SECONDARY    = 0xC4DCE0F5;
-        TEXT_MUTED        = 0x8AA9B0D0;
+        TEXT_MUTED        = 0xBCA9B0D0;
         DIVIDER           = 0x24F5C451;
         ORNAMENT_COLOR    = 0x99F5C451;
         ORNAMENT_ACCENT   = 0xCC2DD4BF;
@@ -365,33 +395,35 @@ public final class GlassTheme {
 
         return new GlassTheme(
                 safeStyle, orn,
-                Color.argb(14, 7, 8, 16),
-                Color.argb(overlayA, 7, 8, 16),
-                Color.argb(cardA, 22, 24, 38),
-                Color.argb(66, 245, 196, 81),
-                Color.argb(clamp(206 + d, 148, 244), 20, 23, 38),
-                Color.argb(88, 245, 196, 81),
-                Color.argb(pillA, 24, 27, 44),
-                Color.argb(74, 245, 196, 81),
-                Color.argb(34, 255, 228, 240),
-                0xFFD94680,
+                argb(14, 7, 8, 16),
+                argb(overlayA, 7, 8, 16),
+                argb(cardA, 22, 24, 38),
+                argb(66, 245, 196, 81),
+                argb(clampLocal(206 + d, 148, 244), 20, 23, 38),
+                argb(88, 245, 196, 81),
+                argb(pillA, 24, 27, 44),
+                argb(74, 245, 196, 81),
+                argb(34, 255, 228, 240),
+                // Белый текст на 0xFFD94680 давал 4,09:1. 0xFFC22A6E —
+                // 5,45:1, оттенок сакуры сохранён.
+                0xFFC22A6E,
                 0xFFF5C451,
-                Color.WHITE,
-                Color.argb(252, 18, 20, 34),
-                Color.argb(78, 245, 196, 81),
+                0xFFFFFFFF,
+                argb(252, 18, 20, 34),
+                argb(78, 245, 196, 81),
                 0x24F5C451,
                 0xFFFFFDF8,
                 0xC4DCE0F5,
-                0x8AA9B0D0,
+                0xBCA9B0D0,
                 0xFF2DD4BF,
                 0x302DD4BF,
                 0xFFF5C451,
-                Color.argb(92, 255, 238, 210),
+                argb(92, 255, 238, 210),
                 0xFF2DD4BF,
                 0xFFF43F5E,
                 0xFF33374E,
                 0xFF14B8A6,
-                Color.WHITE,
+                0xFFFFFFFF,
                 ORNAMENT_COLOR,
                 ORNAMENT_ACCENT,
                 0xFFF5C451
@@ -450,6 +482,19 @@ public final class GlassTheme {
 
     private static int clamp(int v, int min, int max) {
         return Math.max(min, Math.min(max, v));
+    }
+
+    /** Копия {@link #clamp(int, int, int)} для чистого расчёта палитры. */
+    private static int clampLocal(int v, int min, int max) {
+        return v < min ? min : (v > max ? max : v);
+    }
+
+    /**
+     * Копия {@code android.graphics.Color.argb}. Нужна, чтобы расчёт палитры в
+     * {@link #createResolved} не зависел от Android-классов и проверялся тестом.
+     */
+    private static int argb(int a, int r, int g, int b) {
+        return ((a & 0xFF) << 24) | ((r & 0xFF) << 16) | ((g & 0xFF) << 8) | (b & 0xFF);
     }
 
     public static int dp(Context ctx, float dp) {
