@@ -8,11 +8,15 @@ package com.doxaiz.launcher;
  * пряталось целиком, а подпись шла без подложки — контраст 1,2:1 при пороге
  * 4,5:1.
  *
- * Здесь фиксируются три вещи:
+ * Здесь фиксируются четыре вещи:
  *  1. математика контраста считается правильно (известные пары);
  *  2. скрим поверх системных обоев даёт не хуже 4,5:1 даже на белой картинке;
  *  3. подобранная подложка под подпись действительно проходит порог, а не
- *     «выглядит нормально на глаз».
+ *     «выглядит нормально на глаз»;
+ *  4. пары цветов самих палитр GlassTheme читаемы во всех четырёх стилях и на
+ *     всех трёх уровнях непрозрачности. Именно эти пары были дефектом:
+ *     белый текст на активном чипе #2B8BFF давал 3,37:1, «Удалить приложение»
+ *     на карточке — 4,11:1, а подсказки в тёмной теме — 2,62:1.
  */
 public final class ContrastTest {
 
@@ -21,6 +25,44 @@ public final class ContrastTest {
     private static void check(boolean v, String label) {
         if (!v) throw new AssertionError(label);
         n++;
+    }
+
+    /** Порог с числом в сообщении: при падении сразу видно, сколько вышло. */
+    private static void requireAtLeast(double value, double min, String label) {
+        if (!(value >= min)) {
+            throw new AssertionError(label + ": " + Math.round(value * 100) / 100.0
+                    + ":1, нужно не меньше " + min + ":1");
+        }
+        n++;
+    }
+
+    /** Обратная проверка: значение обязано остаться ниже порога. */
+    private static void requireBelow(double value, double max, String label) {
+        if (!(value < max)) {
+            throw new AssertionError(label + ": " + Math.round(value * 100) / 100.0
+                    + ":1, ожидалось меньше " + max + ":1");
+        }
+        n++;
+    }
+
+    /**
+     * Кладёт слой {@code fg} (ARGB) на слой {@code bg} (ARGB, поверх чёрного) и
+     * считает контраст результата с фоном. Так проверяются полупрозрачные цвета
+     * палитры — ровно то, что видит пользователь.
+     */
+    private static double textOn(int fg, int bg) {
+        int[] b = flatten(bg, 0, 0, 0);
+        int[] f = flatten(fg, b[0], b[1], b[2]);
+        return Legibility.contrastRatio(f[0], f[1], f[2], b[0], b[1], b[2]);
+    }
+
+    private static int[] flatten(int argb, int br, int bg, int bb) {
+        int a = (argb >>> 24) & 0xFF;
+        double k = a / 255.0;
+        int r = (int) Math.round(((argb >> 16) & 0xFF) * k + br * (1 - k));
+        int g = (int) Math.round(((argb >> 8) & 0xFF) * k + bg * (1 - k));
+        int b = (int) Math.round((argb & 0xFF) * k + bb * (1 - k));
+        return new int[]{r, g, b};
     }
 
     public static void main(String[] args) {
@@ -71,6 +113,69 @@ public final class ContrastTest {
         // Тема CLASSIC_LIGHT: текст 0xFF151922 на карточке 0xFFFFFFFF.
         double lightTheme = Legibility.contrastRatio(0x15, 0x19, 0x22, 255, 255, 255);
         check(lightTheme >= 4.5, "текст светлой темы на карточке: " + lightTheme + ":1");
+
+        // 5. Палитры GlassTheme. Считаем по настоящим цветам: createResolved()
+        // намеренно не трогает Prefs и android.graphics.Color, поэтому работает
+        // и в unit-тестах (где Color.argb() вернул бы 0).
+        //
+        // Стили перебираем напрямую, а не через create(): sanitizeVisualStyle()
+        // сейчас сворачивает Кибер-Аниме и Сакуру в «Классический графит», но
+        // палитры в коде живые — если их включат, контраст уже проверен.
+        // Уровни непрозрачности: 0 — светлый, 1 — обычный, 2 — плотный.
+        int[] styles = {
+                Prefs.STYLE_CLASSIC_LIGHT, Prefs.STYLE_CYBER_ANIME,
+                Prefs.STYLE_CLASSIC_DARK, Prefs.STYLE_SAKURA_JADE};
+        String[] styleNames = {"светлая", "кибер-аниме", "графит", "сакура × нефрит"};
+        for (int si = 0; si < styles.length; si++) {
+            for (int op = 0; op <= 2; op++) {
+                GlassTheme t = GlassTheme.createResolved(styles[si], op);
+                String where = styleNames[si] + ", непрозрачность " + op;
+
+                // Текст на карточке, подложке и пилюле — порог обычного текста.
+                requireAtLeast(textOn(t.textPrimary, t.cardBgColor), 4.5,
+                        "основной текст на карточке (" + where + ")");
+                requireAtLeast(textOn(t.textSecondary, t.cardBgColor), 4.5,
+                        "второстепенный текст на карточке (" + where + ")");
+                requireAtLeast(textOn(t.textHint, t.cardBgColor), 4.5,
+                        "подсказка на карточке (" + where + ")");
+                requireAtLeast(textOn(t.textHint, t.overlayBgColor), 4.5,
+                        "подсказка на подложке (" + where + ")");
+                requireAtLeast(textOn(t.textHint, t.pillBgColor), 4.5,
+                        "подсказка на пилюле (" + where + ")");
+                requireAtLeast(textOn(t.textSecondary, t.pillBgColor), 4.5,
+                        "второстепенный текст на пилюле (" + where + ")");
+                requireAtLeast(textOn(t.textPrimary, t.chipInactiveBg), 4.5,
+                        "текст неактивного чипа (" + where + ")");
+
+                // Активный чип: подпись на заливке — это текст, 4,5:1.
+                requireAtLeast(textOn(t.chipActiveText, t.chipActiveBg), 4.5,
+                        "подпись активного чипа (" + where + ")");
+                // Выбранный чип виден не только заливкой: в MainActivity активному
+                // чипу ставится рамка chipActiveBorder, и именно она — нетекстовый
+                // индикатор выбора. Проверяем её по порогу 3:1 к пилюле.
+                // (Саму заливку к пилюле требовать нельзя: чтобы белый текст на ней
+                // читался, она должна быть тёмной, а чтобы выделяться на тёмной
+                // пилюле — светлой. Коридор есть только у очень узких оттенков,
+                // поэтому выбор показываем рамкой.)
+                requireAtLeast(textOn(t.chipActiveBorder, t.pillBgColor), 3.0,
+                        "рамка активного чипа видна на пилюле (" + where + ")");
+
+                // «Удалить приложение/папку» — красный текст на карточке.
+                requireAtLeast(textOn(t.dangerColor, t.cardBgColor), 4.5,
+                        "опасное действие на карточке (" + where + ")");
+                requireAtLeast(textOn(t.accentColor, t.cardBgColor), 4.5,
+                        "акцентный текст на карточке (" + where + ")");
+            }
+        }
+
+        // 6. Регрессия конкретных дефектов: значения из истории правок.
+        // #2B8BFF под белым текстом — 3,37:1; теперь активный чип тёмной темы
+        // темнее. Проверяем, что «прежний» цвет действительно не проходит —
+        // иначе тест выше ничего не значит.
+        requireBelow(Legibility.contrastRatio(255, 255, 255, 0x2B, 0x8B, 0xFF), 4.5,
+                "белый на #2B8BFF по-прежнему ниже порога (исторический дефект)");
+        // И что новый активный чип эту пару закрывает.
+        requireAtLeast(textOn(0xFFFFFFFF, 0xFF2563EB), 4.5, "белый на #2563EB проходит");
 
         System.out.println("CONTRAST_TESTS=" + n);
     }
