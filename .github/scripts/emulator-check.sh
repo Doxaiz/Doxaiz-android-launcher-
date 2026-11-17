@@ -26,8 +26,14 @@ APK="$(find "${APK_PATH:-apk}" -name '*.apk' | head -1)"
 log() { echo "::group::$*"; }
 endlog() { echo "::endgroup::"; }
 
+# Метка прохода (см. SKIP_CRASH_SCENARIO/ONLY_CRASH_SCENARIO): два прохода
+# выполняются в одном job, и без метки их заметки в отчёте смешиваются —
+# непонятно, к какому проходу относится «узлов=23».
+PASS_TAG="стол"
+if [ "${ONLY_CRASH_SCENARIO:-0}" = "1" ]; then PASS_TAG="аварийный"; fi
+
 note() {
-    echo "::notice title=$1::$(printf '%s' "$2" | tr '\r\n' '  ' | cut -c1-900)"
+    echo "::notice title=[$PASS_TAG] $1::$(printf '%s' "$2" | tr '\r\n' '  ' | cut -c1-900)"
 }
 
 # Системные диалоги («Pixel Launcher isn't responding», «System UI не отвечает»)
