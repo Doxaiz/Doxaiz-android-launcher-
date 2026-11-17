@@ -612,6 +612,10 @@ PYEOF
     # слабо зависит от загрузки раннера. Публикуется приложением в файл
     # files/doxaiz_filter_stats.txt (setprop обычному приложению запрещён).
     FILTER_STATS="$(adb shell "run-as $PKG cat files/doxaiz_filter_stats.txt" 2>/dev/null | tr -d '\r\n')"
+    # Если файла нет — в отчёт шага кладём список files/, чтобы причина была
+    # видна (не создан / создан под другим именем / run-as не работает).
+    adb shell "run-as $PKG ls -l files/" > "$OUT/app-files.txt" 2>&1 || true
+    summary "файлы-приложения" "$(cat "$OUT/app-files.txt")"
     if [ -n "$FILTER_STATS" ]; then
         note "пересчёт-каталога" "$FILTER_STATS"
         summary "пересчёт-каталога" "$FILTER_STATS (время applyFilter() на нажатие клавиши)"

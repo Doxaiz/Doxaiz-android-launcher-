@@ -4197,11 +4197,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         // Пока шла задержка, экран мог смениться (пользователь ушёл в настройки) —
         // тогда пересчитывать список незачем, он всё равно не виден.
         if (currentScreen != SCREEN_DRAWER && currentScreen != SCREEN_HOME) return;
-        // Стоимость пересчёта нужна для решения «копить нажатия или считать сразу».
-        long startedNs = System.nanoTime();
         applyFilter(q, true);
-        lastDrawerFilterCostNs = System.nanoTime() - startedNs;
-        recordFilterCost(lastDrawerFilterCostNs);
     }
 
     /**
@@ -4222,7 +4218,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             int slot = recentFilterCostCount % recentFilterCostMs.length;
             recentFilterCostMs[slot] = Math.max(0L, costNs / 1_000_000L);
             recentFilterCostCount++;
-            if (recentFilterCostCount < 4 || recentFilterCostCount % 4 != 0) return;
+            if (recentFilterCostCount % 4 != 0) return;
             long[] sorted = new long[recentFilterCostMs.length];
             System.arraycopy(recentFilterCostMs, 0, sorted, 0, sorted.length);
             java.util.Arrays.sort(sorted);
@@ -4248,6 +4244,18 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     }
 
     private void applyFilter(String rawQuery, boolean fromUserTyping) {
+        // Стоимость пересчёта: и для решения «копить нажатия или считать сразу»,
+        // и для отчёта CI (files/doxaiz_filter_stats.txt).
+        long filterStartedNs = System.nanoTime();
+        try {
+            applyFilterBody(rawQuery, fromUserTyping);
+        } finally {
+            lastDrawerFilterCostNs = System.nanoTime() - filterStartedNs;
+            recordFilterCost(lastDrawerFilterCostNs);
+        }
+    }
+
+    private void applyFilterBody(String rawQuery, boolean fromUserTyping) {
         filteredApps.clear();
         final String q = rawQuery != null ? rawQuery.trim() : "";
         String emptyMsg = "Ничего не найдено";
