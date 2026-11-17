@@ -443,6 +443,39 @@ adb exec-out screencap -p > "$OUT/screen-drawer.png" 2>/dev/null || true
 check_crash "прокрутка" || true
 endlog
 
+log "Отзывчивость: набор текста в поиске каталога"
+# Измеряем не «на глаз», а по кадрам: gfxinfo собирает статистику по кадрам
+# нашего процесса. Набираем запрос в поиске каталога и смотрим, сколько кадров
+# пропущено и какая у них 90-я перцентиль длительности. Эмулятор рисует
+# программно, поэтому абсолютные числа не равны телефону — значение имеет
+# сравнение прогонов между собой и отсутствие «залипших» кадров на сотни мс.
+if [ "${DRAWER_NODES:-0}" -ge 40 ]; then
+    adb shell input swipe 540 1700 540 600 250 >/dev/null 2>&1 || true
+    sleep 3
+    adb shell dumpsys gfxinfo "$PKG" reset >/dev/null 2>&1 || true
+    # Поиск в каталоге — первый EditText в верхней части экрана.
+    adb shell input tap 540 300 >/dev/null 2>&1 || true
+    sleep 2
+    START_MS=$(date +%s%3N)
+    for ch in s e t t i n g; do
+        adb shell input text "$ch" >/dev/null 2>&1 || true
+        sleep 0.12
+    done
+    END_MS=$(date +%s%3N)
+    sleep 2
+    adb shell dumpsys gfxinfo "$PKG" > "$OUT/gfxinfo-search.txt" 2>/dev/null || true
+    grep -E "Total frames rendered|Janky frames:|50th percentile|90th percentile|95th percentile|Number Missed Vsync|Number Slow UI thread" \
+        "$OUT/gfxinfo-search.txt" | tee "$OUT/gfxinfo-search-summary.txt"
+    echo "ввод занял $((END_MS - START_MS)) мс" | tee -a "$OUT/gfxinfo-search-summary.txt"
+    note "поиск-метрики" "$(tr '\n' ' ' < "$OUT/gfxinfo-search-summary.txt" | cut -c1-700)"
+    note "поиск-оговорка" "swiftshader: числа сравнимы только между прогонами, не с телефоном"
+    adb shell input keyevent KEYCODE_BACK >/dev/null 2>&1 || true
+    sleep 1
+else
+    note "поиск-метрики" "каталог не открылся — замер набора текста пропущен"
+fi
+endlog
+
 log "Итог"
 # Полные дампы и метрики — в отчёт шага: он приложен к run и читается глазами.
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
