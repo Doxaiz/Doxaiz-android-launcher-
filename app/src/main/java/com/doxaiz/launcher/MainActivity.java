@@ -4112,6 +4112,17 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     private final Runnable pendingDrawerFilter = this::runPendingDrawerFilter;
     /** Сколько занял последний пересчёт каталога: 0 — ещё не считали. */
     private long lastDrawerFilterCostNs = 0L;
+    /**
+     * Суммарное время пересчёта каталога за последние замеры: median/max, мс.
+     *
+     * Кадровые метрики эмулятора зависят от загрузки раннера: один и тот же код
+     * в соседних прогонах давал 50-й перцентиль 16 и 93 мс. Время самого
+     * фильтра от загрузки CPU зависит гораздо меньше и показывает, сколько
+     * главный поток реально тратит на нажатие клавиши. Публикуется в системное
+     * свойство debug.doxaiz.filter_ms, откуда его читает сценарий CI.
+     */
+    private final long[] recentFilterCostMs = new long[16];
+    private int recentFilterCostCount = 0;
     /** Запрос, который нужно посчитать после задержки; null — ничего не ждёт. */
     private String pendingDrawerFilterQuery = null;
 
@@ -4190,6 +4201,33 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         long startedNs = System.nanoTime();
         applyFilter(q, true);
         lastDrawerFilterCostNs = System.nanoTime() - startedNs;
+        recordFilterCost(lastDrawerFilterCostNs);
+    }
+
+    /**
+     * Запоминает стоимость пересчёта и раз в 8 замеров публикует сводку в
+     * системное свойство — только в debug-сборке: в релизе лишний setprop
+     * не нужен, а чтение свойства из CI иначе невозможно.
+     */
+    private void recordFilterCost(long costNs) {
+        try {
+            if (!BuildConfig.DEBUG) return;
+            int slot = recentFilterCostCount % recentFilterCostMs.length;
+            recentFilterCostMs[slot] = Math.max(0L, costNs / 1_000_000L);
+            recentFilterCostCount++;
+            if (recentFilterCostCount < 8 || recentFilterCostCount % 8 != 0) return;
+            long[] sorted = new long[recentFilterCostMs.length];
+            System.arraycopy(recentFilterCostMs, 0, sorted, 0, sorted.length);
+            java.util.Arrays.sort(sorted);
+            long median = sorted[sorted.length / 2];
+            long max = sorted[sorted.length - 1];
+            Process p = Runtime.getRuntime().exec(new String[]{
+                    "setprop", "debug.doxaiz.filter_ms", median + "/" + max});
+            p.waitFor();
+        } catch (Throwable t) {
+            // Диагностика не имеет права мешать набору текста.
+            Diagnostics.record("MainActivity.recordFilterCost", t);
+        }
     }
 
     /** Досчитывает отложенный фильтр немедленно (Enter, закрытие каталога). */
