@@ -65,6 +65,39 @@ PYEOF
     return 1
 }
 
+# Нажатие по элементу с заданной подписью доступности.
+# Нужно, чтобы открывать каталог детерминированно: свайп по рабочему столу
+# эмулятор иногда "съедает" (это уже стоило нам четырёх попыток и красной
+# сборки), а кнопка в доке имеет contentDescription и находится всегда.
+tap_by_desc() {  # $1 = текст content-desc
+    adb shell uiautomator dump /sdcard/ui-tap.xml >/dev/null 2>&1 || true
+    adb shell cat /sdcard/ui-tap.xml > "$OUT/ui-tap.xml" 2>/dev/null || true
+    local xy
+    xy="$(python3 - "$OUT/ui-tap.xml" "$1" <<'PYEOF' 2>/dev/null || true
+import re, sys
+try:
+    xml = open(sys.argv[1], encoding='utf-8', errors='replace').read()
+except OSError:
+    raise SystemExit
+want = sys.argv[2]
+for nd in re.findall(r'<node [^>]*>', xml):
+    m = re.search(r'content-desc="([^"]*)"', nd)
+    if not m or want not in m.group(1):
+        continue
+    b = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', nd)
+    if b:
+        x1, y1, x2, y2 = map(int, b.groups())
+        print(f"{(x1+x2)//2} {(y1+y2)//2}")
+        break
+PYEOF
+)"
+    if [ -n "${xy:-}" ]; then
+        adb shell input tap $xy >/dev/null 2>&1 || true
+        return 0
+    fi
+    return 1
+}
+
 report_fail() {
     echo "::error title=проверка::$*"
     echo "$*" | tee -a "$OUT/failures.txt"
@@ -396,7 +429,10 @@ log "Каталог приложений"
 # свайп, ожидание и дамп; повторы нужны из-за нестабильности эмулятора.
 DRAWER_NODES=0
 for attempt in 1 2 3 4; do
-    adb shell input swipe 540 1700 540 600 250
+    # Сначала кнопка «Все приложения» в доке (детерминированно), затем свайп.
+    if ! tap_by_desc "Все приложения"; then
+        adb shell input swipe 540 1700 540 600 250
+    fi
     sleep 4
     dump_ui drawer "ui-drawer"
     DRAWER_NODES="$(sed -n 's/^узлов=//p' "$OUT/ui-drawer.txt" 2>/dev/null | head -1)"
