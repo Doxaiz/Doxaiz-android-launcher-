@@ -307,40 +307,45 @@ endlog
 log "Аварийный возврат: аварийный экран и уход на системный лаунчер"
 
 # Проверяем поведение, а не рассуждение. Состояние «предыдущий запуск рабочего
-# стола упал» подкладывается прямо в prefs приложения (run-as доступен, потому
-# что это debug-сборка), после чего HOME открывается заново.
+# стола упал» подкладывается в настройки приложения: сборка debug, поэтому
+# run-as доступен. Ожидания:
+#   1-й аварийный запуск -> на экране аварийный экран Doxaiz с объяснением;
+#   2-й аварийный запуск -> лаунчер сам уступает: на переднем плане системный
+#                           рабочий стол, а не чёрный экран.
 #
-# Ожидания:
-#   1-й аварийный запуск  -> на экране аварийный экран Doxaiz с объяснением;
-#   2-й аварийный запуск  -> лаунчер сам уступает: на переднем плане системный
-#                            рабочий стол, а не чёрный экран.
-#
-# Роль HOME при этом может остаться у Doxaiz: Android не даёт приложению снять
-# её без подтверждения пользователем (RoleManager показывает диалог, который
-# эмулятор в headless-режиме не подтверждает). Поэтому фиксируем именно переход
-# на системный лаунчер, а остаточную роль отмечаем предупреждением.
-CRASH_PREFS_DIR=shared_prefs
-CRASH_PREFS_FILE=doxaiz_prefs.xml
-CRASH_XML=/data/local/tmp/doxaiz-crash-prefs.xml
+# Роль HOME после сценария может остаться у Doxaiz: снять её без подтверждения
+# пользователя Android не даёт (RoleManager показывает диалог, а в headless
+# эмуляторе подтверждать некому). Фиксируем именно переход на системный
+# лаунчер — то, что видит пользователь, — а остаточную роль отмечаем
+# предупреждением.
+CRASH_DIR=shared_prefs
+CRASH_FILE=doxaiz_prefs.xml
 
+# Запасной вариант записи напрямую через run-as, если внешний каталог недоступен.
 write_crash_state() {  # $1 = streak, $2 = pending (мс)
-    cat > /tmp/doxaiz-crash-prefs.xml <<XMLEOF
-<?xml version='1.0' encoding='utf-8' standalone='yes' ?>
-<map>
-    <int name="crash_guard_streak" value="$1" />
-    <long name="crash_guard_pending" value="$2" />
-</map>
-XMLEOF
-    adb push /tmp/doxaiz-crash-prefs.xml "$CRASH_XML" >/dev/null 2>&1 || return 1
-    adb shell "run-as $PKG mkdir -p $CRASH_PREFS_DIR" >/dev/null 2>&1 || true
-    adb shell "run-as $PKG cp $CRASH_XML $CRASH_PREFS_DIR/$CRASH_PREFS_FILE" >/dev/null 2>&1 || return 1
-    adb shell chmod 644 "$CRASH_XML" >/dev/null 2>&1 || true
-    return 0
+    printf "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>\n<map>\n    <int name=\"crash_guard_streak\" value=\"%s\" />\n    <long name=\"crash_guard_pending\" value=\"%s\" />\n</map>\n" "$1" "$2" > /tmp/doxaiz-crash.xml
+    adb push /tmp/doxaiz-crash.xml /data/local/tmp/doxaiz-crash.xml >/dev/null 2>&1 || true
+    adb shell "run-as $PKG mkdir -p $CRASH_DIR" >/dev/null 2>&1 || true
+    if adb shell "run-as $PKG cp /data/local/tmp/doxaiz-crash.xml $CRASH_DIR/$CRASH_FILE" >/dev/null 2>&1; then
+        return 0
+    fi
+    # cat-перенаправление не всегда проходит через shell, поэтому вторым
+    # способом пишем по stdin.
+    if adb exec-in run-as "$PKG" sh -c "cat > $CRASH_DIR/$CRASH_FILE" < /tmp/doxaiz-crash.xml >/dev/null 2>&1; then
+        return 0
+    fi
+    return 1
+}
+
+read_crash_state() {
+    adb exec-out run-as "$PKG" cat "$CRASH_DIR/$CRASH_FILE" 2>/dev/null || true
 }
 
 focus_now() {
     adb shell dumpsys window 2>/dev/null | grep -m1 mCurrentFocus || true
 }
+
+note "crash-prefs" "после сценария запись = $(read_crash_state | tr '\n' ' ' | cut -c1-200)"
 
 if adb shell dumpsys role 2>/dev/null | grep -q "$PKG"; then
     note "crash-guard" "Doxaiz держит роль HOME — сценарий возврата применим"
@@ -356,17 +361,18 @@ if [ "$scenario_ok" = "1" ]; then
     sleep 1
     pending_ms=$(( $(date +%s) * 1000 - 3000 ))
     if write_crash_state 0 "$pending_ms"; then
+        note "crash-write" "состояние сбоя записано: $(read_crash_state | tr '\n' ' ' | cut -c1-160)"
         adb shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1 || true
         sleep 4
         dump_ui "crash-safe" "аварийный экран" || true
         if grep -q "не запустился" "$OUT/ui-crash-safe.txt" 2>/dev/null; then
             note "crash-safe" "аварийный экран показан после первого сбоя"
         else
-            echo "::warning title=аварийный экран::аварийный экран не найден в дереве интерфейса (узлов=$(grep -c . "$OUT/ui-crash-safe.txt" 2>/dev/null || echo 0))"
+            echo "::warning title=аварийный экран::аварийный экран не найден в дереве интерфейса"
         fi
         check_crash "аварийный экран" || true
     else
-        echo "::warning title=аварийный экран::не удалось подложить состояние сбоя (run-as запрещён)"
+        echo "::warning title=аварийный экран::не удалось записать состояние сбоя (run-as недоступен)"
     fi
 
     # --- запуск №2: счётчик уже 1, ещё один сбой -> уход на системный ---------
@@ -387,7 +393,7 @@ if [ "$scenario_ok" = "1" ]; then
     fi
 
     # --- восстановление: чистим состояние и возвращаем лаунчер в работу -------
-    adb shell "run-as $PKG rm -f $CRASH_PREFS_DIR/$CRASH_PREFS_FILE" >/dev/null 2>&1 || true
+    adb shell "run-as $PKG rm -f $CRASH_DIR/$CRASH_FILE" >/dev/null 2>&1 || true
     adb shell am force-stop "$PKG" >/dev/null 2>&1 || true
     sleep 1
     adb shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1 || true
