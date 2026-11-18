@@ -51,6 +51,9 @@ public final class Audit60Tests {
         formatWithCurrentTimeZoneHandlesNullDate();
         pendingAuthActionDeliversOnce();
         pendingAuthActionCannotMixRequests();
+        importTruncatesForeignStrings();
+        dismissedRecentSetIsBounded();
+        trafficTotalsIgnoreAnomalies();
 
         System.out.println("Audit60Tests: " + n + " проверок пройдено");
     }
@@ -530,5 +533,105 @@ public final class Audit60Tests {
         pending.set(() -> { throw new IllegalStateException("сбой действия"); }, null);
         pending.deliver(true);
         check(!pending.has(), "после исключения ожидание всё равно снято");
+    }
+    // -------------------------------- 12. ограничение чужих строк при импорте
+
+    /**
+     * Подпись иконки приходит из базы ДРУГОЙ оболочки: её длина ничем не
+     * ограничена, а провайдер может отдать строку в мегабайты. Такая строка
+     * попадает в модель рабочего стола и в JSON раскладки, поэтому обрезается
+     * на входе, а не «где-нибудь потом».
+     */
+    private static void importTruncatesForeignStrings() {
+        check("".equals(LayoutImporter.truncateForImport(null, 10)),
+                "null из чужой базы даёт пустую строку, а не NPE");
+        check("".equals(LayoutImporter.truncateForImport("что-то", 0)),
+                "нулевой предел даёт пустую строку");
+        check("Короткое".equals(LayoutImporter.truncateForImport("Короткое", 64)),
+                "короткая строка не меняется");
+
+        StringBuilder huge = new StringBuilder();
+        for (int i = 0; i < 10_000; i++) huge.append('я');
+        String cut = LayoutImporter.truncateForImport(huge.toString(), 256);
+        check(cut.length() == 256, "длинная строка обрезана до предела, стало " + cut.length());
+
+        // Предел импорта строк должен быть заведомо больше реальной раскладки
+        // (8 страниц × 24 иконки + док + папки), иначе импорт потеряет иконки.
+        int realisticMax = DesktopModel.MAX_PAGES * DesktopModel.GRID_ROWS * 5 + 64;
+        check(LayoutImporter.MAX_IMPORT_ROWS >= realisticMax,
+                "предел строк импорта не режет настоящую раскладку: "
+                        + LayoutImporter.MAX_IMPORT_ROWS + " >= " + realisticMax);
+    }
+    // --------------------- 13. набор «скрытых из Недавних» не растёт бесконечно
+
+    /**
+     * Каждый свайп по карточке в «Недавних» дописывал пакет в JSON и никогда
+     * его не убирал: набор рос без предела, а целиком перечитывался и
+     * перезаписывался на каждый следующий свайп.
+     *
+     * Логика предела вынесена на обычную Map, поэтому проверяется здесь:
+     * org.json в JVM-тестах — заглушка, и через JSON это не проверить.
+     */
+    private static void dismissedRecentSetIsBounded() {
+        Map<String, Long> all = new HashMap<>();
+        long base = 1_700_000_000_000L;
+        for (int i = 0; i < 260; i++) all.put("pkg" + i, base + i);
+
+        Map<String, Long> trimmed = Prefs.trimDismissed(all, 200);
+        check(trimmed.size() == 200, "переполненный набор срезан до предела, стало " + trimmed.size());
+        check(trimmed.containsKey("pkg259"), "самая свежая запись сохранена");
+        check(!trimmed.containsKey("pkg0"), "самая старая запись выброшена");
+        check(!trimmed.containsKey("pkg59"), "записи за пределами 200 свежих выброшены");
+
+        // На пределе и ниже — ничего не теряем.
+        check(Prefs.trimDismissed(all, 260).size() == 260, "на пределе набор не режется");
+        check(Prefs.trimDismissed(all, 1000).size() == 260, "при большом пределе набор цел");
+
+        // Границы не должны ронять.
+        check(Prefs.trimDismissed(null, 200).isEmpty(), "null даёт пустой набор, а не NPE");
+        check(Prefs.trimDismissed(new HashMap<>(), 200).isEmpty(), "пустой набор остаётся пустым");
+        check(Prefs.trimDismissed(all, 0).isEmpty(), "нулевой предел даёт пустой набор");
+
+        // Исходная карта не должна меняться: её вызывает горячий путь настроек.
+        check(all.size() == 260, "исходный набор не изменён, стало " + all.size());
+    }
+    // --------------------------- 14. учёт трафика: дельты, сброс счётчика, скачки
+
+    /**
+     * Учёт трафика раньше не вызывался ниоткуда (панель сети показывала только
+     * скорость). Перенесён в NetworkQualityHelper; расчёт проверяется здесь,
+     * потому что он чистый: ни TrafficStats, ни SharedPreferences.
+     */
+    private static void trafficTotalsIgnoreAnomalies() {
+        long mb = 1024L * 1024L;
+
+        // Первый замер: стартуем от текущего счётчика, а не прибавляем всё
+        // накопленное с загрузки телефона как «трафик за сутки».
+        long[] first = NetworkQualityHelper.nextTrafficTotals(0L, 0L, -1L, 300L * mb);
+        check(first[0] == 300L * mb && first[1] == 300L * mb,
+                "первый замер берёт текущее значение");
+
+        // Обычная дельта прибавляется к обеим суммам.
+        long[] next = NetworkQualityHelper.nextTrafficTotals(10L * mb, 100L * mb, 300L * mb, 312L * mb);
+        check(next[0] == 22L * mb, "суточная сумма выросла на дельту, стало " + next[0]);
+        check(next[1] == 112L * mb, "месячная сумма выросла на дельту, стало " + next[1]);
+
+        // Счётчик обнулился (перезагрузка): берём текущее значение, не отрицательное.
+        long[] afterReboot = NetworkQualityHelper.nextTrafficTotals(22L * mb, 112L * mb, 312L * mb, 5L * mb);
+        check(afterReboot[0] == 27L * mb && afterReboot[1] == 117L * mb,
+                "после сброса счётчика дельта = текущее значение");
+
+        // Аномальный скачок (> 50 ГБ за час) не засчитывается вовсе.
+        long[] huge = NetworkQualityHelper.nextTrafficTotals(1L * mb, 2L * mb, 0L, 60L * 1024L * mb);
+        check(huge[0] == 1L * mb && huge[1] == 2L * mb,
+                "скачок больше 50 ГБ не портит накопленное");
+
+        // Отрицательные/битые входные значения не дают отрицательных сумм.
+        long[] broken = NetworkQualityHelper.nextTrafficTotals(-5L, -7L, -1L, -100L);
+        check(broken[0] >= 0L && broken[1] >= 0L, "битые входные данные дают неотрицательные суммы");
+
+        // Нет изменений — суммы не растут.
+        long[] flat = NetworkQualityHelper.nextTrafficTotals(5L * mb, 6L * mb, 300L * mb, 300L * mb);
+        check(flat[0] == 5L * mb && flat[1] == 6L * mb, "без трафика суммы не меняются");
     }
 }

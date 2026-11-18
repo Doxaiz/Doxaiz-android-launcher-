@@ -245,18 +245,6 @@ public final class Prefs {
         return sp.getString(KEY_SHADE_TILES, DEFAULT_SHADE_TILES);
     }
 
-    public void setShadeTiles(List<String> tiles) {
-        StringBuilder sb = new StringBuilder();
-        if (tiles != null) {
-            for (String k : tiles) {
-                if (k == null || k.trim().isEmpty()) continue;
-                if (sb.length() > 0) sb.append(',');
-                sb.append(k.trim());
-            }
-        }
-        sp.edit().putString(KEY_SHADE_TILES, sb.toString()).apply();
-    }
-
     public void setShadeTilesCsv(String csv) {
         if (csv == null) return;
         String safe = csv.length() > 300 ? csv.substring(0, 300) : csv;
@@ -748,31 +736,89 @@ public final class Prefs {
         return out;
     }
 
+    /**
+     * Сколько «скрытых из Недавних» пакетов хранится.
+     *
+     * Зачем предел: каждый свайп по карточке в «Недавних» дописывал пакет в
+     * JSON и никогда его не убирал. Набор только рос — десятки установок и
+     * удалений приложений оставляли в настройках мусор, который целиком
+     * перечитывался и перезаписывался при каждом следующем свайпе. Старые
+     * записи не нужны: они сравниваются с временем запуска, а такие запуски
+     * давно вне списка.
+     */
+    private static final int MAX_DISMISSED_PKGS = 200;
+
     public void markRecentPackageDismissed(String pkg) {
         if (pkg == null || pkg.isEmpty()) return;
         try {
             String dRaw = sp.getString(KEY_DISMISSED_PKGS_JSON, null);
             JSONObject obj = (dRaw != null && !dRaw.isEmpty()) ? new JSONObject(dRaw) : new JSONObject();
-            obj.put(pkg, System.currentTimeMillis());
-            sp.edit().putString(KEY_DISMISSED_PKGS_JSON, obj.toString()).apply();
+            Map<String, Long> entries = parseDismissed(obj);
+            entries.put(pkg, System.currentTimeMillis());
+            sp.edit().putString(KEY_DISMISSED_PKGS_JSON,
+                    dismissedToJson(trimDismissed(entries, MAX_DISMISSED_PKGS)).toString()).apply();
         } catch (Throwable ignored) {
         }
+    }
+
+    /**
+     * Оставляет {@link #MAX_DISMISSED_PKGS} самых свежих записей.
+     *
+     * Отдельный статический метод: он не трогает SharedPreferences, поэтому
+     * проверяется JVM-тестом {@code Audit60Tests.dismissedRecentSetIsBounded()}.
+     */
+    static Map<String, Long> trimDismissed(Map<String, Long> entries, int limit) {
+        Map<String, Long> out = new HashMap<>();
+        if (entries == null || entries.isEmpty()) return out;
+        if (limit <= 0) return out;
+        if (entries.size() <= limit) {
+            out.putAll(entries);
+            return out;
+        }
+        List<Map.Entry<String, Long>> sorted = new ArrayList<>(entries.entrySet());
+        // Свежие первыми: так в журнал попадают именно те записи, которые ещё
+        // влияют на список «Недавних».
+        Collections.sort(sorted, (a, b) -> {
+            long ta = (a.getValue() != null) ? a.getValue() : 0L;
+            long tb = (b.getValue() != null) ? b.getValue() : 0L;
+            return Long.compare(tb, ta);
+        });
+        for (int i = 0; i < limit; i++) {
+            Map.Entry<String, Long> e = sorted.get(i);
+            out.put(e.getKey(), (e.getValue() != null) ? e.getValue() : 0L);
+        }
+        return out;
+    }
+
+    /** Разбор JSON «скрытых из Недавних» в обычную карту. */
+    private static Map<String, Long> parseDismissed(JSONObject obj) {
+        Map<String, Long> out = new HashMap<>();
+        if (obj == null) return out;
+        try {
+            Iterator<String> it = obj.keys();
+            while (it.hasNext()) {
+                String k = it.next();
+                if (k == null || k.isEmpty()) continue;
+                out.put(k, obj.optLong(k, 0L));
+            }
+        } catch (Throwable ignored) {
+        }
+        return out;
+    }
+
+    private static JSONObject dismissedToJson(Map<String, Long> map) throws org.json.JSONException {
+        JSONObject obj = new JSONObject();
+        if (map != null) {
+            for (Map.Entry<String, Long> e : map.entrySet()) {
+                obj.put(e.getKey(), (e.getValue() != null) ? e.getValue() : 0L);
+            }
+        }
+        return obj;
     }
 
     public void markAllRecentTabsCleared() {
         sp.edit()
                 .putLong(KEY_RECENTS_CLEARED_AT, System.currentTimeMillis())
-                .remove(KEY_DISMISSED_PKGS_JSON)
-                .apply();
-    }
-
-    public void clearAppUsage() {
-        synchronized (usageLock) {
-            usageCache = new HashMap<>();
-        }
-        sp.edit()
-                .remove(KEY_USAGE_JSON)
-                .remove(KEY_RECENTS_CLEARED_AT)
                 .remove(KEY_DISMISSED_PKGS_JSON)
                 .apply();
     }
@@ -1003,44 +1049,17 @@ public final class Prefs {
         }
     }
 
-    // Умный локальный суточный и месячный учёт трафика по реальным дельтам TrafficStats
-    public long[] updateAndReadTrafficBytes(long currentTotalBytes) {
-        if (currentTotalBytes < 0L) currentTotalBytes = 0L;
-        java.text.SimpleDateFormat dayFmt = new java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US);
-        java.text.SimpleDateFormat monFmt = new java.text.SimpleDateFormat("yyyy-MM", java.util.Locale.US);
-        java.util.Date now = new java.util.Date();
-        String todayKey = dayFmt.format(now);
-        String monthKey = monFmt.format(now);
-
-        String savedDay = sp.getString("tr_day_key", "");
-        String savedMonth = sp.getString("tr_mon_key", "");
-        long lastRaw = sp.getLong("tr_last_raw", -1L);
-        long dayAcc = savedDay.equals(todayKey) ? sp.getLong("tr_day_acc", 0L) : 0L;
-        long monAcc = savedMonth.equals(monthKey) ? sp.getLong("tr_mon_acc", 0L) : 0L;
-
-        if (lastRaw >= 0L) {
-            long delta = (currentTotalBytes >= lastRaw) ? (currentTotalBytes - lastRaw) : currentTotalBytes;
-            // Защита от аномального скачка
-            if (delta > 0L && delta < (50L * 1024L * 1024L * 1024L)) {
-                dayAcc += delta;
-                monAcc += delta;
-            }
-        } else if (currentTotalBytes > 0L) {
-            // Первый замер: стартуем от текущего счётчика сеанса
-            dayAcc = currentTotalBytes;
-            monAcc = currentTotalBytes;
-        }
-
-        sp.edit()
-                .putString("tr_day_key", todayKey)
-                .putString("tr_mon_key", monthKey)
-                .putLong("tr_last_raw", currentTotalBytes)
-                .putLong("tr_day_acc", dayAcc)
-                .putLong("tr_mon_acc", monAcc)
-                .apply();
-
-        return new long[]{dayAcc, monAcc};
-    }
+    /**
+     * Учёт трафика перенесён в {@link NetworkQualityHelper#accumulateTraffic}.
+     *
+     * Раньше здесь жил updateAndReadTrafficBytes(): он считал суточную и
+     * месячную сумму по дельтам TrafficStats, но не вызывался НИ ОТКУДА — то
+     * есть панель сети показывала только текущую скорость, а накопленные
+     * значения в настройках никогда не обновлялись. Перенос в панель сети не
+     * просто «оживил» код: там уже есть готовый снимок TrafficStats и
+     * собственный троттлинг обновлений, поэтому учёт не добавляет ни одного
+     * лишнего IPC.
+     */
 
     // === Doxaiz 4.1: Ручные категории приложений ===
     private static final String KEY_CUSTOM_CAT_PREFIX = "custom_cat_";
@@ -1135,17 +1154,6 @@ public final class Prefs {
         return sp.getString(KEY_CUSTOM_SECTIONS, "");
     }
 
-    public void setCustomSectionsRawJson(String raw) {
-        if (raw == null || raw.trim().isEmpty()) {
-            synchronized (prefsCacheLock) {
-                customSectionsCache = new ArrayList<>();
-            }
-            sp.edit().remove(KEY_CUSTOM_SECTIONS).apply();
-        } else {
-            saveCustomSections(CustomSection.fromJson(raw));
-        }
-    }
-
     /**
      * Вариант для импорта бэкапа: пишет в хранилище, но НЕ трогает кэш чтения —
      * при откате кэш должен остаться согласованным с восстановленными настройками
@@ -1198,10 +1206,6 @@ public final class Prefs {
         // Санитизация та же, что и в обычном пути, но без записи в кэш чтения.
         Set<Integer> parsed = CustomSection.parseHiddenStdCategories(raw);
         sp.edit().putString(KEY_HIDDEN_STD_CATS, CustomSection.encodeHiddenStdCategories(parsed)).apply();
-    }
-
-    public void setHiddenStdCategoriesRaw(String raw) {
-        setHiddenStdCategories(CustomSection.parseHiddenStdCategories(raw));
     }
 
     public boolean isAutoNetworkEnabled() { return isAutoNetworkAssist(); }
@@ -1260,17 +1264,12 @@ public final class Prefs {
         return sp.getBoolean("anime_ornaments", true);
     }
 
-    public void setAnimeOrnamentsEnabled(boolean enabled) {
-        sp.edit().putBoolean("anime_ornaments", enabled).apply();
-    }
-
-    public boolean isAnimeParticlesEnabled() {
-        return sp.getBoolean("anime_particles", true);
-    }
-
-    public void setAnimeParticlesEnabled(boolean enabled) {
-        sp.edit().putBoolean("anime_particles", enabled).apply();
-    }
+    // isAnimeOrnamentsEnabled() используется: MainActivity передаёт значение в
+    // GlassTheme.create(...). Записи в настройку нет намеренно — выключателя в
+    // интерфейсе тоже нет, а мёртвый сеттер создавал ложное впечатление
+    // работающей настройки. Частицы (anime_particles) не создаются нигде: слой
+    // AnimeParticlesView остался от прежней версии и в дерево видов не
+    // добавляется, поэтому и настроек у него нет.
 
     // =========================================================================
     // Транзакционный импорт резервной копии (BackupHelper)

@@ -8027,8 +8027,12 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
         TextView netDnsStats = new TextView(this);
         String statsLine = (networkHelper != null) ? networkHelper.formatStatsLine() : "";
+        // Учёт трафика раньше не выводился нигде (и не считался вовсе) — теперь
+        // строка «за сутки / за месяц» стоит рядом с диагностикой DNS.
+        String trafficLine = (networkHelper != null) ? networkHelper.formatTrafficLine() : "";
         netDnsStats.setText("Частный DNS: " + netStatus.dnsSummary
-                + (statsLine.isEmpty() ? "" : "\n" + statsLine));
+                + (statsLine.isEmpty() ? "" : "\n" + statsLine)
+                + (trafficLine.isEmpty() ? "" : "\n" + trafficLine));
         netDnsStats.setTextColor(theme.textHint);
         netDnsStats.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f);
         LinearLayout.LayoutParams ndLp = new LinearLayout.LayoutParams(

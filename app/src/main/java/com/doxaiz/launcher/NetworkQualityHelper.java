@@ -4,10 +4,12 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.net.ConnectivityManager;
 import android.net.LinkProperties;
 import android.net.Network;
 import android.net.NetworkCapabilities;
+import android.net.TrafficStats;
 import android.os.Build;
 import android.os.SystemClock;
 import android.provider.Settings;
@@ -94,8 +96,17 @@ public final class NetworkQualityHelper {
         void onNetworkStatusChanged(Status status, boolean autoReprobed);
     }
 
+    /** Ключи учёта трафика: прежние имена, чтобы не потерять накопленное. */
+    private static final String KEY_TR_DAY = "tr_day_key";
+    private static final String KEY_TR_MONTH = "tr_mon_key";
+    private static final String KEY_TR_LAST_RAW = "tr_last_raw";
+    private static final String KEY_TR_DAY_ACC = "tr_day_acc";
+    private static final String KEY_TR_MONTH_ACC = "tr_mon_acc";
+
     private final Context appContext;
     private final ConnectivityManager cm;
+    /** Настройки нужны только для редкой записи накопленного трафика. */
+    private final Prefs prefs;
     private ConnectivityManager.NetworkCallback activeCallback;
     private boolean activeAutoHeal = false;
     private int activeMode = -1;
@@ -103,6 +114,12 @@ public final class NetworkQualityHelper {
     private volatile long lastAutoReprobeTs = 0L;
 
     private volatile boolean lastReprobeAccepted = false;
+    /**
+     * «Недавние» уже посчитали трафик этого часа: второй замер раздул бы сумму
+     * на ту же дельту. Так панель сети может стоять на экране подолгу, а
+     * TrafficStats читается на каждый кадр её обновления.
+     */
+    private volatile long lastTrafficSampleHour = -1L;
     private final Object statsLock = new Object();
     // Сам SimpleDateFormat не держим: он не потокобезопасен, а панель сети
     // форматирует время из фонового потока. Шаблон и локаль — неизменяемые.
@@ -114,6 +131,7 @@ public final class NetworkQualityHelper {
 
     public NetworkQualityHelper(Context context) {
         this.appContext = context.getApplicationContext();
+        this.prefs = new Prefs(appContext);
         this.cm = (ConnectivityManager) appContext.getSystemService(Context.CONNECTIVITY_SERVICE);
     }
 
@@ -177,6 +195,7 @@ public final class NetworkQualityHelper {
     }
 
     public Status inspect() {
+        accumulateTraffic(System.currentTimeMillis());
         if (cm == null) {
             return new Status(false, false, false, "Нет данных", 0, 0,
                     "Сеть недоступна", "Служба подключения не отвечает");
@@ -340,6 +359,135 @@ public final class NetworkQualityHelper {
             lastHealTimeMs = 0L;
             recentEvents.clear();
         }
+    }
+
+    /**
+     * Суточный и месячный учёт трафика по реальным дельтам TrafficStats.
+     *
+     * <h3>Почему здесь</h3>
+     * Раньше это был {@code Prefs.updateAndReadTrafficBytes()}, который не
+     * вызывался ниоткуда: панель сети показывала только оценку канала, а
+     * накопленные значения в настройках не обновлялись никогда. Панель сети —
+     * единственное место, которое и так читает состояние сети, поэтому учёт
+     * живёт здесь, а не в настройках.
+     *
+     * <h3>Что важно</h3>
+     * Запись в SharedPreferences идёт не чаще раза в час и только при
+     * фактическом изменении: считать трафик на каждый кадр и писать настройки
+     * на каждый кадр — разные вещи, и второе недопустимо.
+     */
+    void accumulateTraffic(long nowMs) {
+        try {
+            long hour = nowMs / 3600_000L;
+            if (hour == lastTrafficSampleHour) return;
+            lastTrafficSampleHour = hour;
+
+            long total = TrafficStats.getTotalRxBytes();
+            if (total < 0L) return; // счётчик недоступен на части прошивок
+
+            java.text.SimpleDateFormat dayFmt =
+                    quickFormat("yyyy-MM-dd");
+            java.text.SimpleDateFormat monFmt =
+                    quickFormat("yyyy-MM");
+            java.util.Date now = new java.util.Date(nowMs);
+            String todayKey = dayFmt.format(now);
+            String monthKey = monFmt.format(now);
+
+            SharedPreferences sp = prefs.getSharedPreferences();
+            if (sp == null) return;
+            String savedDay = sp.getString(KEY_TR_DAY, "");
+            String savedMonth = sp.getString(KEY_TR_MONTH, "");
+            long lastRaw = sp.getLong(KEY_TR_LAST_RAW, -1L);
+            long dayAcc = savedDay.equals(todayKey) ? sp.getLong(KEY_TR_DAY_ACC, 0L) : 0L;
+            long monthAcc = savedMonth.equals(monthKey) ? sp.getLong(KEY_TR_MONTH_ACC, 0L) : 0L;
+
+            long[] next = nextTrafficTotals(dayAcc, monthAcc, lastRaw, total);
+            sp.edit()
+                    .putString(KEY_TR_DAY, todayKey)
+                    .putString(KEY_TR_MONTH, monthKey)
+                    .putLong(KEY_TR_LAST_RAW, total)
+                    .putLong(KEY_TR_DAY_ACC, next[0])
+                    .putLong(KEY_TR_MONTH_ACC, next[1])
+                    .apply();
+        } catch (Throwable t) {
+            Diagnostics.record("NetworkQualityHelper.accumulateTraffic", t);
+        }
+    }
+
+    /**
+     * Чистый расчёт новых сумм: без Android API, поэтому проверяется JVM-тестом
+     * {@code Audit60Tests.trafficTotalsIgnoreAnomalies()}.
+     *
+     * @param lastRaw предыдущее показание счётчика, -1 если его ещё не было
+     * @return {суточная сумма, месячная сумма}
+     */
+    static long[] nextTrafficTotals(long dayAcc, long monthAcc, long lastRaw, long currentTotal) {
+        long day = Math.max(0L, dayAcc);
+        long month = Math.max(0L, monthAcc);
+        long current = Math.max(0L, currentTotal);
+        if (lastRaw < 0L) {
+            // Первый замер: стартуем от текущего счётчика сеанса, иначе первая
+            // же дельта оказалась бы равна всему трафику с загрузки телефона.
+            return new long[]{current, current};
+        }
+        // Счётчик мог обнулиться (перезагрузка) — тогда берём текущее значение,
+        // но аномальный скачок (больше 50 ГБ за час) не засчитываем вовсе.
+        long delta = (current >= lastRaw) ? (current - lastRaw) : current;
+        final long MAX_HOURLY_DELTA = 50L * 1024L * 1024L * 1024L;
+        if (delta > 0L && delta < MAX_HOURLY_DELTA) {
+            day += delta;
+            month += delta;
+        }
+        return new long[]{day, month};
+    }
+
+    /**
+     * Строка «израсходовано за сутки / за месяц» для панели сети.
+     *
+     * Раньше эти числа не показывались нигде: учёт не вызывался, а значит и
+     * выводить было нечего. Пустая строка — если данных ещё нет, чтобы панель
+     * не показывала «0 Б» как будто трафик посчитан.
+     */
+    String formatTrafficLine() {
+        try {
+            SharedPreferences sp = prefs.getSharedPreferences();
+            if (sp == null) return "";
+            java.text.SimpleDateFormat dayFmt = quickFormat("yyyy-MM-dd");
+            java.text.SimpleDateFormat monFmt = quickFormat("yyyy-MM");
+            java.util.Date now = new java.util.Date();
+            String todayKey = dayFmt.format(now);
+            String monthKey = monFmt.format(now);
+            long dayAcc = todayKey.equals(sp.getString(KEY_TR_DAY, ""))
+                    ? sp.getLong(KEY_TR_DAY_ACC, 0L) : 0L;
+            long monthAcc = monthKey.equals(sp.getString(KEY_TR_MONTH, ""))
+                    ? sp.getLong(KEY_TR_MONTH_ACC, 0L) : 0L;
+            if (dayAcc <= 0L && monthAcc <= 0L) return "";
+            return "Трафик: за сутки " + formatTrafficBytes(dayAcc)
+                    + " • за месяц " + formatTrafficBytes(monthAcc);
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    /**
+     * Байты в короткую подпись. Своя, а не {@code Formatter.formatShortFileSize}:
+     * тот требует контекст, а расчёт проверяется JVM-тестом.
+     */
+    static String formatTrafficBytes(long bytes) {
+        if (bytes < 0L) return "—";
+        if (bytes < 1024L) return bytes + " Б";
+        double kb = bytes / 1024.0;
+        if (kb < 1024.0) return String.format(java.util.Locale.US, "%.1f КБ", kb);
+        double mb = kb / 1024.0;
+        if (mb < 1024.0) return String.format(java.util.Locale.US, "%.1f МБ", mb);
+        double gb = mb / 1024.0;
+        if (gb < 1024.0) return String.format(java.util.Locale.US, "%.1f ГБ", gb);
+        return String.format(java.util.Locale.US, "%.1f ТБ", gb / 1024.0);
+    }
+
+    /** Форматтер без общего состояния: SimpleDateFormat не потокобезопасен. */
+    private static java.text.SimpleDateFormat quickFormat(String pattern) {
+        return new java.text.SimpleDateFormat(pattern, java.util.Locale.US);
     }
 
     public String formatStatsLine() {
