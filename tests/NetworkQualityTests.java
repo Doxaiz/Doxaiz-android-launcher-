@@ -150,6 +150,11 @@ public final class NetworkQualityTests {
         check(NetworkQualityHelper.signalStrengthToLevel(-60) == 4, "сырой −60 → 4");
         check(NetworkQualityHelper.signalStrengthToLevel(-90) == 1, "сырой −90 → 1");
         check(NetworkQualityHelper.signalStrengthToLevel(0) == -1, "сырой 0 — нет данных");
+        // ДБм отрицательные: раньше проверка «raw <= 0» отсекала все реальные
+        // значения, и уровень мобильной сети всегда был «нет данных» — из-за
+        // этого слабая мобильная сеть никогда не вызывала перепроверку.
+        check(NetworkQualityHelper.signalStrengthToLevel(-105) == 0, "сырой −105 → 0");
+        check(NetworkQualityHelper.signalStrengthToLevel(-1) == -1, "−1 дБм — не данные");
         check(NetworkQualityHelper.levelLabel(1).equals("Слабый"), "уровень 1 — «Слабый»");
         check(NetworkQualityHelper.levelLabel(-1).isEmpty(), "без данных — пусто");
         check(NetworkQualityHelper.autoReprobeScopeLabel().contains("мобильная"),

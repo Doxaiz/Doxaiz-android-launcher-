@@ -356,7 +356,11 @@ public final class NetworkQualityHelper {
      * @return 0..4 либо −1, если данных нет
      */
     public static int signalStrengthToLevel(int raw) {
-        if (raw <= 0) return -1;           // 0 и меньше — нет данных
+        // ВАЖНО: дБм отрицательные, поэтому «raw <= 0» отсекало бы ВСЕ реальные
+        // значения и уровень всегда был бы «нет данных» — именно эта ошибка и
+        // делала проверку слабой мобильной сети мёртвой. Нет данных — это 0 и
+        // положительные значения (так Android сообщает «неизвестно»).
+        if (raw >= -2 || raw < -140) return -1;
         if (raw >= -65) return 4;
         if (raw >= -75) return 3;
         if (raw >= -85) return 2;
