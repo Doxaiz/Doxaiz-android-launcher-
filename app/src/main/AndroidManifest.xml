@@ -15,8 +15,16 @@
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
     <!-- Жест свайпа вниз для шторки уведомлений -->
     <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />
-    <!-- Чтение статуса сети для авто-перепроверки при залипании (без доступа в интернет!) -->
+    <!-- Чтение статуса сети для авто-перепроверки при залипании. Лаунчер остаётся
+         без INTERNET: замер скорости и работа с интернетом — отдельное приложение
+         net-optimizer-by_doxaiz (AUDIT §29.5). -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Перепроверка канала: ConnectivityManager.reportNetworkConnectivity() требует
+         CHANGE_NETWORK_STATE (protection level normal, выдаётся при установке) ЛИБО
+         права менять системные настройки. Без этой строки вызов падал с
+         SecurityException, который молча проглатывался, и «улучшение сети» не
+         работало никогда — см. AUDIT §29. -->
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <!-- Системный отпечаток пальца / PIN для приватного пространства скрытых приложений -->
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <!-- Завершение фоновых кэшированных процессов в окне «Активные приложения» -->

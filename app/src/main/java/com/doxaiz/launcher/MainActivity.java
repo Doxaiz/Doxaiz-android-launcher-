@@ -467,7 +467,8 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                 }
             }
             @Override public boolean triggerNetworkBoostNow() {
-                boolean ok = (networkHelper != null) && networkHelper.triggerSystemReprobe("Шторка: Сеть+");
+                boolean ok = (networkHelper != null)
+                        && networkHelper.triggerSystemReprobe("Шторка: Сеть+");
                 if (currentScreen == SCREEN_SETTINGS) {
                     rebuildSettingsContent();
                 }
@@ -810,12 +811,29 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         return super.onKeyDown(keyCode, event);
     }
 
+    /**
+     * Экран «Изменение настроек» — второй путь, которым Android разрешает
+     * reportNetworkConnectivity(). CHANGE_NETWORK_STATE выдаётся при установке,
+     * но часть прошивок требует именно это право, и тогда без него функция
+     * молча не работает.
+     */
+    private void openWriteSettingsForNetwork() {
+        try {
+            Intent i = new Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS,
+                    Uri.parse("package:" + getPackageName()));
+            startActivity(i);
+        } catch (Throwable t) {
+            startSafeSystemIntent(Settings.ACTION_MANAGE_WRITE_SETTINGS);
+        }
+    }
+
     private void restartNetworkMonitor() {
         if (networkHelper == null) return;
         networkHelper.startForegroundMonitor(
                 prefs.isAutoNetworkAssist(),
                 prefs.getAutoNetworkMode(),
                 prefs.isAutoNetworkWeakWifi(),
+                prefs.getAutoNetworkSensitivity(),
                 (status, autoReprobed) ->
                         uiHandler.post(() -> {
                             if (isFinishing() || isDestroyed()) return;
@@ -5637,14 +5655,16 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
         TextView msg = new TextView(this);
         msg.setText(
-                "1. Без расхода заряда и без доступа в интернет\n"
-                        + "У Doxaiz нет разрешения INTERNET — оболочка ничего не скачивает и не отправляет. Она читает только системное состояние сети Android (ACCESS_NETWORK_STATE, LinkProperties).\n\n"
+                "1. В фоне — без расхода трафика\n"
+                        + "Авто-улучшение не скачивает и не отправляет ничего: оно читает только системное состояние сети Android (ACCESS_NETWORK_STATE, LinkProperties, WifiInfo). У лаунчера нет разрешения INTERNET вовсе — замер скорости и задержки живёт в отдельном приложении Net Optimizer.\n\n"
                         + "2. Три режима и тихая работа без всплывашек\n"
                         + "• Мягкий (30 с) — перепроверяет канал только при полном залипании (NET_CAPABILITY_VALIDATED снят).\n"
-                        + "• Сбалансированный (15 с) — залипание + контроль слабого Wi-Fi (<= -82 дБм).\n"
-                        + "• Активный (10 с) — быстрая реакция на залипание и просадку Wi-Fi (<= -76 дБм).\n"
-                        + "Все срабатывания происходят тихо в фоне и фиксируются в локальной статистике настроек.\n\n"
-                        + "3. Быстрый Частный DNS, панель Wi-Fi/4G и плитка «Сеть+»\n"
+                        + "• Сбалансированный (15 с) — залипание + контроль слабого Wi-Fi (<= -82 дБм, на 5 ГГц -86 дБм).\n"
+                        + "• Активный (10 с) — быстрая реакция на залипание и просадку Wi-Fi (<= -76 дБм, на 5 ГГц -80 дБм).\n"
+                        + "Чувствительность «Терпеливая / Обычная / Тревожная» сдвигает порог на 6 дБ, чтобы не вмешиваться раньше, чем нужно. Срабатывания происходят тихо в фоне и остаются в журнале, который хранится между запусками (20 событий).\n\n"
+                        + "3. Что приложение НЕ может без root\n"
+                        + "Принудительно переключить Wi-Fi на LTE или обратно, сменить канал Wi-Fi, измерить скорость скачивания без расхода трафика. Переключение транспорта делает только система: приложение может попросить перепроверку и открыть панель подключения.\n\n"
+                        + "4. Быстрый Частный DNS, панель Wi-Fi/4G и плитка «Сеть+»\n"
                         + "Показывает реальный статус Частного DNS, лимитность сети и уровень сигнала. В редакторе шторки можно добавить плитку «Сеть+» для перепроверки канала в 1 касание."
         );
         msg.setTextColor(theme.textSecondary);
@@ -5734,17 +5754,21 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     }
 
     private void runQuickNetworkImprove() {
-        boolean reprobed = (networkHelper != null) && networkHelper.triggerSystemReprobe();
-        String msg;
-        if (reprobed) {
-            msg = "Канал перепроверен: сеть активна";
-        } else if (networkHelper != null) {
-            msg = "Система не подтвердила переподключение — открываю панель подключения";
-        } else {
-            msg = "Открытие панели подключения";
+        if (networkHelper == null) {
+            Toast.makeText(this, "Служба подключения недоступна", Toast.LENGTH_SHORT).show();
+            NetworkQualityHelper.openInternetQuickPanel(this);
+            return;
         }
-        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
-        NetworkQualityHelper.openInternetQuickPanel(this);
+        NetworkQualityHelper.ReprobeResult result =
+                networkHelper.triggerSystemReprobeDetailed("Жест: улучшить сеть");
+        Toast.makeText(this, NetworkQualityHelper.reprobeMessage(result), Toast.LENGTH_SHORT).show();
+        // Панель подключения открываем только там, где она действительно нужна:
+        // при принятой перепроверке пользователя выдёргивать из рабочего стола
+        // в системные настройки незачем.
+        if (result == NetworkQualityHelper.ReprobeResult.NO_NETWORK
+                || result == NetworkQualityHelper.ReprobeResult.NO_EFFECT) {
+            NetworkQualityHelper.openInternetQuickPanel(this);
+        }
     }
 
     private void triggerScreenLock() {
@@ -8272,6 +8296,22 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         nsLp.topMargin = dp(2);
         netCard.addView(netSub, nsLp);
 
+        // Совет по существу: не «сеть плохая», а что именно сделать. Показываем
+        // только в настройках — пользователь выбрал не засорять шторку. Пустой
+        // совет значит «всё в порядке», тогда строки нет вовсе.
+        if (!netStatus.advice.isEmpty()) {
+            TextView adviceTv = new TextView(this);
+            adviceTv.setText(netStatus.advice);
+            adviceTv.setTextColor(theme.accentColor);
+            adviceTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
+            adviceTv.setLineSpacing(dp(2), 1f);
+            LinearLayout.LayoutParams advLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            );
+            advLp.topMargin = dp(6);
+            netCard.addView(adviceTv, advLp);
+        }
+
         TextView netDnsStats = new TextView(this);
         String statsLine = (networkHelper != null) ? networkHelper.formatStatsLine() : "";
         // Учёт трафика раньше не выводился нигде (и не считался вовсе) — теперь
@@ -8306,7 +8346,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                 logHdr.setOrientation(LinearLayout.HORIZONTAL);
                 logHdr.setGravity(Gravity.CENTER_VERTICAL);
                 TextView lhTitle = new TextView(this);
-                lhTitle.setText("Журнал перепроверок (тихий режим)");
+                lhTitle.setText("Журнал перепроверок • хранится между запусками");
                 lhTitle.setTextColor(theme.textSecondary);
                 lhTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f);
                 lhTitle.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
@@ -8324,7 +8364,9 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                 logHdr.addView(resetLogBtn);
                 logWrap.addView(logHdr);
 
-                int showLim = Math.min(3, evs.size());
+                // Показываем 5 последних: история теперь переживает перезапуск,
+                // и трёх строк уже мало, чтобы увидеть закономерность.
+                int showLim = Math.min(5, evs.size());
                 StringBuilder logText = new StringBuilder();
                 for (int i = 0; i < showLim; i++) {
                     NetworkQualityHelper.HealEvent ev = evs.get(i);
@@ -8386,6 +8428,32 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
             if (autoNetMode != Prefs.NET_MODE_GENTLE) {
                 addDivider(netCard);
+                // Чувствительность: раньше порог слабого сигнала был зашит, и
+                // человек не мог выбрать, вмешиваться раньше или позже.
+                int netSensitivity = prefs.getAutoNetworkSensitivity();
+                addOptionGroup(
+                        netCard,
+                        "Чувствительность контроля сигнала",
+                        new String[]{"Терпеливая", "Обычная", "Тревожная"},
+                        netSensitivity,
+                        idx -> {
+                            prefs.setAutoNetworkSensitivity(idx);
+                            restartNetworkMonitor();
+                            rebuildSettingsContent();
+                        }
+                );
+                TextView sensHint = new TextView(this);
+                sensHint.setText(NetworkQualityHelper.sensitivitySummary(autoNetMode, netSensitivity)
+                        + " • " + NetworkQualityHelper.sensitivityLabel(netSensitivity));
+                sensHint.setTextColor(theme.textHint);
+                sensHint.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f);
+                LinearLayout.LayoutParams shLp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+                );
+                shLp.topMargin = dp(6);
+                netCard.addView(sensHint, shLp);
+
+                addDivider(netCard);
                 addToggleRow(netCard, "Контроль слабого Wi-Fi",
                         "При слабом сигнале Wi-Fi запрашивать перепроверку канала для быстрого перехода на 4G",
                         prefs.isAutoNetworkWeakWifi(),
@@ -8401,12 +8469,26 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         addActionRow(netCard, "Перепроверить канал сейчас",
                 "Мгновенный системный сброс залипания и обновление диагностики",
                 () -> {
-                    boolean ok = (networkHelper != null) && networkHelper.triggerSystemReprobe("Ручное обновление");
-                    Toast.makeText(this,
-                            ok ? "Перепроверка канала выполнена" : "Нет активного подключения",
+                    NetworkQualityHelper.ReprobeResult r = (networkHelper != null)
+                            ? networkHelper.triggerSystemReprobeDetailed("Ручное обновление")
+                            : NetworkQualityHelper.ReprobeResult.NO_NETWORK;
+                    Toast.makeText(this, NetworkQualityHelper.reprobeMessage(r),
                             Toast.LENGTH_SHORT).show();
                     rebuildSettingsContent();
+                    // Раньше при отсутствии права человек видел только текст и не
+                    // знал, где это право включить. Ведём прямо на нужный экран.
+                    if (r == NetworkQualityHelper.ReprobeResult.NO_PERMISSION) {
+                        openWriteSettingsForNetwork();
+                    }
                 });
+
+        addDivider(netCard);
+        // Замер задержки и работу с интернетом вынесли в отдельное приложение:
+        // лаунчер не запрашивает INTERNET и занимается только качеством сигнала.
+        addActionRow(netCard, "Замер скорости и задержки — в Net Optimizer",
+                "Отдельное приложение net-optimizer-by_doxaiz • лаунчер остаётся без INTERNET",
+                () -> NetworkQualityHelper.openInBrowser(this,
+                        "https://github.com/Doxaiz/net-optimizer-by_doxaiz"));
 
         addDivider(netCard);
         addActionRow(netCard, "Быстрая панель интернета (Wi-Fi / 4G)",
@@ -8430,7 +8512,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
         addDivider(netCard);
         addActionRow(netCard, "Что делает авто-улучшение и как работает?",
-                "Честное объяснение всех режимов (0 INTERNET, без расхода батареи)",
+                "Честное объяснение режимов, порогов и границ без root",
                 this::showAutoNetworkInfoModal);
 
         settingsContent.addView(netCard);

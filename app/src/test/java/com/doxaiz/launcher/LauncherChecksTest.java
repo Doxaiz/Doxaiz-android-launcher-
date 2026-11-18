@@ -68,6 +68,11 @@ public class LauncherChecksTest {
         run("QuickShadeColorsTest", () -> QuickShadeColorsTest.main(new String[0]));
     }
 
+    @Test
+    public void networkQualityRules() {
+        run("NetworkQualityTests", () -> NetworkQualityTests.main(new String[0]));
+    }
+
     private interface Check {
         void run() throws Exception;
     }
