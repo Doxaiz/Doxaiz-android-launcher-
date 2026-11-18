@@ -29,7 +29,7 @@ import java.util.Locale;
  *   лечится перепроверкой канала, им занимается отдельное приложение Net Optimizer.
  * - Работает тихо в фоне и НЕ делает сетевых запросов: авто-улучшение читает только
  *   системное состояние. Лаунчер остаётся без разрешения INTERNET: замер задержки и
- *   работа с интернетом — отдельное приложение net-optimizer-by_doxaiz (AUDIT §29.5).
+ *   работа с интернетом — отдельное приложение Net Optimizer из профиля автора (AUDIT §29.5).
  * - Журнал перепроверок переживает перезапуск (20 событий), причины отказа различаются.
  */
 public final class NetworkQualityHelper {
@@ -1190,13 +1190,20 @@ public final class NetworkQualityHelper {
      */
     public static final String NET_OPTIMIZER_PACKAGE = "com.doxaiz.netoptimizer";
 
-    /** Ссылка на репозиторий автора — то, что человек видит в интерфейсе. */
-    public static final String NET_OPTIMIZER_REPO_URL =
-            "https://github.com/Doxaiz/net-optimizer-by_doxaiz";
+    /**
+     * Профиль автора — то, что человек видит в интерфейсе.
+     *
+     * Ссылка ведёт на профиль, а не на конкретный репозиторий: программа ещё в
+     * разработке, её имя может измениться, а профиль — нет. Прибитый в код URL
+     * репозитория однажды превратился бы в 404 у людей со старой сборкой.
+     */
+    public static final String AUTHOR_PROFILE_URL = "https://github.com/Doxaiz";
 
-    /** Страница последнего релиза Net Optimizer (браузер, не наш процесс). */
-    public static final String NET_OPTIMIZER_RELEASE_URL =
-            NET_OPTIMIZER_REPO_URL + "/releases/latest";
+    /** Название программы для поиска в профиле автора. */
+    public static final String NET_OPTIMIZER_NAME = "Net Optimizer by Doxaiz";
+
+    /** Куда ведёт кнопка «Установить» (браузер, не наш процесс). */
+    public static final String NET_OPTIMIZER_RELEASE_URL = AUTHOR_PROFILE_URL;
 
     /** Версия установленного Net Optimizer или null. */
     public static String installedVersion(Context ctx) {

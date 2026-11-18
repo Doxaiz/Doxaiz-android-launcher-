@@ -32,6 +32,7 @@ public final class NetworkQualityTests {
         signalLevelsDontLie();
         journalSurvivesRestart();
         placeholderHasNoFalseAdvice();
+        authorLinkIsStable();
 
         System.out.println("NETWORK_QUALITY_TESTS=" + n);
     }
@@ -190,6 +191,20 @@ public final class NetworkQualityTests {
         check(!real.advice.isEmpty(), "при реальной проверке совет есть");
     }
 
+
+    private static void authorLinkIsStable() {
+        // Ссылка ведёт на профиль автора, а не на конкретный репозиторий:
+        // программа в разработке, её имя может измениться, профиль — нет.
+        String url = NetworkQualityHelper.AUTHOR_PROFILE_URL;
+        check(url.equals("https://github.com/Doxaiz"), "ссылка — профиль автора: " + url);
+        check(!url.contains("net-optimizer"), "в ссылке нет имени конкретного репозитория");
+        check(!url.endsWith("/releases/latest"),
+                "не склеиваем /releases/latest с профилем — такого адреса не существует");
+        check(NetworkQualityHelper.NET_OPTIMIZER_RELEASE_URL.equals(url),
+                "кнопка «Установить» ведёт туда же, где виден проект");
+        check(NetworkQualityHelper.NET_OPTIMIZER_NAME.contains("Net Optimizer"),
+                "в окне сказано, как программа называется в профиле");
+    }
 
     private static void signalLevelsDontLie() {
         check(NetworkQualityHelper.signalLevel(Integer.MIN_VALUE).isEmpty(),
