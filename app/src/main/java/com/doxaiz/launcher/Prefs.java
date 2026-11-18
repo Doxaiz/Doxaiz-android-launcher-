@@ -410,30 +410,160 @@ public final class Prefs {
         sp.edit().remove(KEY_HIDDEN).apply();
     }
 
+    /**
+     * Переименования приложений: «ключ приложения → подпись».
+     *
+     * <h3>Почему кэш, а не перебор всех настроек</h3>
+     * Раньше метод шёл по {@code sp.getAll()}: это полное копирование всего файла
+     * настроек (≈200 ключей) ради поиска префикса {@code rename_}. Вызывается из
+     * {@code AppRepository.reloadNow} на каждое событие пакетов — то есть при
+     * каждой установке, обновлении и удалении, на фоне, но с копированием всего
+     * файла каждый раз.
+     *
+     * <p>Теперь переименования хранятся одной картой в служебном ключе, а в памяти
+     * держится её копия. Старые отдельные ключи {@code rename_*} продолжают
+     * читаться и один раз переносятся в карту — раскладка и подписи у тех, кто уже
+     * пользуется лаунчером, не пропадают.
+     */
+    private final Object labelsLock = new Object();
+    private Map<String, String> labelsCache = null;
+    private static final String KEY_RENAMES_JSON = "renames_json";
+
     public Map<String, String> getCustomLabels() {
-        Map<String, String> result = new HashMap<>();
-        for (Map.Entry<String, ?> e : sp.getAll().entrySet()) {
-            if (e.getKey().startsWith(KEY_RENAME_PREFIX) && e.getValue() instanceof String) {
-                result.put(e.getKey().substring(KEY_RENAME_PREFIX.length()), (String) e.getValue());
+        synchronized (labelsLock) {
+            if (labelsCache == null) {
+                labelsCache = loadCustomLabelsLocked();
             }
+            return new HashMap<>(labelsCache);
+        }
+    }
+
+    /** Чтение с диска: карта плюс разовая миграция старых ключей {@code rename_*}. */
+    private Map<String, String> loadCustomLabelsLocked() {
+        Map<String, String> result = new HashMap<>();
+        Map<String, ?> all;
+        try {
+            all = sp.getAll();
+        } catch (Throwable t) {
+            Diagnostics.record("Prefs.getCustomLabels", t);
+            return result;
+        }
+        // Новый формат: одна карта. Простой построчный разбор без JSON-библиотеки:
+        // ключ и значение кодируются как «длина:текст», поэтому переводы строк,
+        // двоеточия и эмодзи в подписях ничего не ломают.
+        String packed = (all.get(KEY_RENAMES_JSON) instanceof String)
+                ? (String) all.get(KEY_RENAMES_JSON) : null;
+        if (packed != null) decodeLabels(packed, result);
+        // Старый формат: отдельные ключи rename_<appKey>. Переносим их в карту,
+        // чтобы дальше не сканировать весь файл настроек.
+        boolean migrated = false;
+        for (Map.Entry<String, ?> e : all.entrySet()) {
+            String key = e.getKey();
+            if (key != null && key.startsWith(KEY_RENAME_PREFIX) && e.getValue() instanceof String) {
+                String appKey = key.substring(KEY_RENAME_PREFIX.length());
+                if (!result.containsKey(appKey)) {
+                    result.put(appKey, (String) e.getValue());
+                    migrated = true;
+                }
+            }
+        }
+        if (migrated) {
+            SharedPreferences.Editor ed = sp.edit().putString(KEY_RENAMES_JSON, encodeLabels(result));
+            for (String key : all.keySet()) {
+                if (key != null && key.startsWith(KEY_RENAME_PREFIX)) ed.remove(key);
+            }
+            ed.apply();
         }
         return result;
     }
 
     public void setCustomLabel(String appKey, String newLabel) {
-        if (newLabel == null || newLabel.trim().isEmpty()) {
-            sp.edit().remove(KEY_RENAME_PREFIX + appKey).apply();
-        } else {
-            sp.edit().putString(KEY_RENAME_PREFIX + appKey, newLabel.trim()).apply();
+        if (appKey == null || appKey.isEmpty()) return;
+        boolean empty = newLabel == null || newLabel.trim().isEmpty();
+        synchronized (labelsLock) {
+            if (labelsCache == null) labelsCache = loadCustomLabelsLocked();
+            if (empty) labelsCache.remove(appKey);
+            else labelsCache.put(appKey, newLabel.trim());
+            SharedPreferences.Editor ed = sp.edit();
+            ed.putString(KEY_RENAMES_JSON, encodeLabels(labelsCache));
+            // Гасим старый ключ, если он ещё остался (миграция могла не пройти).
+            ed.remove(KEY_RENAME_PREFIX + appKey);
+            ed.apply();
         }
     }
 
     public void clearAllCustomLabels() {
-        SharedPreferences.Editor ed = sp.edit();
-        for (String k : sp.getAll().keySet()) {
-            if (k.startsWith(KEY_RENAME_PREFIX)) ed.remove(k);
+        synchronized (labelsLock) {
+            labelsCache = new HashMap<>();
+            SharedPreferences.Editor ed = sp.edit().remove(KEY_RENAMES_JSON);
+            for (String k : sp.getAll().keySet()) {
+                if (k != null && k.startsWith(KEY_RENAME_PREFIX)) ed.remove(k);
+            }
+            ed.apply();
         }
-        ed.apply();
+    }
+
+    // ------------------------------------------------- кодирование карты подписей
+
+    /**
+     * Формат: повторяющиеся пары «длина:текст», где длина — число символов.
+     * Разбор по длине, а не по разделителю: подпись может содержать что угодно,
+     * включая «|», двоеточия и переводы строк, и не сломает остальные записи.
+     */
+    static String encodeLabels(Map<String, String> labels) {
+        if (labels == null || labels.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder(labels.size() * 32);
+        for (Map.Entry<String, String> e : labels.entrySet()) {
+            String k = e.getKey() == null ? "" : e.getKey();
+            String v = e.getValue() == null ? "" : e.getValue();
+            sb.append(k.length()).append(':').append(k)
+                    .append(v.length()).append(':').append(v);
+        }
+        return sb.toString();
+    }
+
+    static void decodeLabels(String packed, Map<String, String> out) {
+        if (packed == null || packed.isEmpty() || out == null) return;
+        int i = 0;
+        int n = packed.length();
+        while (i < n) {
+            int colon = packed.indexOf(':', i);
+            if (colon < 0) break;
+            int kLen = readLength(packed, i, colon);
+            if (kLen < 0) break;
+            int kStart = colon + 1;
+            if (kStart + kLen > n) break;
+            String k = packed.substring(kStart, kStart + kLen);
+            int j = kStart + kLen;
+            int colon2 = packed.indexOf(':', j);
+            if (colon2 < 0) break;
+            int vLen = readLength(packed, j, colon2);
+            if (vLen < 0) break;
+            int vStart = colon2 + 1;
+            if (vStart + vLen > n) break;
+            out.put(k, packed.substring(vStart, vStart + vLen));
+            i = vStart + vLen;
+        }
+    }
+
+    /**
+     * Длина из отрезка строки или -1, если это не число.
+     *
+     * Проверка вместо {@code Integer.parseInt} в try/catch: повреждённая карта
+     * подписей — ожидаемая ситуация (старая запись, оборванный файл), и разбирать
+     * её исключениями значит платить за каждую попытку. Ограничение в 7 цифр:
+     * больше в карте подписей быть не может, а гигантское число — признак мусора.
+     */
+    private static int readLength(String s, int from, int to) {
+        int len = to - from;
+        if (len <= 0 || len > 7) return -1;
+        int value = 0;
+        for (int i = from; i < to; i++) {
+            char c = s.charAt(i);
+            if (c < '0' || c > '9') return -1;
+            value = value * 10 + (c - '0');
+        }
+        return value;
     }
 
     // Быстрый свайп вверх по конкретной иконке («2 в 1»)
@@ -1068,16 +1198,57 @@ public final class Prefs {
 
     public void setCustomCategory(String packageName, int category) {
         if (packageName == null || packageName.isEmpty()) return;
-        if (category <= AppCategoryHelper.CAT_ALL || category > AppCategoryHelper.CAT_SYSTEM) {
-            sp.edit().remove(KEY_CUSTOM_CAT_PREFIX + packageName).apply();
-        } else {
-            sp.edit().putInt(KEY_CUSTOM_CAT_PREFIX + packageName, category).apply();
+        boolean valid = category > AppCategoryHelper.CAT_ALL
+                && category <= AppCategoryHelper.CAT_SYSTEM;
+        synchronized (labelsLock) {
+            invalidateCustomCategoriesLocked();
+            if (valid) {
+                if (customCategoriesCache != null) {
+                    customCategoriesCache.put(packageName, category);
+                }
+                sp.edit().putInt(KEY_CUSTOM_CAT_PREFIX + packageName, category).apply();
+            } else {
+                if (customCategoriesCache != null) {
+                    customCategoriesCache.remove(packageName);
+                }
+                sp.edit().remove(KEY_CUSTOM_CAT_PREFIX + packageName).apply();
+            }
         }
     }
 
+    /**
+     * Пользовательские категории приложений.
+     *
+     * <p>Читается из того же места, что и раньше (отдельные ключи
+     * {@code custom_cat_*}), но с кэшем в памяти: метод вызывается из
+     * {@code AppRepository.reloadNow} вместе с подписями, то есть на каждое
+     * событие пакетов. Копировать весь файл настроек дважды за вызов незачем.
+     */
+    private Map<String, Integer> customCategoriesCache = null;
+
     public Map<String, Integer> getAllCustomCategories() {
+        synchronized (labelsLock) {
+            if (customCategoriesCache == null) {
+                customCategoriesCache = loadCustomCategoriesLocked();
+            }
+            return new HashMap<>(customCategoriesCache);
+        }
+    }
+
+    /** Сброс кэша категорий: вызывать после записи ключей {@code custom_cat_*}. */
+    private void invalidateCustomCategoriesLocked() {
+        customCategoriesCache = null;
+    }
+
+    private Map<String, Integer> loadCustomCategoriesLocked() {
         Map<String, Integer> out = new HashMap<>();
-        Map<String, ?> all = sp.getAll();
+        Map<String, ?> all;
+        try {
+            all = sp.getAll();
+        } catch (Throwable t) {
+            Diagnostics.record("Prefs.getAllCustomCategories", t);
+            return out;
+        }
         if (all == null) return out;
         for (Map.Entry<String, ?> e : all.entrySet()) {
             String k = e.getKey();
@@ -1092,6 +1263,9 @@ public final class Prefs {
     }
 
     public void clearAllCustomCategories() {
+        synchronized (labelsLock) {
+            customCategoriesCache = new HashMap<>();
+        }
         SharedPreferences.Editor ed = sp.edit();
         Map<String, ?> all = sp.getAll();
         if (all != null) {
