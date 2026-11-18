@@ -1,0 +1,73 @@
+name: Ошибка в приложении
+description: Что-то работает не так — стол, каталог, шторка, служба, настройки
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Спасибо за отчёт. Чем точнее данные ниже, тем быстрее найдётся причина:
+        у лаунчера многое зависит от прошивки и версии Android.
+  - type: textarea
+    id: what
+    attributes:
+      label: Что произошло
+      description: Что вы сделали, что ожидали и что получилось.
+      placeholder: Нажал «Все приложения», каталог открылся пустым…
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Шаги воспроизведения
+      placeholder: |
+        1. Открыть настройки Doxaiz
+        2. …
+        3. …
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Версия Doxaiz
+      description: Настройки Doxaiz → «О приложении», либо имя скачанного APK.
+      placeholder: 1.0.0
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Устройство и Android
+      placeholder: Pixel 6, Android 14 (API 34) / Transsion XOS, Android 13
+    validations:
+      required: true
+  - type: dropdown
+    id: service
+    attributes:
+      label: Включена ли служба спецвозможностей
+      options:
+        - Включена и работает
+        - Не включается, переключатель серый
+        - Показывает «Настройки с ограниченным доступом»
+        - Не включал
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Журнал диагностики
+      description: |
+        Настройки Doxaiz → «Система и быстродействие» → «Диагностика».
+        Скопируйте записи: в них только компонент, тип исключения и короткое
+        сообщение — без путей к файлам и личных данных.
+      render: text
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Перед отправкой
+      options:
+        - label: Я не публикую здесь личные данные (списки приложений, PIN, ключи)
+          required: true
+        - label: Я проверил, что проблема не в «ограниченных настройках» Android 13+
+          required: false

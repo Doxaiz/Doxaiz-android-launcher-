@@ -257,13 +257,13 @@ jobs:
             gh release create "$TAG" doxaiz-1.0.0.apk \
               --target "$GITHUB_SHA" \
               --title "Doxaiz 1.0.0" \
-              --notes-file RELEASE_NOTES.md \
+              --notes-file docs/RELEASE_NOTES.md \
               || fail "не удалось создать релиз $TAG"
             echo "::notice title=релиз::создан $TAG"
           else
             echo "::notice title=релиз::релиз $TAG уже есть — обновляю на месте"
             gh release edit "$TAG" --title "Doxaiz 1.0.0" \
-              --notes-file RELEASE_NOTES.md \
+              --notes-file docs/RELEASE_NOTES.md \
               || fail "не удалось обновить заметки релиза $TAG"
           fi
           gh release upload "$TAG" doxaiz-1.0.0.apk --clobber \
