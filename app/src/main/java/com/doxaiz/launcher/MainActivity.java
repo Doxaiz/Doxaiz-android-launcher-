@@ -147,6 +147,14 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     private ImageView settingsBtnIcon;
     private DesktopPagerView pagerView;
     private LinearLayout pageDotsBar;
+    /**
+     * Подсказка вместо полоски точек, когда страница одна.
+     *
+     * Одна страница + включённое зацикливание = ловушка: свайп вбок тянет
+     * экран, а вернуться некуда. Вместо молчаливого оттяга говорим прямо,
+     * что страниц одна и как добавить ещё.
+     */
+    private TextView pageSingleHint;
     private LinearLayout dockCard;
     private LinearLayout dockAppsRow;
     private FrameLayout dockDrawerBtn;
@@ -1027,6 +1035,12 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         pagerView.setLayoutParams(new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
         ));
+        // Настройки прокрутки берём из сохранённых значений сразу при создании.
+        // Раньше они применялись только из applyTheme(): при выключенном
+        // зацикливании до первого пересоздания темы страницы всё равно ходили
+        // по кругу.
+        pagerView.setSmoothScrollEnabled(prefs.isSmoothAnimationsEnabled());
+        pagerView.setLoopPagesEnabled(prefs.isLoopHomePages());
         pagerView.setOnPageChangedListener(idx -> {
             currentPage = idx;
             rebuildPageDots();
@@ -1050,6 +1064,24 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         dotsLp.bottomMargin = dp(10);
         pageDotsBar.setLayoutParams(dotsLp);
         homeContainer.addView(pageDotsBar);
+
+        // Место полоски точек, когда страница одна: короткая подсказка.
+        pageSingleHint = new TextView(this);
+        pageSingleHint.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f);
+        pageSingleHint.setGravity(Gravity.CENTER);
+        pageSingleHint.setSingleLine(true);
+        pageSingleHint.setEllipsize(TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams hintLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        hintLp.topMargin = dp(4);
+        hintLp.bottomMargin = dp(10);
+        hintLp.leftMargin = dp(16);
+        hintLp.rightMargin = dp(16);
+        pageSingleHint.setLayoutParams(hintLp);
+        pageSingleHint.setVisibility(View.GONE);
+        pageSingleHint.setOnClickListener(v -> showSinglePageHintModal());
+        homeContainer.addView(pageSingleHint);
 
         // Нижний AMOLED-стеклянный док (закреплённые приложения + кнопка всех приложений)
         dockCard = new LinearLayout(this);
@@ -2034,6 +2066,9 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             pagerView.setLoopPagesEnabled(prefs.isLoopHomePages());
         }
 
+        if (pageSingleHint != null) {
+            pageSingleHint.setTextColor(theme.textSecondary);
+        }
         updateDrawerModeUi();
         if (rebuildPages) {
             rebuildDesktop();
@@ -3162,6 +3197,88 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     private int dotsBuiltInactiveColor = 0;
     private int dotsLastActiveIdx = -1;
 
+    /**
+     * Подсказка на месте точек страниц, когда страница одна.
+     *
+     * При одной странице листать нечего: зацикливание пытается «перепрыгнуть»
+     * страницу саму на себя, а без него палец просто тянет экран в резиновый
+     * оттяг. В обоих случаях человек видит реакцию и не понимает, что
+     * происходит. Поэтому вместо молчания — одна строка и переход к добавлению
+     * страницы.
+     */
+    private void updateSinglePageHint(int pageCount) {
+        if (pageSingleHint == null) return;
+        // 0 — точки отключены в настройках: тогда ничего не подсказываем,
+        // иначе подсказка заняла бы место, которое человек только что освободил.
+        if (pageCount != 1) {
+            pageSingleHint.setVisibility(View.GONE);
+            return;
+        }
+        pageSingleHint.setText("Страница одна · свайп вбок не листает · + добавить страницу");
+        pageSingleHint.setTextColor(theme.textSecondary);
+        pageSingleHint.setVisibility(View.VISIBLE);
+    }
+
+    /** Короткое объяснение и две кнопки: добавить страницу или открыть «Страницы». */
+    private void showSinglePageHintModal() {
+        LinearLayout box = createModalBox();
+
+        TextView title = new TextView(this);
+        title.setText("Страница одна");
+        title.setTextColor(theme.textPrimary);
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
+        title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        box.addView(title);
+
+        TextView msg = new TextView(this);
+        msg.setText("Листать пока нечего: на рабочем столе одна страница. "
+                + "Добавьте вторую — или оставьте одну, свайп вбок тогда просто "
+                + "не будет ничего двигать.");
+        msg.setTextColor(theme.textSecondary);
+        msg.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f);
+        msg.setLineSpacing(dp(2), 1f);
+        LinearLayout.LayoutParams mLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        mLp.topMargin = dp(8);
+        mLp.bottomMargin = dp(14);
+        box.addView(msg, mLp);
+
+        LinearLayout btns = new LinearLayout(this);
+        btns.setOrientation(LinearLayout.HORIZONTAL);
+        btns.setGravity(Gravity.END);
+        addDialogButton(btns, "Закрыть", theme.textSecondary, this::dismissModal);
+        addDialogButton(btns, "Добавить страницу", theme.accentColor, () -> {
+            dismissModal();
+            addEmptyPageAtEnd();
+        });
+        box.addView(btns);
+
+        showModalCard(box, Gravity.CENTER, false);
+    }
+
+    /**
+     * Добавляет пустую страницу в конец и переходит на неё.
+     *
+     * Переиспользует тот же путь, что и меню страниц: изменение модели, затем
+     * полная перестройка рабочего стола, иначе пейджер и точки разъедутся с
+     * фактическим числом страниц.
+     */
+    private void addEmptyPageAtEnd() {
+        if (desktop == null || desktop.pages.size() >= DesktopModel.MAX_PAGES) {
+            Toast.makeText(this, "Достигнут предел: до " + DesktopModel.MAX_PAGES + " страниц",
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
+        int newIdx = desktop.addPage();
+        if (newIdx < 0 || newIdx == currentPage) return;
+        currentPage = newIdx;
+        rebuildDesktop();
+        pagerView.goToPage(newIdx);
+        rebuildPageDots();
+        Toast.makeText(this, "Добавлена страница " + (newIdx + 1), Toast.LENGTH_SHORT).show();
+    }
+
     private void rebuildPageDots() {
         int count = desktop.pages.size();
         if (count <= 1 || !prefs.isShowPageDots()) {
@@ -3169,9 +3286,13 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             dotsBuiltCount = 0;
             dotsLastActiveIdx = -1;
             pageDotsBar.setVisibility(View.INVISIBLE);
+            // Одна страница: вместо пустого места — подсказка, что дальше
+            // листать некуда и как добавить вторую страницу.
+            updateSinglePageHint(prefs.isShowPageDots() ? count : 0);
             return;
         }
         pageDotsBar.setVisibility(View.VISIBLE);
+        if (pageSingleHint != null) pageSingleHint.setVisibility(View.GONE);
         int homeIdx = getEffectiveHomePageIndex();
 
         // Быстрый путь при листании страниц: обновляем только 2 изменившиеся точки без пересоздания View!
@@ -6853,6 +6974,19 @@ public class MainActivity extends Activity implements AppRepository.Listener {
      * Менеджер страниц рабочего стола (щипок двумя пальцами или из меню рабочего стола):
      * мини-карточки страниц, добавление/удаление страниц + 4 быстрых векторных действия.
      */
+    /**
+     * Менеджер страниц из настроек.
+     *
+     * Настройки — отдельный экран; чтобы показать модальное окно поверх него,
+     * сначала возвращаемся на рабочий стол: модальный слой принадлежит
+     * рабочему столу, и поверх настроек он не появится.
+     */
+    private void showPageManagerModal() {
+        showScreen(SCREEN_HOME);
+        rebuildPageDots();
+        uiHandler.post(this::showHomeOverviewModal);
+    }
+
     private void showHomeOverviewModal() {
         LinearLayout box = createModalBox();
 
@@ -7902,13 +8036,21 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
         addDivider(lookCard);
         addToggleRow(lookCard, "Зацикленный свайп страниц",
-                "Переход по кругу с последней страницы на первую • Главный экран выбирается в «Страницах»",
+                (desktop != null && desktop.pages.size() <= 1)
+                        ? "Сейчас страница одна, листать нечего — пункт заработает со второй страницей"
+                        : "Переход по кругу с последней страницы на первую • Выключено: на краю свайп просто возвращает назад",
                 prefs.isLoopHomePages(),
                 checked -> {
                     prefs.setLoopHomePages(checked);
                     if (pagerView != null) pagerView.setLoopPagesEnabled(checked);
                     rebuildSettingsContent();
                 });
+
+        addDivider(lookCard);
+        addActionRow(lookCard, "Страницы рабочего стола",
+                (desktop == null ? 1 : desktop.pages.size()) + " из " + DesktopModel.MAX_PAGES
+                        + " • добавить, выбрать главную, удалить лишнюю",
+                this::showPageManagerModal);
 
         addDivider(lookCard);
         addToggleRow(lookCard, "Скрыть кнопку ⚙ сверху",
