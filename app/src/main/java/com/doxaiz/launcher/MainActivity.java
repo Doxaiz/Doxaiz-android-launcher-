@@ -3267,8 +3267,31 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         wLp.topMargin = dp(8);
         box.addView(why, wLp);
 
+        // Состояние ограничения показываем фактом: снято / действует / неизвестно.
+        // Гадать нельзя — на части прошивок чтение app-op запрещено системой.
+        Boolean unrestricted = RestrictedSettingsFix.isUnrestricted(this);
+        boolean shizukuInstalled = RestrictedSettingsFix.isShizukuInstalled(this);
+        boolean shizukuReady = shizukuInstalled && ShizukuBridge.isConnected();
+
+        TextView state = new TextView(this);
+        state.setText(unrestricted == null
+                ? "Состояние ограничения система не сообщает"
+                : (unrestricted
+                        ? "Ограничение снято — можно включать службу"
+                        : "Ограничение действует: переключатель службы будет серым"));
+        state.setTextColor(unrestricted != null && unrestricted
+                ? theme.statusOkColor : theme.textPrimary);
+        state.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
+        LinearLayout.LayoutParams stLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        stLp.topMargin = dp(8);
+        box.addView(state, stLp);
+
         TextView steps = new TextView(this);
-        steps.setText(AccessibilitySetup.restrictedSettingsStep());
+        steps.setText(AccessibilitySetup.restrictedSettingsStep()
+                + "\n\nЕсли пункта нет вовсе (Transsion и часть прошивок), остаётся ADB:\n"
+                + RestrictedSettingsFix.adbCommand(getPackageName()));
         steps.setTextColor(theme.textPrimary);
         steps.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f);
         steps.setLineSpacing(dp(4), 1f);
@@ -3282,6 +3305,22 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         sLp.topMargin = dp(12);
         sLp.bottomMargin = dp(14);
         box.addView(steps, sLp);
+
+        // Быстрый путь. Если Shizuku уже запущен, ограничение снимается одной
+        // командой appops set ... allow без компьютера и без переходов по меню.
+        // Без Shizuku этой кнопки нет: обещать «автоматически», когда нечем,
+        // — то же самое, что молча не работать.
+        if (shizukuReady) {
+            addModalAction(box, "Снять автоматически (Shizuku)\n"
+                            + "Команда appops set … ACCESS_RESTRICTED_SETTINGS allow",
+                    theme.accentColor, this::applyRestrictedSettingsFix);
+        } else if (shizukuInstalled) {
+            addModalAction(box, "Shizuku установлен, но не запущен\n"
+                            + "Запустите Shizuku (ADB/root) и вернитесь сюда",
+                    theme.textSecondary, () -> Toast.makeText(this,
+                            "Откройте Shizuku и запустите службу, затем повторите",
+                            Toast.LENGTH_LONG).show());
+        }
 
         // Кнопки идут в порядке шагов: сначала снять ограничение, потом включить службу.
         addModalAction(box, "Шаг 1 · Снять ограничение\n"
@@ -3303,6 +3342,43 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         addModalAction(box, "Закрыть", theme.textSecondary, this::dismissModal);
 
         showModalCard(box, Gravity.CENTER, false);
+    }
+
+    /**
+     * Снятие ограничения через Shizuku.
+     *
+     * Всё, что здесь происходит, — одна shell-команда от имени shell:
+     * {@code appops set <пакет> ACCESS_RESTRICTED_SETTINGS allow}. Она идёт в
+     * рабочем потоке (запрос права Shizuku синхронный и ждёт человека), а в UI
+     * возвращается только результат. После успеха сразу открываем экран службы:
+     * человек пришёл сюда за включением, а не за сообщением.
+     */
+    private void applyRestrictedSettingsFix() {
+        Toast.makeText(this, "Запрос к Shizuku…", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            final int result;
+            try {
+                result = RestrictedSettingsFix.fixViaShizuku(this);
+            } catch (Throwable t) {
+                Diagnostics.record("MainActivity.restrictedFix", t);
+                uiHandler.post(() -> Toast.makeText(this,
+                        "Не удалось выполнить через Shizuku", Toast.LENGTH_LONG).show());
+                return;
+            }
+            uiHandler.post(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                Toast.makeText(this, RestrictedSettingsFix.message(result),
+                        Toast.LENGTH_LONG).show();
+                if (result == RestrictedSettingsFix.RESULT_OK
+                        || result == RestrictedSettingsFix.RESULT_NOT_NEEDED) {
+                    dismissModal();
+                    AccessibilitySetup.open(this, null);
+                } else {
+                    rebuildSettingsContent();
+                    showRestrictedSettingsHelp();
+                }
+            });
+        }, "doxaiz-restricted-fix").start();
     }
 
     /** Короткое объяснение и две кнопки: добавить страницу или открыть «Страницы». */

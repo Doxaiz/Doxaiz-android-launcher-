@@ -47,6 +47,14 @@
     <uses-permission android:name="com.transsion.magiclauncher.permission.READ_SETTINGS" />
     <uses-permission android:name="com.android.launcher3.permission.READ_SETTINGS" />
 
+    <!-- Shizuku присылает свой binder в провайдер приложения: это единственный
+         штатный способ получить shell-доступ, если человек уже запустил Shizuku
+         через ADB/root. Разрешение INTERACT_ACROSS_USERS_FULL выдано только
+         shell, поэтому провайдер доступен лишь Shizuku и нашему процессу. -->
+    <uses-permission android:name="android.permission.INTERACT_ACROSS_USERS_FULL"
+        tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
+
     <application
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -102,6 +110,17 @@
              система показала бы выбор «Doxaiz / Doxaiz» после аварии. Пока
              аварийный экран открыт, MAIN/LAUNCHER-фильтр MainActivity всё равно
              возвращает пользователя в этот же task. -->
+        <!-- Приём binder'а от Shizuku. Authority задан литералом осознанно:
+             подстановка ${applicationId} — возможность Gradle, а проект
+             собирается ещё и build.sh через aapt2 напрямую, где подстановок
+             нет. Имя пакета зафиксировано в манифесте выше. -->
+        <provider
+            android:name=".ShizukuProvider"
+            android:authorities="com.doxaiz.launcher.shizuku"
+            android:exported="true"
+            android:multiprocess="false"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+
         <activity
             android:name=".SafeModeActivity"
             android:exported="false"
