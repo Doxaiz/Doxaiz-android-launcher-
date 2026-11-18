@@ -31,6 +31,13 @@ public final class GlassTheme {
     public static volatile int ACCENT_GREEN      = 0xFF2DD4BF;
     public static volatile int ACCENT_RED        = 0xFFF43F5E;
     public static volatile int ACCENT_AMBER      = 0xFFF5C451;
+    /**
+     * Полупрозрачная подложка акцентного действия (плашка «Отменить»,
+     * чип стопки, поле быстрого ответа). Раньше эти места были залиты
+     * литералом 0x2E2B8BFF — синим графита, поэтому в Сакуре и Кибере
+     * плашки оставались чужими по цвету.
+     */
+    public static volatile int ACCENT_SOFT_BG    = 0x262B8BFF;
     public static volatile int SWITCH_ON         = 0xFF14B8A6;
     public static volatile int SWITCH_OFF        = 0xFF33374E;
     public static volatile int TEXT_SECONDARY    = 0xC4DCE0F5;
@@ -203,6 +210,7 @@ public final class GlassTheme {
             SLIDER_TRACK = 0xFF2C2C2E; SLIDER_FILL = 0xFFFFFFFF;
             ACCENT_BLUE = 0xFF2B8BFF; ACCENT_GREEN = 0xFF22C55E;
             ACCENT_RED = 0xFFEF4444; ACCENT_AMBER = 0xFFF59E0B;
+            ACCENT_SOFT_BG = 0x222B8BFF;
             SWITCH_ON = 0xFF22C55E; SWITCH_OFF = 0xFF3E3E44;
             TEXT_SECONDARY = 0xB3FFFFFF;
             // 0x80FFFFFF давало 4,25:1 на TILE_SUB_BG #38383C — 0xA8FFFFFF даёт 6,09:1.
@@ -260,6 +268,7 @@ public final class GlassTheme {
             ACCENT_GREEN      = 0xFFFF4D8D;
             ACCENT_RED        = 0xFFFF3366;
             ACCENT_AMBER      = 0xFFA855F7;
+            ACCENT_SOFT_BG    = 0x2600D4FF;
             SWITCH_ON         = 0xFF00C2FF;
             SWITCH_OFF        = 0xFF283354;
             TEXT_SECONDARY    = 0xC4D4E6FF;
@@ -327,6 +336,7 @@ public final class GlassTheme {
             ACCENT_GREEN      = 0xFF22C55E;
             ACCENT_RED        = 0xFFEF4444;
             ACCENT_AMBER      = 0xFFF59E0B;
+            ACCENT_SOFT_BG    = 0x252B8BFF;
             SWITCH_ON         = 0xFF22C55E;
             SWITCH_OFF        = 0xFF3E3E44;
             TEXT_SECONDARY    = 0xB3FFFFFF;
@@ -400,6 +410,7 @@ public final class GlassTheme {
         ACCENT_GREEN      = 0xFF2DD4BF;
         ACCENT_RED        = 0xFFF43F5E;
         ACCENT_AMBER      = 0xFFF5C451;
+        ACCENT_SOFT_BG    = 0x26E94D8A;
         SWITCH_ON         = 0xFF14B8A6;
         SWITCH_OFF        = 0xFF33374E;
         TEXT_SECONDARY    = 0xC4DCE0F5;

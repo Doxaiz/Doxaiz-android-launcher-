@@ -63,6 +63,11 @@ public class LauncherChecksTest {
         run("PagerRulesTests", () -> PagerRulesTests.main(new String[0]));
     }
 
+    @Test
+    public void quickShadeFollowsTheme() {
+        run("QuickShadeColorsTest", () -> QuickShadeColorsTest.main(new String[0]));
+    }
+
     private interface Check {
         void run() throws Exception;
     }
