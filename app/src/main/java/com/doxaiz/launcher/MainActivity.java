@@ -3288,10 +3288,29 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         stLp.topMargin = dp(8);
         box.addView(state, stLp);
 
+        // Источник установки решает, будет ли ограничение вообще. Это тот самый
+        // «встроенный обход»: установка через ADB не включает restricted settings,
+        // поэтому отдельное приложение-посредник не нужно.
+        final int installSource = InstallSource.detect(this);
+        TextView sourceLine = new TextView(this);
+        sourceLine.setText(InstallSource.explain(installSource));
+        sourceLine.setTextColor(InstallSource.restrictionExpected(installSource)
+                ? theme.textPrimary : theme.statusOkColor);
+        sourceLine.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
+        sourceLine.setLineSpacing(dp(3), 1f);
+        LinearLayout.LayoutParams srcLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        srcLp.topMargin = dp(10);
+        box.addView(sourceLine, srcLp);
+
         TextView steps = new TextView(this);
         steps.setText(AccessibilitySetup.restrictedSettingsStep()
                 + "\n\nЕсли пункта нет вовсе (Transsion и часть прошивок), остаётся ADB:\n"
-                + RestrictedSettingsFix.adbCommand(getPackageName()));
+                + RestrictedSettingsFix.adbCommand(getPackageName())
+                + "\n\nНадёжнее — поставить сам APK через ADB: тогда ограничение "
+                + "не включается, и снимать нечего:\n"
+                + RestrictedSettingsFix.adbInstallCommand(getPackageName()));
         steps.setTextColor(theme.textPrimary);
         steps.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f);
         steps.setLineSpacing(dp(4), 1f);

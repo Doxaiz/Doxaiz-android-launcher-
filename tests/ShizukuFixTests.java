@@ -21,6 +21,8 @@ public final class ShizukuFixTests {
         commandIsCorrect();
         messagesExplainOutcome();
         adbCommandMatches();
+        adbInstallAvoidsRestriction();
+        installSourceClassification();
         noFalsePromises();
 
         System.out.println("SHIZUKU_FIX_TESTS=" + n);
@@ -75,6 +77,72 @@ public final class ShizukuFixTests {
         // смыслу, иначе одна из них когда-нибудь разойдётся.
         String[] shizuku = RestrictedSettingsFix.command("com.doxaiz.launcher");
         check(adb.endsWith(String.join(" ", shizuku)), "ADB повторяет ту же команду");
+    }
+
+    /**
+     * Установка через ADB — путь, при котором ограничение не включается.
+     * Команда должна быть исполнимо-корректной: -r (обновление поверх, без
+     * потери данных), имя файла из версии и запуск после установки.
+     */
+    private static void adbInstallAvoidsRestriction() {
+        String cmd = RestrictedSettingsFix.adbInstallCommand("com.doxaiz.launcher");
+        check(cmd.startsWith("adb install -r "), "установка через ADB с -r: " + cmd);
+        check(cmd.contains("doxaiz-" + RestrictedSettingsFix.versionHint() + ".apk"),
+                "имя APK совпадает с файлом релиза");
+        check(cmd.contains("am start -n com.doxaiz.launcher/.MainActivity"),
+                "подсказка запуска указывает на MainActivity");
+        // Версия берётся из сборки, а не вписана руками: иначе имя файла
+        // разойдётся с релизом при первом же обновлении.
+        check(RestrictedSettingsFix.versionHint() != null
+                        && !RestrictedSettingsFix.versionHint().isEmpty(),
+                "версия для имени файла не пустая");
+        // Команда установки и команда снятия app-op — разные действия, и это
+        // должно быть видно: первая не должна содержать appops.
+        check(!cmd.contains("appops"), "установка не подменяется правкой app-op");
+    }
+
+    /**
+     * Классификация источника установки — сердце «обхода без Shizuku».
+     * adb install не передаёт ни установщика, ни инициатора.
+     */
+    private static void installSourceClassification() {
+        check(InstallSource.classify(null, null, null) == InstallSource.SOURCE_ADB,
+                "все три пустых — установка через ADB");
+        check(InstallSource.classify("com.android.vending", "com.android.vending", null)
+                        == InstallSource.SOURCE_STORE,
+                "Google Play — магазин");
+        check(InstallSource.classify("com.google.android.packageinstaller",
+                        "com.android.documentsui", null) == InstallSource.SOURCE_SIDELOAD,
+                "файловый менеджер — сайдлоад, ограничение действует");
+        check(InstallSource.classify("com.android.chrome", "com.android.chrome", null)
+                        == InstallSource.SOURCE_SIDELOAD,
+                "браузер — сайдлоад");
+        check(InstallSource.classify(null, "com.miui.market", null) == InstallSource.SOURCE_STORE
+                        || InstallSource.classify(null, "com.xiaomi.market", null)
+                        == InstallSource.SOURCE_STORE,
+                "сторонний магазин распознаётся как магазин");
+        check(InstallSource.classify("com.doxaiz.launcher", null, null)
+                        == InstallSource.SOURCE_SIDELOAD,
+                "неизвестный установщик — не ADB и не магазин");
+
+        // Тексты: при ADB не должно быть требования что-то снимать.
+        String adb = InstallSource.explain(InstallSource.SOURCE_ADB);
+        check(adb.contains("ADB"), "объяснение ADB упоминает ADB");
+        check(!adb.contains("Снять"), "при ADB не предлагается что-то снимать");
+        String side = InstallSource.explain(InstallSource.SOURCE_SIDELOAD);
+        check(side.contains("вручную") && side.contains("Shizuku"),
+                "при сайдлоаде есть и ручной путь, и Shizuku");
+        // Ожидание ограничения только для сайдлоада.
+        check(!InstallSource.restrictionExpected(InstallSource.SOURCE_ADB),
+                "при ADB ограничение не ожидается");
+        check(!InstallSource.restrictionExpected(InstallSource.SOURCE_STORE),
+                "при магазине ограничение не ожидается");
+        check(InstallSource.restrictionExpected(InstallSource.SOURCE_SIDELOAD),
+                "при сайдлоаде ограничение ожидается");
+        // Пометка для экрана не пустая и различается по источникам.
+        check(!InstallSource.label(InstallSource.SOURCE_ADB).equals(
+                        InstallSource.label(InstallSource.SOURCE_SIDELOAD)),
+                "пометки источников различаются");
     }
 
     private static void noFalsePromises() {
