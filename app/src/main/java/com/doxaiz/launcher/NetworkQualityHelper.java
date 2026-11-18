@@ -23,7 +23,7 @@ import java.util.Locale;
  * Честный контроль и тихое авто-улучшение качества сети без root:
  * - Отслеживает тип сети (Wi-Fi / 4G-5G / VPN), валидацию доступа, пропускную способность,
  *   реальное состояние Частного DNS (LinkProperties API 28+), лимитность сети (NOT_METERED),
- *   уровень сигнала (API 29+) и диапазон 2,4/5 ГГц (LinkProperties#getFrequency, API 30+).
+ *   уровень сигнала (API 29+) и диапазон 2,4/5 ГГц (WifiInfo из TransportInfo, API 29+).
  * - Поддерживает 3 режима (Мягкий 30с / Сбалансированный 15с / Активный 10с) + контроль
  *   слабого Wi-Fi с настраиваемой чувствительностью.
  * - Работает тихо в фоне и НЕ делает сетевых запросов: авто-улучшение читает только
@@ -455,9 +455,15 @@ public final class NetworkQualityHelper {
                         String srv = lp.getPrivateDnsServerName();
                         if (srv != null) dnsServer = srv.trim();
                         // Частота нужна, чтобы различать 2,4 и 5 ГГц: пороги
-                        // «слабого сигнала» у них разные. API 30+, без разрешений.
-                        if (Build.VERSION.SDK_INT >= 30) {
-                            wifiFrequencyMhz = lp.getFrequency();
+                        // «слабого сигнала» у них разные. В LinkProperties её нет
+                        // (первая попытка взять getFrequency() там не собралась),
+                        // поэтому берём WifiInfo из TransportInfo capabilities —
+                        // это доступно без разрешений на геолокацию.
+                        if (Build.VERSION.SDK_INT >= 29) {
+                            android.net.TransportInfo ti = caps.getTransportInfo();
+                            if (ti instanceof android.net.wifi.WifiInfo) {
+                                wifiFrequencyMhz = ((android.net.wifi.WifiInfo) ti).getFrequency();
+                            }
                         }
                     }
                 } catch (Throwable ignored) {
