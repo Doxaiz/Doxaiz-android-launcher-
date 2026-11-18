@@ -8009,12 +8009,16 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         addSectionTitle("Внешний вид");
         LinearLayout lookCard = createGlassSectionCard();
 
+        // Четыре стиля: палитры Сакуры и Кибер-Аниме посчитаны и проверены
+        // контрастом (ContrastTest), поэтому они снова доступны для выбора,
+        // а не сворачиваются в графит при сохранении.
         addOptionGroup(lookCard, "Тема оформления",
-                new String[]{"Тёмная", "Светлая"},
-                prefs.getVisualStyle() == Prefs.STYLE_CLASSIC_LIGHT ? 1 : 0, index -> {
-                    prefs.setVisualStyle(index == 1 ? Prefs.STYLE_CLASSIC_LIGHT : Prefs.STYLE_CLASSIC_DARK);
+                new String[]{"Графит", "Светлая", "Сакура", "Кибер"},
+                visualStyleChipIndex(prefs.getVisualStyle()), index -> {
+                    prefs.setVisualStyle(styleFromChipIndex(index));
                     // Только цвета: страницы рабочего стола не пересобираются.
                     applyThemeColorsOnly();
+                    rebuildSettingsContent();
                 });
         addDivider(lookCard);
         addOptionGroup(lookCard, "Обои рабочего стола",
@@ -8985,6 +8989,27 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
     private interface IntConsumer { void accept(int value); }
     private interface BoolConsumer { void accept(boolean value); }
+
+    /** Порядок чипов темы: Графит, Светлая, Сакура, Кибер. */
+    private static int visualStyleChipIndex(int style) {
+        switch (style) {
+            case Prefs.STYLE_CLASSIC_LIGHT: return 1;
+            case Prefs.STYLE_SAKURA_JADE:   return 2;
+            case Prefs.STYLE_CYBER_ANIME:   return 3;
+            case Prefs.STYLE_CLASSIC_DARK:
+            default:                        return 0;
+        }
+    }
+
+    /** Обратное преобразование к {@link #visualStyleChipIndex(int)}. */
+    private static int styleFromChipIndex(int index) {
+        switch (index) {
+            case 1:  return Prefs.STYLE_CLASSIC_LIGHT;
+            case 2:  return Prefs.STYLE_SAKURA_JADE;
+            case 3:  return Prefs.STYLE_CYBER_ANIME;
+            default: return Prefs.STYLE_CLASSIC_DARK;
+        }
+    }
 
     private void addOptionGroup(LinearLayout parent, String title, String[] labels,
                                 int selectedIndex, final IntConsumer onSelect) {
