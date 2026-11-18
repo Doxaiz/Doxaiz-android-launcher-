@@ -51,6 +51,8 @@ public final class Audit60Tests {
         formatWithCurrentTimeZoneHandlesNullDate();
         pendingAuthActionDeliversOnce();
         pendingAuthActionCannotMixRequests();
+        importTruncatesForeignStrings();
+        dismissedRecentSetIsBounded();
 
         System.out.println("Audit60Tests: " + n + " проверок пройдено");
     }
@@ -530,5 +532,66 @@ public final class Audit60Tests {
         pending.set(() -> { throw new IllegalStateException("сбой действия"); }, null);
         pending.deliver(true);
         check(!pending.has(), "после исключения ожидание всё равно снято");
+    }
+    // -------------------------------- 12. ограничение чужих строк при импорте
+
+    /**
+     * Подпись иконки приходит из базы ДРУГОЙ оболочки: её длина ничем не
+     * ограничена, а провайдер может отдать строку в мегабайты. Такая строка
+     * попадает в модель рабочего стола и в JSON раскладки, поэтому обрезается
+     * на входе, а не «где-нибудь потом».
+     */
+    private static void importTruncatesForeignStrings() {
+        check("".equals(LayoutImporter.truncateForImport(null, 10)),
+                "null из чужой базы даёт пустую строку, а не NPE");
+        check("".equals(LayoutImporter.truncateForImport("что-то", 0)),
+                "нулевой предел даёт пустую строку");
+        check("Короткое".equals(LayoutImporter.truncateForImport("Короткое", 64)),
+                "короткая строка не меняется");
+
+        StringBuilder huge = new StringBuilder();
+        for (int i = 0; i < 10_000; i++) huge.append('я');
+        String cut = LayoutImporter.truncateForImport(huge.toString(), 256);
+        check(cut.length() == 256, "длинная строка обрезана до предела, стало " + cut.length());
+
+        // Предел импорта строк должен быть заведомо больше реальной раскладки
+        // (8 страниц × 24 иконки + док + папки), иначе импорт потеряет иконки.
+        int realisticMax = DesktopModel.MAX_PAGES * DesktopModel.GRID_ROWS * 5 + 64;
+        check(LayoutImporter.MAX_IMPORT_ROWS >= realisticMax,
+                "предел строк импорта не режет настоящую раскладку: "
+                        + LayoutImporter.MAX_IMPORT_ROWS + " >= " + realisticMax);
+    }
+    // --------------------- 13. набор «скрытых из Недавних» не растёт бесконечно
+
+    /**
+     * Каждый свайп по карточке в «Недавних» дописывал пакет в JSON и никогда
+     * его не убирал: набор рос без предела, а целиком перечитывался и
+     * перезаписывался на каждый следующий свайп.
+     *
+     * Логика предела вынесена на обычную Map, поэтому проверяется здесь:
+     * org.json в JVM-тестах — заглушка, и через JSON это не проверить.
+     */
+    private static void dismissedRecentSetIsBounded() {
+        Map<String, Long> all = new HashMap<>();
+        long base = 1_700_000_000_000L;
+        for (int i = 0; i < 260; i++) all.put("pkg" + i, base + i);
+
+        Map<String, Long> trimmed = Prefs.trimDismissed(all, 200);
+        check(trimmed.size() == 200, "переполненный набор срезан до предела, стало " + trimmed.size());
+        check(trimmed.containsKey("pkg259"), "самая свежая запись сохранена");
+        check(!trimmed.containsKey("pkg0"), "самая старая запись выброшена");
+        check(!trimmed.containsKey("pkg59"), "записи за пределами 200 свежих выброшены");
+
+        // На пределе и ниже — ничего не теряем.
+        check(Prefs.trimDismissed(all, 260).size() == 260, "на пределе набор не режется");
+        check(Prefs.trimDismissed(all, 1000).size() == 260, "при большом пределе набор цел");
+
+        // Границы не должны ронять.
+        check(Prefs.trimDismissed(null, 200).isEmpty(), "null даёт пустой набор, а не NPE");
+        check(Prefs.trimDismissed(new HashMap<>(), 200).isEmpty(), "пустой набор остаётся пустым");
+        check(Prefs.trimDismissed(all, 0).isEmpty(), "нулевой предел даёт пустой набор");
+
+        // Исходная карта не должна меняться: её вызывает горячий путь настроек.
+        check(all.size() == 260, "исходный набор не изменён, стало " + all.size());
     }
 }

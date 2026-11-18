@@ -748,15 +748,84 @@ public final class Prefs {
         return out;
     }
 
+    /**
+     * Сколько «скрытых из Недавних» пакетов хранится.
+     *
+     * Зачем предел: каждый свайп по карточке в «Недавних» дописывал пакет в
+     * JSON и никогда его не убирал. Набор только рос — десятки установок и
+     * удалений приложений оставляли в настройках мусор, который целиком
+     * перечитывался и перезаписывался при каждом следующем свайпе. Старые
+     * записи не нужны: они сравниваются с временем запуска, а такие запуски
+     * давно вне списка.
+     */
+    private static final int MAX_DISMISSED_PKGS = 200;
+
     public void markRecentPackageDismissed(String pkg) {
         if (pkg == null || pkg.isEmpty()) return;
         try {
             String dRaw = sp.getString(KEY_DISMISSED_PKGS_JSON, null);
             JSONObject obj = (dRaw != null && !dRaw.isEmpty()) ? new JSONObject(dRaw) : new JSONObject();
-            obj.put(pkg, System.currentTimeMillis());
-            sp.edit().putString(KEY_DISMISSED_PKGS_JSON, obj.toString()).apply();
+            Map<String, Long> entries = parseDismissed(obj);
+            entries.put(pkg, System.currentTimeMillis());
+            sp.edit().putString(KEY_DISMISSED_PKGS_JSON,
+                    dismissedToJson(trimDismissed(entries, MAX_DISMISSED_PKGS)).toString()).apply();
         } catch (Throwable ignored) {
         }
+    }
+
+    /**
+     * Оставляет {@link #MAX_DISMISSED_PKGS} самых свежих записей.
+     *
+     * Отдельный статический метод: он не трогает SharedPreferences, поэтому
+     * проверяется JVM-тестом {@code Audit60Tests.dismissedRecentSetIsBounded()}.
+     */
+    static Map<String, Long> trimDismissed(Map<String, Long> entries, int limit) {
+        Map<String, Long> out = new HashMap<>();
+        if (entries == null || entries.isEmpty()) return out;
+        if (limit <= 0) return out;
+        if (entries.size() <= limit) {
+            out.putAll(entries);
+            return out;
+        }
+        List<Map.Entry<String, Long>> sorted = new ArrayList<>(entries.entrySet());
+        // Свежие первыми: так в журнал попадают именно те записи, которые ещё
+        // влияют на список «Недавних».
+        Collections.sort(sorted, (a, b) -> {
+            long ta = (a.getValue() != null) ? a.getValue() : 0L;
+            long tb = (b.getValue() != null) ? b.getValue() : 0L;
+            return Long.compare(tb, ta);
+        });
+        for (int i = 0; i < limit; i++) {
+            Map.Entry<String, Long> e = sorted.get(i);
+            out.put(e.getKey(), (e.getValue() != null) ? e.getValue() : 0L);
+        }
+        return out;
+    }
+
+    /** Разбор JSON «скрытых из Недавних» в обычную карту. */
+    private static Map<String, Long> parseDismissed(JSONObject obj) {
+        Map<String, Long> out = new HashMap<>();
+        if (obj == null) return out;
+        try {
+            Iterator<String> it = obj.keys();
+            while (it.hasNext()) {
+                String k = it.next();
+                if (k == null || k.isEmpty()) continue;
+                out.put(k, obj.optLong(k, 0L));
+            }
+        } catch (Throwable ignored) {
+        }
+        return out;
+    }
+
+    private static JSONObject dismissedToJson(Map<String, Long> map) throws org.json.JSONException {
+        JSONObject obj = new JSONObject();
+        if (map != null) {
+            for (Map.Entry<String, Long> e : map.entrySet()) {
+                obj.put(e.getKey(), (e.getValue() != null) ? e.getValue() : 0L);
+            }
+        }
+        return obj;
     }
 
     public void markAllRecentTabsCleared() {

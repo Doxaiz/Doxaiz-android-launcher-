@@ -77,6 +77,20 @@ public final class LayoutImporter {
             {"content://com.google.android.apps.nexuslauncher.settings/favorites?notify=false", "System Launcher"}
     };
 
+    /**
+     * Предел строк, которые читаются из базы чужой оболочки за один импорт.
+     *
+     * Зачем: ContentProvider принадлежит ДРУГОМУ приложению, и его ответ никем не
+     * ограничен. Курсор на несколько сотен тысяч строк (битая база, чужой
+     * провайдер с тем же именем authority) складывался в список целиком — это
+     * OOM в фоновом потоке импорта. Реальная раскладка — это 8 страниц × 24
+     * иконки + док + папки, то есть меньше 300 строк, так что предел с запасом.
+     */
+    private static final int MAX_IMPORT_ROWS = 2000;
+
+    /** Предел длины подписи иконки при импорте: чужое имя может быть любым. */
+    private static final int MAX_IMPORT_TEXT_LEN = 256;
+
     private static final int CONTAINER_DESKTOP = -100;
     private static final int CONTAINER_HOTSEAT = -101;
     private static final int ITEM_TYPE_APPLICATION = 0;
@@ -308,15 +322,17 @@ public final class LayoutImporter {
         List<RawRow> rows = new ArrayList<>();
         int maxDesktopCellX = 0;
 
-        while (c.moveToNext()) {
+        while (rows.size() < MAX_IMPORT_ROWS && c.moveToNext()) {
             long id = (idxId >= 0) ? c.getLong(idxId) : -1L;
             int itemType = (idxType >= 0) ? c.getInt(idxType) : ITEM_TYPE_APPLICATION;
             long container = c.getLong(idxContainer);
             int screen = (idxScreen >= 0) ? c.getInt(idxScreen) : 0;
             int cellX = (idxCellX >= 0) ? c.getInt(idxCellX) : 0;
             int cellY = (idxCellY >= 0) ? c.getInt(idxCellY) : 0;
-            String title = (idxTitle >= 0 && !c.isNull(idxTitle)) ? c.getString(idxTitle) : "";
-            String intentUri = (!c.isNull(idxIntent)) ? c.getString(idxIntent) : "";
+            String title = (idxTitle >= 0 && !c.isNull(idxTitle))
+                    ? truncateForImport(c.getString(idxTitle), MAX_IMPORT_TEXT_LEN) : "";
+            String intentUri = (!c.isNull(idxIntent))
+                    ? truncateForImport(c.getString(idxIntent), MAX_IMPORT_TEXT_LEN * 8) : "";
 
             rows.add(new RawRow(id, itemType, container, screen, cellX, cellY, title, intentUri));
             boolean isImportableType = (itemType == ITEM_TYPE_APPLICATION
@@ -477,6 +493,21 @@ public final class LayoutImporter {
     }
 
     /** Чистая функция автовыбора числа столбцов (4 или 5) — покрывается unit-тестами. */
+    /**
+     * Обрезает строку, пришедшую из чужой базы. Возвращает пустую для null:
+     * вызывающему не нужно проверять дважды.
+     *
+     * Отдельный метод, потому что данные чужие: провайдер может вернуть строку
+     * любого размера (в том числе в несколько мегабайт), а она попадает в модель
+     * рабочего стола и в JSON раскладки. Проверяется тестом
+     * {@code Audit60Tests.importTruncatesForeignStrings()}.
+     */
+    static String truncateForImport(String value, int maxLen) {
+        if (value == null) return "";
+        if (maxLen <= 0) return "";
+        return value.length() <= maxLen ? value : value.substring(0, maxLen);
+    }
+
     static int detectGridColumns(int maxDesktopCellX, int fallbackCols) {
         if (maxDesktopCellX >= 4) return 5;
         return (fallbackCols == 5) ? 5 : 4;
