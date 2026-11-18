@@ -53,6 +53,7 @@ public final class Audit60Tests {
         pendingAuthActionCannotMixRequests();
         importTruncatesForeignStrings();
         dismissedRecentSetIsBounded();
+        trafficTotalsIgnoreAnomalies();
 
         System.out.println("Audit60Tests: " + n + " проверок пройдено");
     }
@@ -593,5 +594,44 @@ public final class Audit60Tests {
 
         // Исходная карта не должна меняться: её вызывает горячий путь настроек.
         check(all.size() == 260, "исходный набор не изменён, стало " + all.size());
+    }
+    // --------------------------- 14. учёт трафика: дельты, сброс счётчика, скачки
+
+    /**
+     * Учёт трафика раньше не вызывался ниоткуда (панель сети показывала только
+     * скорость). Перенесён в NetworkQualityHelper; расчёт проверяется здесь,
+     * потому что он чистый: ни TrafficStats, ни SharedPreferences.
+     */
+    private static void trafficTotalsIgnoreAnomalies() {
+        long mb = 1024L * 1024L;
+
+        // Первый замер: стартуем от текущего счётчика, а не прибавляем всё
+        // накопленное с загрузки телефона как «трафик за сутки».
+        long[] first = NetworkQualityHelper.nextTrafficTotals(0L, 0L, -1L, 300L * mb);
+        check(first[0] == 300L * mb && first[1] == 300L * mb,
+                "первый замер берёт текущее значение");
+
+        // Обычная дельта прибавляется к обеим суммам.
+        long[] next = NetworkQualityHelper.nextTrafficTotals(10L * mb, 100L * mb, 300L * mb, 312L * mb);
+        check(next[0] == 22L * mb, "суточная сумма выросла на дельту, стало " + next[0]);
+        check(next[1] == 112L * mb, "месячная сумма выросла на дельту, стало " + next[1]);
+
+        // Счётчик обнулился (перезагрузка): берём текущее значение, не отрицательное.
+        long[] afterReboot = NetworkQualityHelper.nextTrafficTotals(22L * mb, 112L * mb, 312L * mb, 5L * mb);
+        check(afterReboot[0] == 27L * mb && afterReboot[1] == 117L * mb,
+                "после сброса счётчика дельта = текущее значение");
+
+        // Аномальный скачок (> 50 ГБ за час) не засчитывается вовсе.
+        long[] huge = NetworkQualityHelper.nextTrafficTotals(1L * mb, 2L * mb, 0L, 60L * 1024L * mb);
+        check(huge[0] == 1L * mb && huge[1] == 2L * mb,
+                "скачок больше 50 ГБ не портит накопленное");
+
+        // Отрицательные/битые входные значения не дают отрицательных сумм.
+        long[] broken = NetworkQualityHelper.nextTrafficTotals(-5L, -7L, -1L, -100L);
+        check(broken[0] >= 0L && broken[1] >= 0L, "битые входные данные дают неотрицательные суммы");
+
+        // Нет изменений — суммы не растут.
+        long[] flat = NetworkQualityHelper.nextTrafficTotals(5L * mb, 6L * mb, 300L * mb, 300L * mb);
+        check(flat[0] == 5L * mb && flat[1] == 6L * mb, "без трафика суммы не меняются");
     }
 }

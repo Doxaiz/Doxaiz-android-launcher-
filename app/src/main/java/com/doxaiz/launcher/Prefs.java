@@ -245,18 +245,6 @@ public final class Prefs {
         return sp.getString(KEY_SHADE_TILES, DEFAULT_SHADE_TILES);
     }
 
-    public void setShadeTiles(List<String> tiles) {
-        StringBuilder sb = new StringBuilder();
-        if (tiles != null) {
-            for (String k : tiles) {
-                if (k == null || k.trim().isEmpty()) continue;
-                if (sb.length() > 0) sb.append(',');
-                sb.append(k.trim());
-            }
-        }
-        sp.edit().putString(KEY_SHADE_TILES, sb.toString()).apply();
-    }
-
     public void setShadeTilesCsv(String csv) {
         if (csv == null) return;
         String safe = csv.length() > 300 ? csv.substring(0, 300) : csv;
@@ -835,17 +823,6 @@ public final class Prefs {
                 .apply();
     }
 
-    public void clearAppUsage() {
-        synchronized (usageLock) {
-            usageCache = new HashMap<>();
-        }
-        sp.edit()
-                .remove(KEY_USAGE_JSON)
-                .remove(KEY_RECENTS_CLEARED_AT)
-                .remove(KEY_DISMISSED_PKGS_JSON)
-                .apply();
-    }
-
     // =========================================================================
     // Dynamic Bar (информационная капсула вверху экрана) и индикаторы статуса
     // =========================================================================
@@ -1072,44 +1049,17 @@ public final class Prefs {
         }
     }
 
-    // Умный локальный суточный и месячный учёт трафика по реальным дельтам TrafficStats
-    public long[] updateAndReadTrafficBytes(long currentTotalBytes) {
-        if (currentTotalBytes < 0L) currentTotalBytes = 0L;
-        java.text.SimpleDateFormat dayFmt = new java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US);
-        java.text.SimpleDateFormat monFmt = new java.text.SimpleDateFormat("yyyy-MM", java.util.Locale.US);
-        java.util.Date now = new java.util.Date();
-        String todayKey = dayFmt.format(now);
-        String monthKey = monFmt.format(now);
-
-        String savedDay = sp.getString("tr_day_key", "");
-        String savedMonth = sp.getString("tr_mon_key", "");
-        long lastRaw = sp.getLong("tr_last_raw", -1L);
-        long dayAcc = savedDay.equals(todayKey) ? sp.getLong("tr_day_acc", 0L) : 0L;
-        long monAcc = savedMonth.equals(monthKey) ? sp.getLong("tr_mon_acc", 0L) : 0L;
-
-        if (lastRaw >= 0L) {
-            long delta = (currentTotalBytes >= lastRaw) ? (currentTotalBytes - lastRaw) : currentTotalBytes;
-            // Защита от аномального скачка
-            if (delta > 0L && delta < (50L * 1024L * 1024L * 1024L)) {
-                dayAcc += delta;
-                monAcc += delta;
-            }
-        } else if (currentTotalBytes > 0L) {
-            // Первый замер: стартуем от текущего счётчика сеанса
-            dayAcc = currentTotalBytes;
-            monAcc = currentTotalBytes;
-        }
-
-        sp.edit()
-                .putString("tr_day_key", todayKey)
-                .putString("tr_mon_key", monthKey)
-                .putLong("tr_last_raw", currentTotalBytes)
-                .putLong("tr_day_acc", dayAcc)
-                .putLong("tr_mon_acc", monAcc)
-                .apply();
-
-        return new long[]{dayAcc, monAcc};
-    }
+    /**
+     * Учёт трафика перенесён в {@link NetworkQualityHelper#accumulateTraffic}.
+     *
+     * Раньше здесь жил updateAndReadTrafficBytes(): он считал суточную и
+     * месячную сумму по дельтам TrafficStats, но не вызывался НИ ОТКУДА — то
+     * есть панель сети показывала только текущую скорость, а накопленные
+     * значения в настройках никогда не обновлялись. Перенос в панель сети не
+     * просто «оживил» код: там уже есть готовый снимок TrafficStats и
+     * собственный троттлинг обновлений, поэтому учёт не добавляет ни одного
+     * лишнего IPC.
+     */
 
     // === Doxaiz 4.1: Ручные категории приложений ===
     private static final String KEY_CUSTOM_CAT_PREFIX = "custom_cat_";
@@ -1204,17 +1154,6 @@ public final class Prefs {
         return sp.getString(KEY_CUSTOM_SECTIONS, "");
     }
 
-    public void setCustomSectionsRawJson(String raw) {
-        if (raw == null || raw.trim().isEmpty()) {
-            synchronized (prefsCacheLock) {
-                customSectionsCache = new ArrayList<>();
-            }
-            sp.edit().remove(KEY_CUSTOM_SECTIONS).apply();
-        } else {
-            saveCustomSections(CustomSection.fromJson(raw));
-        }
-    }
-
     /**
      * Вариант для импорта бэкапа: пишет в хранилище, но НЕ трогает кэш чтения —
      * при откате кэш должен остаться согласованным с восстановленными настройками
@@ -1267,10 +1206,6 @@ public final class Prefs {
         // Санитизация та же, что и в обычном пути, но без записи в кэш чтения.
         Set<Integer> parsed = CustomSection.parseHiddenStdCategories(raw);
         sp.edit().putString(KEY_HIDDEN_STD_CATS, CustomSection.encodeHiddenStdCategories(parsed)).apply();
-    }
-
-    public void setHiddenStdCategoriesRaw(String raw) {
-        setHiddenStdCategories(CustomSection.parseHiddenStdCategories(raw));
     }
 
     public boolean isAutoNetworkEnabled() { return isAutoNetworkAssist(); }
@@ -1329,17 +1264,12 @@ public final class Prefs {
         return sp.getBoolean("anime_ornaments", true);
     }
 
-    public void setAnimeOrnamentsEnabled(boolean enabled) {
-        sp.edit().putBoolean("anime_ornaments", enabled).apply();
-    }
-
-    public boolean isAnimeParticlesEnabled() {
-        return sp.getBoolean("anime_particles", true);
-    }
-
-    public void setAnimeParticlesEnabled(boolean enabled) {
-        sp.edit().putBoolean("anime_particles", enabled).apply();
-    }
+    // isAnimeOrnamentsEnabled() используется: MainActivity передаёт значение в
+    // GlassTheme.create(...). Записи в настройку нет намеренно — выключателя в
+    // интерфейсе тоже нет, а мёртвый сеттер создавал ложное впечатление
+    // работающей настройки. Частицы (anime_particles) не создаются нигде: слой
+    // AnimeParticlesView остался от прежней версии и в дерево видов не
+    // добавляется, поэтому и настроек у него нет.
 
     // =========================================================================
     // Транзакционный импорт резервной копии (BackupHelper)
