@@ -152,4 +152,22 @@ final class RestrictedSettingsFix {
     static String adbCommand(String packageName) {
         return "adb shell appops set " + packageName + " ACCESS_RESTRICTED_SETTINGS allow";
     }
+
+    /**
+     * Как поставить APK через ADB, чтобы ограничение не включилось вовсе.
+     *
+     * Это предпочтительнее {@link #adbCommand}: там мы уже после установки правим
+     * состояние app-op, а здесь нужное состояние просто не создаётся — система
+     * считает установку доверенной. Ограничение на установку сохраняем: `-r`
+     * обновляет поверх, данные и настройки не теряются.
+     */
+    static String adbInstallCommand(String packageName) {
+        return "adb install -r doxaiz-" + versionHint() + ".apk   # затем: "
+                + "adb shell am start -n " + packageName + "/.MainActivity";
+    }
+
+    /** Имя APK в релизе строится из версии — подсказка должна совпадать с файлом. */
+    static String versionHint() {
+        return BuildConfig.VERSION_NAME;
+    }
 }
