@@ -1224,8 +1224,25 @@ public final class Prefs {
     public static final int WALLPAPER_DIM_MEDIUM = 1;
     public static final int WALLPAPER_DIM_STRONG = 2;
 
+    /**
+     * Приводит номер стиля к допустимому.
+     *
+     * Раньше здесь оставалось только «светлая или тёмная», а Сакура и
+     * Кибер-Аниме сворачивались в графит. В интерфейсе выбора этих стилей не
+     * было, поэтому усечение выглядело безобидным — но оно же делало
+     * недостижимыми готовые палитры, которые уже посчитаны и проверены
+     * контрастом (GlassTheme.createResolved). Теперь сохраняются все четыре.
+     */
     public static int sanitizeVisualStyle(int style) {
-        return style == STYLE_CLASSIC_LIGHT ? STYLE_CLASSIC_LIGHT : STYLE_CLASSIC_DARK;
+        switch (style) {
+            case STYLE_SAKURA_JADE:
+            case STYLE_CYBER_ANIME:
+            case STYLE_CLASSIC_DARK:
+            case STYLE_CLASSIC_LIGHT:
+                return style;
+            default:
+                return STYLE_CLASSIC_DARK;
+        }
     }
 
     public static int sanitizeWallpaperMode(int mode) {

@@ -4,8 +4,12 @@ public final class SimpleThemeTest {
  public static void main(String[] args) {
   check(Prefs.sanitizeVisualStyle(Prefs.STYLE_CLASSIC_DARK)==Prefs.STYLE_CLASSIC_DARK);
   check(Prefs.sanitizeVisualStyle(Prefs.STYLE_CLASSIC_LIGHT)==Prefs.STYLE_CLASSIC_LIGHT);
-  check(Prefs.sanitizeVisualStyle(Prefs.STYLE_SAKURA_JADE)==Prefs.STYLE_CLASSIC_DARK);
-  check(Prefs.sanitizeVisualStyle(Prefs.STYLE_CYBER_ANIME)==Prefs.STYLE_CLASSIC_DARK);
+  // Сакура и Кибер-Аниме теперь достижимы: их палитры посчитаны и проверены
+  // контрастом в ContrastTest, поэтому sanitizeVisualStyle больше не сворачивает
+  // их в графит. Проверяем и прямой проход, и «мусор» на входе.
+  check(Prefs.sanitizeVisualStyle(Prefs.STYLE_SAKURA_JADE)==Prefs.STYLE_SAKURA_JADE);
+  check(Prefs.sanitizeVisualStyle(Prefs.STYLE_CYBER_ANIME)==Prefs.STYLE_CYBER_ANIME);
+  check(Prefs.sanitizeVisualStyle(Prefs.STYLE_SAKURA_JADE)!=Prefs.STYLE_CLASSIC_DARK);
   check(Prefs.sanitizeVisualStyle(-1)==Prefs.STYLE_CLASSIC_DARK);
   check(Prefs.sanitizeVisualStyle(999)==Prefs.STYLE_CLASSIC_DARK);
   check(Prefs.sanitizeWallpaperMode(0)==Prefs.WALLPAPER_KURUMI_XIAOBAI);
