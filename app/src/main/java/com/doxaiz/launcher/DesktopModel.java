@@ -20,6 +20,7 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Хранит раскладку рабочего стола Doxaiz со свободной сеткой (cols x GRID_ROWS):
@@ -47,7 +48,17 @@ public final class DesktopModel {
         t.setDaemon(true);
         return t;
     });
-    private final AtomicReference<String> pendingGuardJson = new AtomicReference<>(null);
+    /**
+     * Ожидающий записи снимок раскладки (F-15). Очередь из одного элемента:
+     * UI-поток никогда не ждёт, а на диск попадает самый свежий снимок.
+     */
+    private final AtomicReference<PendingSave> pendingSave = new AtomicReference<>(null);
+    /**
+     * Поколение снимков. Растёт при каждом save() и при load(): если пока
+     * сериализация шла в фоне, пришёл load() (импорт, восстановление), устаревший
+     * снимок не будет записан поверх загруженной раскладки.
+     */
+    private final AtomicLong layoutGeneration = new AtomicLong(0);
 
     private final Context appContext;
     private final Prefs prefs;
@@ -101,6 +112,8 @@ public final class DesktopModel {
 
     /** Синхронизирован по той же причине, что и save(): перезагрузка и запись не должны пересекаться. */
     public synchronized void load() {
+        // Всё, что было поставлено в очередь на запись до загрузки, устарело.
+        layoutGeneration.incrementAndGet();
         dock.clear();
         pages.clear();
         initialized = false;
@@ -194,57 +207,163 @@ public final class DesktopModel {
     }
 
     /**
-     * Сериализация и запись раскладки. Метод синхронизирован: save() вызывается и с
-     * главного потока, и из фоновых (импорт бэкапа, guard-writer), а раньше два
-     * конкурентных вызова могли перемешать итерацию по pages/dock и записать
-     * повреждённый или устаревший JSON поверх свежего.
+     * Запрос на сохранение раскладки. Возвращается сразу, не блокируя кадр.
+     *
+     * <h3>Что изменилось (F-15)</h3>
+     * Раньше метод был {@code synchronized} и на вызывающем потоке строил
+     * {@code JSONObject} по всем страницам: при 8 страницах × 30 элементах это
+     * ~240 вставок плюс сборка строки — и всё это при каждом перетаскивании
+     * иконки, то есть на UI-потоке.
+     *
+     * <p>Теперь на вызывающем потоке остаётся только <b>снимок</b> (копия полей:
+     * десятки объектов, без JSON), а построение JSON, {@code toString()} и запись
+     * идут в фоновом потоке {@code GUARD_WRITER}. Снимок делается под той же
+     * блокировкой, что и раньше, поэтому итерация по живым {@code pages}/{@code dock}
+     * из фона не читается и повреждённый JSON записать невозможно.
+     *
+     * <p>Порядок гарантирован очередью из одного элемента: на диск попадает
+     * последний снимок, промежуточные не пишутся. Если за время сериализации
+     * прошёл {@code load()} (импорт бэкапа, восстановление), снимок со старым
+     * поколением отбрасывается и не затирает загруженную раскладку.
      */
-    public synchronized void save() {
-        // F-15: здесь остаётся только построение JSON в памяти и подписка на
-        // хранилище. Кодирование в UTF-8 и запись guard-файла выполняются в
-        // фоновом потоке GUARD_WRITER (см. writeGuardFile), поэтому UI-поток не
-        // блокируется на вводе-выводе даже при частых перетаскиваниях иконок.
+    public void save() {
+        final PendingSave pending;
         try {
-            JSONObject root = new JSONObject();
-            root.put("seq", nextFolderSeq);
-            // Признак «раскладка построена»: без него пустой стол после первой
-            // неудачной загрузки приложений считался бы готовым навсегда.
-            root.put("built", initialized || hasContent());
-
-            JSONArray dockArr = new JSONArray();
-            for (String k : dock) dockArr.put(k);
-            root.put("dock", dockArr);
-
-            JSONArray pagesArr = new JSONArray();
-            for (List<DesktopItem> page : pages) {
-                JSONArray pageJson = new JSONArray();
-                for (DesktopItem item : page) {
-                    JSONObject obj = new JSONObject();
-                    obj.put("col", item.col);
-                    obj.put("row", item.row);
-                    if (item.type == DesktopItem.TYPE_FOLDER) {
-                        obj.put("type", "folder");
-                        obj.put("id", item.folderId);
-                        obj.put("name", item.folderName);
-                        JSONArray fa = new JSONArray();
-                        for (String ak : item.folderApps) fa.put(ak);
-                        obj.put("apps", fa);
-                    } else {
-                        obj.put("type", "app");
-                        obj.put("key", item.appKey);
-                    }
-                    pageJson.put(obj);
-                }
-                pagesArr.put(pageJson);
+            synchronized (this) {
+                pending = new PendingSave(snapshotLocked(), layoutGeneration.incrementAndGet());
             }
-            root.put("pages", pagesArr);
-            String json = root.toString();
-            if (prefs != null) prefs.setDesktopJson(json);
-            scheduleGuardWrite(json);
         } catch (Throwable t) {
-            // Сбой сохранения раскладки раньше был полностью невидим: иконки
-            // «переезжали» или пропадали после перезапуска без следов в логах.
             Diagnostics.record("DesktopModel.save", t);
+            return;
+        }
+        if (pending.snapshot == null) return;
+        boolean submit = pendingSave.getAndSet(pending) == null;
+        if (!submit) return; // уже стоит задача: она заберёт самый свежий снимок
+        try {
+            GUARD_WRITER.execute(this::drainPendingSaves);
+        } catch (Throwable t) {
+            // Исполнитель уже остановлен (выход из процесса) — сохраняем здесь.
+            Diagnostics.record("DesktopModel.save.shutdown", t);
+            PendingSave fallback = pendingSave.getAndSet(null);
+            if (fallback != null) applyPendingSave(fallback);
+        }
+    }
+
+    /**
+     * Досохранить то, что ещё в очереди. Вызывается при уходе приложения в фон:
+     * очередь живёт в памяти процесса, и при мгновенном убийстве последняя
+     * правка иначе могла бы не дойти до диска.
+     */
+    public void flushPendingSave() {
+        PendingSave pending = pendingSave.getAndSet(null);
+        if (pending != null) applyPendingSave(pending);
+    }
+
+    private void drainPendingSaves() {
+        PendingSave pending;
+        while ((pending = pendingSave.getAndSet(null)) != null) {
+            applyPendingSave(pending);
+        }
+    }
+
+    /** Сериализация снимка и запись. Всегда в фоне (или при явном flush). */
+    private void applyPendingSave(PendingSave pending) {
+        if (pending == null || pending.snapshot == null) return;
+        String json = pending.snapshot.toJson();
+        if (json == null || json.isEmpty()) return;
+        synchronized (this) {
+            if (layoutGeneration.get() != pending.generation) {
+                // Раскладку успели загрузить заново — этот снимок устарел.
+                return;
+            }
+            if (prefs != null) prefs.setDesktopJson(json);
+        }
+        writeGuardFile(json);
+    }
+
+    /**
+     * Снимок раскладки: только данные, без ссылок на живые списки. Делается под
+     * {@code synchronized(this)}, поэтому конкурентная правка не испортит JSON.
+     */
+    /** Снимок для тестов: та же логика, что использует save(). */
+    synchronized LayoutSnapshot debugSnapshot() {
+        return snapshotLocked();
+    }
+
+    private LayoutSnapshot snapshotLocked() {
+        return new LayoutSnapshot(nextFolderSeq, initialized || hasContent(), dock, pages);
+    }
+
+    /** Отложенный снимок вместе с поколением, к которому он относится. */
+    private static final class PendingSave {
+        final LayoutSnapshot snapshot;
+        final long generation;
+
+        PendingSave(LayoutSnapshot snapshot, long generation) {
+            this.snapshot = snapshot;
+            this.generation = generation;
+        }
+    }
+
+    /** Снимок раскладки: плоские данные для сериализации в любом потоке. */
+    static final class LayoutSnapshot {
+        final int seq;
+        final boolean built;
+        final List<String> dock;
+        final List<List<DesktopItem>> pages;
+
+        LayoutSnapshot(int seq, boolean built, List<String> dock, List<List<DesktopItem>> pages) {
+            this.seq = seq;
+            this.built = built;
+            this.dock = new ArrayList<>(dock);
+            this.pages = new ArrayList<>(pages.size());
+            for (List<DesktopItem> page : pages) {
+                this.pages.add(new ArrayList<>(page));
+            }
+        }
+
+        String toJson() {
+            try {
+                JSONObject root = new JSONObject();
+                root.put("seq", seq);
+                // Признак «раскладка построена»: без него пустой стол после первой
+                // неудачной загрузки приложений считался бы готовым навсегда.
+                root.put("built", built);
+
+                JSONArray dockArr = new JSONArray();
+                for (String k : dock) dockArr.put(k);
+                root.put("dock", dockArr);
+
+                JSONArray pagesArr = new JSONArray();
+                for (List<DesktopItem> page : pages) {
+                    JSONArray pageJson = new JSONArray();
+                    for (DesktopItem item : page) {
+                        JSONObject obj = new JSONObject();
+                        obj.put("col", item.col);
+                        obj.put("row", item.row);
+                        if (item.type == DesktopItem.TYPE_FOLDER) {
+                            obj.put("type", "folder");
+                            obj.put("id", item.folderId);
+                            obj.put("name", item.folderName);
+                            JSONArray fa = new JSONArray();
+                            for (String ak : item.folderApps) fa.put(ak);
+                            obj.put("apps", fa);
+                        } else {
+                            obj.put("type", "app");
+                            obj.put("key", item.appKey);
+                        }
+                        pageJson.put(obj);
+                    }
+                    pagesArr.put(pageJson);
+                }
+                root.put("pages", pagesArr);
+                return root.toString();
+            } catch (Throwable t) {
+                // Сбой сериализации раньше был невидим: иконки «переезжали» после
+                // перезапуска без следов в журнале.
+                Diagnostics.record("DesktopModel.save", t);
+                return null;
+            }
         }
     }
 
@@ -333,25 +452,6 @@ public final class DesktopModel {
             }
         }
         return keys;
-    }
-
-    private void scheduleGuardWrite(String json) {
-        if (appContext == null || json == null || json.isEmpty()) return;
-        // Дедуплицируем частые сохранения и выносим атомарную запись с UI-потока
-        boolean shouldSubmit = (pendingGuardJson.getAndSet(json) == null);
-        if (shouldSubmit) {
-            try {
-                GUARD_WRITER.execute(() -> {
-                    String latest;
-                    while ((latest = pendingGuardJson.getAndSet(null)) != null) {
-                        writeGuardFile(latest);
-                    }
-                });
-            } catch (Throwable ignored) {
-                String fallback = pendingGuardJson.getAndSet(null);
-                if (fallback != null) writeGuardFile(fallback);
-            }
-        }
     }
 
     private synchronized void writeGuardFile(String json) {

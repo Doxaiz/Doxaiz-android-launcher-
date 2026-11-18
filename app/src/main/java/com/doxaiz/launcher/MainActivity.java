@@ -847,6 +847,11 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     protected void onPause() {
         syncAmbientParticles();
         super.onPause();
+        // F-15: сохранение раскладки ушло в фоновый поток, и очередь живёт в
+        // памяти процесса. При уходе в фон досохраняем её сейчас — иначе при
+        // мгновенном убийстве процесса последняя правка (перетаскивание,
+        // переименование) могла бы не дойти до диска.
+        if (desktop != null) desktop.flushPendingSave();
         if (dragging || dragPending) {
             if (cancelDragCleanup()) rebuildDesktop();
         }
