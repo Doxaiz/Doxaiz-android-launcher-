@@ -346,13 +346,21 @@ public final class NetworkQualityHelper {
         return 0;
     }
 
-    /** Уровень из «сырых» единиц Android (-113..-55) в 0..4; -1 — данных нет. */
+    /**
+     * Уровень из «сырых» единиц Android (дБм, примерно −113..−55) в 0..4.
+     *
+     * Границы выбраны так, чтобы −60 дБм (нормальный LTE) давал 4, а −90 дБм
+     * (крайний случай) — 1. Точная семантика у разных сетей своя (RSRP/RSRQ),
+     * поэтому шкала намеренно грубая: она нужна только для «вмешиваться или нет».
+     *
+     * @return 0..4 либо −1, если данных нет
+     */
     public static int signalStrengthToLevel(int raw) {
-        if (raw <= 0) return -1;           // -113..-55; 0 и меньше — нет данных
-        if (raw >= -55) return 4;
-        if (raw >= -65) return 3;
-        if (raw >= -75) return 2;
-        if (raw >= -85) return 1;
+        if (raw <= 0) return -1;           // 0 и меньше — нет данных
+        if (raw >= -65) return 4;
+        if (raw >= -75) return 3;
+        if (raw >= -85) return 2;
+        if (raw >= -95) return 1;
         return 0;
     }
 
