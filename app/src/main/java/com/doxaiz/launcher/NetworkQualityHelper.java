@@ -12,7 +12,6 @@ import android.os.Build;
 import android.os.SystemClock;
 import android.provider.Settings;
 
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
@@ -105,7 +104,10 @@ public final class NetworkQualityHelper {
 
     private volatile boolean lastReprobeAccepted = false;
     private final Object statsLock = new Object();
-    private final SimpleDateFormat timeFmt = new SimpleDateFormat("HH:mm", Locale.getDefault());
+    // Сам SimpleDateFormat не держим: он не потокобезопасен, а панель сети
+    // форматирует время из фонового потока. Шаблон и локаль — неизменяемые.
+    static final String TIME_PATTERN = "HH:mm";
+    static final Locale TIME_LOCALE = Locale.getDefault();
     private int healCount = 0;
     private long lastHealTimeMs = 0L;
     private final List<HealEvent> recentEvents = new ArrayList<>();
@@ -350,10 +352,9 @@ public final class NetworkQualityHelper {
         if (cnt == 0) {
             return "Залипаний не было • Работает тихо без всплывашек";
         }
-        String hhmm;
-        synchronized (timeFmt) {
-            hhmm = QuickShadeHelper.formatWithCurrentTimeZone(timeFmt, new Date(lastTs));
-        }
+        // Блокировка больше не нужна: форматтер создаётся внутри вызова.
+        String hhmm = QuickShadeHelper.formatWithCurrentTimeZone(
+                TIME_PATTERN, TIME_LOCALE, new Date(lastTs));
         return "Перепроверок за сеанс: " + cnt + " • Последняя в " + hhmm;
     }
 

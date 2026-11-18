@@ -590,7 +590,15 @@ public final class DynamicBarHelper {
 
     public void refresh() {
         if (capsuleContainer == null) return;
-        if (!isScreenInteractive()) return;
+        if (!isScreenInteractive()) {
+            // Раньше здесь был просто выход. lastRenderSig оставался от события,
+            // показанного до гашения экрана, а сама капсула при разблокировке
+            // ещё считается «видимой» — сравнение сигнатур совпадало, и бар
+            // оставался скрытым до следующей смены события. Сбрасываем снимок,
+            // чтобы после разблокировки состояние перерисовалось.
+            lastRenderSig = "";
+            return;
+        }
         if (suppressedByOverlay) {
             expanded = false;
             lastRenderSig = "SUPPRESSED";

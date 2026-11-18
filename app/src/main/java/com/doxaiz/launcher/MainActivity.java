@@ -236,8 +236,14 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     // Свайп вверх по конкретной иконке («2 в 1») и приватное пространство
     private String touchedSwipeUpAppKey = null;
     private View touchedSwipeUpAnchor = null;
-    private Runnable pendingPrivateSpaceAction = null;
     private boolean pendingImportAuthVerified = false;
+    /**
+     * Аварийный экран уже был открыт в этом запуске. Иначе «Попробовать снова»
+     * после второго сбоя зацикливается: MainActivity снова видит свежую
+     * отметку, снова открывает SafeModeActivity, и так по кругу, потому что
+     * показать рабочий стол так и не удалось.
+     */
+    private static boolean startedInSafeMode = false;
     private final java.util.concurrent.ExecutorService backupIo =
             java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
                 Thread t = new Thread(r, "doxaiz-backup-io");
@@ -363,12 +369,21 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                     return;
                 }
             }
-            SafeModeActivity.show(this, startupCrashReason());
-            finish();
-            return;
+            // Показываем аварийный экран один раз за запуск процесса. Кнопка
+            // «Попробовать снова» на нём запускает MainActivity снова — и без
+            // этой проверки мы снова увидели бы ту же свежую отметку и снова
+            // открыли аварийный экран, то есть получился бы бесконечный цикл
+            // «Домой → аварийный экран → Попробовать снова → Домой».
+            if (!startedInSafeMode) {
+                startedInSafeMode = true;
+                SafeModeActivity.show(this, startupCrashReason());
+                finish();
+                return;
+            }
         }
 
-        theme = GlassTheme.create(prefs.getVisualStyle(), prefs.getGlassOpacity(), false);
+        theme = GlassTheme.create(prefs.getVisualStyle(), prefs.getGlassOpacity(),
+                prefs.isAnimeOrnamentsEnabled());
         desktop = new DesktopModel(this, prefs);
         currentPage = getEffectiveHomePageIndex();
         networkHelper = new NetworkQualityHelper(this);
@@ -471,6 +486,9 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         rootContainer.post(() -> {
             if (isFinishing() || isDestroyed()) return;
             CrashGuard.onStartupComplete(prefs, keepStreak);
+            // Стол всё-таки показался: защита от цикла аварийного экрана больше
+            // не нужна и не должна мешать показать его при новом сбое.
+            startedInSafeMode = false;
         });
     }
 
@@ -724,6 +742,9 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         // Не сбрасываем ОЗУ-кэш иконок при обычном открытии приложения (TRIM_MEMORY_UI_HIDDEN=20) —
         // освобождаем при вытеснении в LRU-фон / дефиците ОЗУ (на Android 14+ TRIM_MEMORY_COMPLETE не приходит)
         if (level >= TRIM_MEMORY_BACKGROUND) {
+            // Процесс может быть выгружен сразу после этого: последняя запись
+            // журнала (причина сбоя) должна успеть попасть на диск.
+            Diagnostics.flushNow();
             if (animeBackdrop != null) animeBackdrop.onTrimMemoryCache();
             if (repository != null) repository.trimIconCache();
             if (quickShadeHelper != null) quickShadeHelper.clearIconCache();
@@ -886,13 +907,16 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
     @Override
     protected void onDestroy() {
+        Diagnostics.flushNow();
         if (animeBackdrop != null) animeBackdrop.destroy();
         backupIo.shutdownNow();
         super.onDestroy();
         uiHandler.removeCallbacksAndMessages(null);
         pendingBatchUninstallPkgs.clear();
         awaitingBatchUninstallResume = false;
-        pendingPrivateSpaceAction = null;
+        // Отложенное подтверждение PIN принадлежит проверке, а не активности:
+        // после destroy выполнять его нельзя.
+        BiometricHelper.clearPendingCredentialAction();
         DoxaizNotificationService.setListener(null);
         DoxaizNotificationService.setHeadsUpListener(null);
         if (networkHelper != null) networkHelper.stopForegroundMonitor();
@@ -1908,7 +1932,8 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     private void applyThemeInternal(boolean rebuildPages) {
         lastDrawerRecentSig = "";
         lastAlphabetBarSig = "";
-        theme = GlassTheme.create(prefs.getVisualStyle(), prefs.getGlassOpacity(), false);
+        theme = GlassTheme.create(prefs.getVisualStyle(), prefs.getGlassOpacity(),
+                prefs.isAnimeOrnamentsEnabled());
         // Подложка подписей зависит от темы — пересобираем её один раз здесь, а
         // не на каждой из сотни иконок рабочего стола.
         invalidateLabelBackdrop();
@@ -7463,16 +7488,14 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                 Toast.makeText(this, "Для доступа сначала установите PIN или пароль экрана в настройках Android", Toast.LENGTH_LONG).show();
                 return;
             }
-            pendingPrivateSpaceAction = this::showHiddenAppsModal;
+            // Действие при отложенном подтверждении хранит BiometricHelper:
+            // если система уйдёт в KeyguardManager, ответ придёт в onActivityResult.
             BiometricHelper.authenticate(
                     this,
                     "Скрытые приложения",
                     "Подтвердите отпечатком пальца или PIN-кодом",
-                    () -> {
-                        pendingPrivateSpaceAction = null;
-                        showHiddenAppsModal();
-                    },
-                    () -> pendingPrivateSpaceAction = null
+                    this::showHiddenAppsModal,
+                    () -> { }
             );
         } else {
             showHiddenAppsModal();
@@ -8050,13 +8073,13 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                 logHdr.addView(resetLogBtn);
                 logWrap.addView(logHdr);
 
-                java.text.SimpleDateFormat evFmt = new java.text.SimpleDateFormat("HH:mm:ss", Locale.getDefault());
                 int showLim = Math.min(3, evs.size());
                 StringBuilder logText = new StringBuilder();
                 for (int i = 0; i < showLim; i++) {
                     NetworkQualityHelper.HealEvent ev = evs.get(i);
                     if (i > 0) logText.append('\n');
-                    logText.append(evFmt.format(new java.util.Date(ev.timeMs)))
+                    logText.append(QuickShadeHelper.formatWithCurrentTimeZone(
+                                    "HH:mm:ss", Locale.getDefault(), new java.util.Date(ev.timeMs)))
                             .append(" • ").append(ev.transport)
                             .append(" — ").append(ev.reason);
                 }
@@ -8199,23 +8222,15 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                             Toast.makeText(this, "Для отключения защиты сначала установите PIN или пароль экрана", Toast.LENGTH_LONG).show();
                             return;
                         }
-                        pendingPrivateSpaceAction = () -> {
-                            prefs.setProtectHiddenApps(false);
-                            rebuildSettingsContent();
-                        };
                         BiometricHelper.authenticate(
                                 this,
                                 "Отключение защиты",
                                 "Подтвердите отпечатком пальца или PIN-кодом",
                                 () -> {
-                                    pendingPrivateSpaceAction = null;
                                     prefs.setProtectHiddenApps(false);
                                     rebuildSettingsContent();
                                 },
-                                () -> {
-                                    pendingPrivateSpaceAction = null;
-                                    rebuildSettingsContent();
-                                }
+                                this::rebuildSettingsContent
                         );
                         return;
                     }
@@ -10417,14 +10432,12 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             pendingExportIncludesPrivate = false;
             return;
         }
-        pendingPrivateSpaceAction = this::launchExportBackupPicker;
+        // При подтверждении через системный экран PIN результат приходит в
+        // onActivityResult; действие для этого случая хранит BiometricHelper.
         BiometricHelper.authenticate(this, "Сохранение копии",
                 "Файл содержит список скрытых приложений. Подтвердите отпечатком или PIN.",
-                () -> { pendingPrivateSpaceAction = null; launchExportBackupPicker(); },
-                () -> {
-                    pendingPrivateSpaceAction = null;
-                    pendingExportIncludesPrivate = false;
-                });
+                this::launchExportBackupPicker,
+                () -> pendingExportIncludesPrivate = false);
     }
 
     /**
@@ -10473,16 +10486,12 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                 Toast.makeText(this, "Для восстановления защищённой копии сначала установите PIN или пароль экрана", Toast.LENGTH_LONG).show();
                 return;
             }
-            pendingPrivateSpaceAction = () -> launchImportBackupPicker(true);
             BiometricHelper.authenticate(
                     this,
                     "Восстановление копии",
                     "Подтвердите отпечатком или PIN для импорта защищённых настроек",
-                    () -> {
-                        pendingPrivateSpaceAction = null;
-                        launchImportBackupPicker(true);
-                    },
-                    () -> pendingPrivateSpaceAction = null
+                    () -> launchImportBackupPicker(true),
+                    () -> { }
             );
             return;
         }
@@ -10501,13 +10510,19 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             return;
         }
         if (requestCode == BiometricHelper.REQ_DEVICE_CREDENTIAL) {
-            Runnable action = pendingPrivateSpaceAction;
-            pendingPrivateSpaceAction = null;
-            if (isFinishing() || isDestroyed()) return;
-            if (resultCode == RESULT_OK && action != null) {
-                action.run();
-            } else if (currentScreen == SCREEN_SETTINGS) {
+            if (isFinishing() || isDestroyed()) {
+                BiometricHelper.clearPendingCredentialAction();
+                return;
+            }
+            final boolean ok = resultCode == RESULT_OK;
+            // Действие и отмена приходят из BiometricHelper: только он знает,
+            // какая именно проверка запускала этот системный экран.
+            boolean hadAction = BiometricHelper.deliverCredentialResult(ok);
+            if (!ok && currentScreen == SCREEN_SETTINGS) {
                 // При отмене PIN/отпечатка возвращаем визуальный переключатель в фактическое состояние
+                rebuildSettingsContent();
+            } else if (ok && hadAction && currentScreen == SCREEN_SETTINGS) {
+                // Действие могло изменить состояние переключателей (защита скрытых).
                 rebuildSettingsContent();
             }
             return;

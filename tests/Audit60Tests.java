@@ -47,6 +47,10 @@ public final class Audit60Tests {
         diskStatsCacheIsIsolated();
         importResultHasContent();
         emptyLayoutIsNotInitialized();
+        formatWithCurrentTimeZoneIsIndependentOfSavedTimeZone();
+        formatWithCurrentTimeZoneHandlesNullDate();
+        pendingAuthActionDeliversOnce();
+        pendingAuthActionCannotMixRequests();
 
         System.out.println("Audit60Tests: " + n + " проверок пройдено");
     }
@@ -419,5 +423,112 @@ public final class Audit60Tests {
                 clear = false;
             }
         }
+    }
+
+    // ------------------------------------- 6. форматирование времени в шторке
+
+    /**
+     * Раньше в QuickShadeHelper лежали static SimpleDateFormat и метод,
+     * который менял их часовой пояс. SimpleDateFormat не потокобезопасен, а
+     * вызывается и из UI-потока, и из фонового (панель сети). Теперь форматтер
+     * создаётся внутри вызова — проверяем, что результат не зависит от
+     * предыдущих вызовов и учитывает смену часового пояса.
+     */
+    private static void formatWithCurrentTimeZoneIsIndependentOfSavedTimeZone() {
+        java.util.TimeZone original = java.util.TimeZone.getDefault();
+        try {
+            java.util.TimeZone utc = java.util.TimeZone.getTimeZone("UTC");
+            java.util.TimeZone plus3 = java.util.TimeZone.getTimeZone("Etc/GMT-3");
+            java.util.Date at = new java.util.Date(1_700_000_000_000L);
+
+            java.util.TimeZone.setDefault(utc);
+            String utcText = QuickShadeHelper.formatWithCurrentTimeZone(
+                    "HH:mm", java.util.Locale.US, at);
+
+            java.util.TimeZone.setDefault(plus3);
+            String plus3Text = QuickShadeHelper.formatWithCurrentTimeZone(
+                    "HH:mm", java.util.Locale.US, at);
+
+            check(utcText.length() == 5 && utcText.charAt(2) == ':',
+                    "время формата HH:mm, получено " + utcText);
+            // Перелёт/смена пояса должна менять время, а не «залипать» на старом.
+            check(!utcText.equals(plus3Text),
+                    "смена часового пояса меняет время: " + utcText + " -> " + plus3Text);
+
+            // Повторный вызов после возврата пояса даёт исходную строку: нет
+            // накопленного состояния (это и было свойством static-форматтера).
+            java.util.TimeZone.setDefault(utc);
+            check(utcText.equals(QuickShadeHelper.formatWithCurrentTimeZone(
+                            "HH:mm", java.util.Locale.US, at)),
+                    "повторный вызов не зависит от предыдущего");
+        } finally {
+            java.util.TimeZone.setDefault(original);
+        }
+    }
+
+    /** Пустая дата не должна ронять форматирование (был бы NPE внутри format). */
+    private static void formatWithCurrentTimeZoneHandlesNullDate() {
+        check("".equals(QuickShadeHelper.formatWithCurrentTimeZone(
+                        "HH:mm", java.util.Locale.US, null)),
+                "null-дата даёт пустую строку, а не падение");
+    }
+
+    // ---------------------------------------- 11. отложенное подтверждение PIN
+
+    /**
+     * Ответ системного экрана PIN применяется ровно один раз: действие не
+     * должно выполниться повторно, если результат придёт ещё раз (поворот
+     * экрана, повторная доставка onActivityResult).
+     */
+    private static void pendingAuthActionDeliversOnce() {
+        PendingAuthAction pending = new PendingAuthAction();
+        final int[] ran = {0};
+
+        check(!pending.has(), "новая проверка ничего не ждёт");
+        check(!pending.deliver(true), "ответ без запроса не считается нашим");
+
+        pending.set(() -> ran[0]++, () -> ran[0] += 100);
+        check(pending.has(), "ожидание зафиксировано");
+        check(pending.deliver(true), "успех применён к своему запросу");
+        check(ran[0] == 1, "действие выполнено ровно один раз, стало " + ran[0]);
+
+        check(!pending.deliver(true), "повторный успех уже не наш");
+        check(ran[0] == 1, "повторный ответ не выполняет действие снова");
+        check(!pending.has(), "после ответа ожидание снято");
+
+        // Отмена не должна запускать действие успеха — и наоборот.
+        ran[0] = 0;
+        pending.set(() -> ran[0] += 1, () -> ran[0] += 10);
+        pending.deliver(false);
+        check(ran[0] == 10, "отмена вызывает только отмену, стало " + ran[0]);
+    }
+
+    /**
+     * Главный дефект: запрос на одно действие, затем второй запрос на другое.
+     * Раньше оба жили в одном поле активности, и ответ второго мог выполнить
+     * действие первого (открыть скрытые приложения вместо экспорта копии).
+     */
+    private static void pendingAuthActionCannotMixRequests() {
+        PendingAuthAction pending = new PendingAuthAction();
+        final StringBuilder order = new StringBuilder();
+
+        pending.set(() -> order.append("A"), () -> order.append("a"));
+        // Второй запрос пришёл, пока первый ещё не ответил.
+        pending.set(() -> order.append("B"), () -> order.append("b"));
+        pending.deliver(true);
+        check("B".contentEquals(order), "выполнен только последний запрос, стало " + order);
+
+        order.setLength(0);
+        pending.set(() -> order.append("C"), () -> order.append("c"));
+        pending.clear();
+        check(!pending.has(), "clear() снимает запрос");
+        check(!pending.deliver(true), "после clear() ответ не наш");
+        check(order.length() == 0, "снятый запрос не выполняется, стало " + order);
+
+        // Исключение внутри действия не должно ломать состояние ожидания.
+        order.setLength(0);
+        pending.set(() -> { throw new IllegalStateException("сбой действия"); }, null);
+        pending.deliver(true);
+        check(!pending.has(), "после исключения ожидание всё равно снято");
     }
 }

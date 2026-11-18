@@ -1,6 +1,8 @@
 package com.doxaiz.launcher;
 
 import android.content.SharedPreferences;
+import android.os.Handler;
+import android.os.Looper;
 
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -37,6 +39,13 @@ public final class Diagnostics {
     /** Не чаще одного сброса на диск в столько миллисекунд (защита от шторма). */
     private static final long FLUSH_INTERVAL_MS = 300L;
 
+    /**
+     * Страховочный сброс: если сбой случился, а следующего не было, запись
+     * долетала до диска только при следующей ошибке — то есть могла не попасть
+     * в журнал вообще (ровно это и нужно видеть при разборе падения).
+     */
+    private static final long FLUSH_MAX_DELAY_MS = 5000L;
+
     /** Максимальная длина сообщения в записи — лишнее обрезается. */
     private static final int MAX_MESSAGE_LEN = 120;
 
@@ -49,6 +58,12 @@ public final class Diagnostics {
     private static final List<Entry> BUFFER = new ArrayList<>();
     private static SharedPreferences storage;
     private static long lastFlushMs = 0L;
+    /**
+     * Обработчик создаётся лениво: статический журнал грузится и в JVM-тестах,
+     * где настоящего Looper нет, а падать из-за этого диагностика не должна.
+     */
+    private static Handler flushHandler;
+    private static boolean flushScheduled = false;
     private static boolean loaded = false;
 
     private Diagnostics() {}
@@ -107,7 +122,11 @@ public final class Diagnostics {
                 needFlush = (now - lastFlushMs) >= FLUSH_INTERVAL_MS;
                 if (needFlush) lastFlushMs = now;
             }
-            if (needFlush) persistAsync();
+            if (needFlush) {
+                persistAsync();
+            } else {
+                scheduleFlush();
+            }
         } catch (Throwable ignored) {
             // Диагностика не имеет права влиять на работу приложения.
         }
@@ -221,6 +240,58 @@ public final class Diagnostics {
         msg = msg.replaceAll("(/[^\\s:]+/)+([^\\s/:]+)", "$2");
         if (msg.length() > MAX_MESSAGE_LEN) msg = msg.substring(0, MAX_MESSAGE_LEN) + "…";
         return msg;
+    }
+
+    /**
+     * Страховка от «тишины»: одна отложенная запись на диск, не чаще
+     * {@link #FLUSH_MAX_DELAY_MS}. Состояние под LOCK, чтобы не плодить задачи.
+     */
+    private static void scheduleFlush() {
+        synchronized (LOCK) {
+            if (flushScheduled) return;
+            flushScheduled = true;
+        }
+        try {
+            Handler handler = flushHandler;
+            if (handler == null) {
+                handler = new Handler(Looper.getMainLooper());
+                flushHandler = handler;
+            }
+            handler.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    synchronized (LOCK) {
+                        flushScheduled = false;
+                    }
+                    try {
+                        persistAsync();
+                    } catch (Throwable ignored) {
+                    }
+                }
+            }, FLUSH_MAX_DELAY_MS);
+        } catch (Throwable ignored) {
+            synchronized (LOCK) {
+                flushScheduled = false;
+            }
+        }
+    }
+
+    /**
+     * Немедленный сброс журнала на диск.
+     *
+     * Нужен там, где процесс может исчезнуть раньше, чем сработает отложенная
+     * запись ({@link #FLUSH_MAX_DELAY_MS}): уход лаунчера в фон, нехватка
+     * памяти, аварийный экран. Иначе последняя — самая важная — запись о сбое
+     * не попадала в журнал, который переживает перезапуск.
+     */
+    public static void flushNow() {
+        try {
+            synchronized (LOCK) {
+                lastFlushMs = System.currentTimeMillis();
+            }
+            persistAsync();
+        } catch (Throwable ignored) {
+        }
     }
 
     private static void persistAsync() {
