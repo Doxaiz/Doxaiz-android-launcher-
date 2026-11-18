@@ -69,6 +69,11 @@ public class LauncherChecksTest {
     }
 
     @Test
+    public void layoutSaveSnapshot() {
+        run("LayoutSaveTests", () -> LayoutSaveTests.main(new String[0]));
+    }
+
+    @Test
     public void restrictedSettingsFix() {
         run("ShizukuFixTests", () -> ShizukuFixTests.main(new String[0]));
     }
