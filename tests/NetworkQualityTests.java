@@ -27,9 +27,9 @@ public final class NetworkQualityTests {
         reprobeResultsAreDistinct();
         messagesExplainCause();
         adviceDependsOnCause();
-        signalThresholdsRespectBand();
+        onlyCellTriggersAutoReprobe();
+        levelsDecideSwitch();
         signalLevelsDontLie();
-        sensitivityShiftsThresholds();
         journalSurvivesRestart();
         placeholderHasNoFalseAdvice();
 
@@ -88,68 +88,71 @@ public final class NetworkQualityTests {
         check(fine.isEmpty(), "всё в порядке — совет не нужен");
         check(!noNet.equals(stuck) && !stuck.equals(weak) && !weak.equals(metered),
                 "советы для разных причин различаются");
-        check(weak.contains("роутер") || weak.contains("ГГц"),
-                "совет про сигнал говорит, что сделать: " + weak);
+        check(weak.contains("роутер"), "совет про сигнал говорит, что сделать: " + weak);
     }
 
-    private static void signalThresholdsRespectBand() {
-        // На 5 ГГц тревога поднимается позже: тот же −80 дБм там нормален.
-        int fast24 = NetworkQualityHelper.weakWifiThresholdDbm(Prefs.NET_MODE_BALANCED, false);
-        int fast5 = NetworkQualityHelper.weakWifiThresholdDbm(Prefs.NET_MODE_BALANCED, true);
-        check(fast5 < fast24, "порог 5 ГГц ниже порога 2,4 ГГц");
-        // Внимание: чем ВЫШЕ порог, тем раньше срабатывает тревога. Первая
-        // версия теста утверждала обратное — CI это поймал.
-        check(NetworkQualityHelper.weakWifiThresholdDbm(Prefs.NET_MODE_ACTIVE, false) > fast24,
-                "активный режим поднимает тревогу раньше сбалансированного");
+    private static void onlyCellTriggersAutoReprobe() {
+        // ГЛАВНОЕ РЕШЕНИЕ: слабый Wi-Fi больше не повод вмешиваться. Раньше
+        // лаунчер по дБм угадывал «слабый Wi-Fi» и дёргал канал, из-за чего на
+        // прошивках с умным переключением телефон прыгал Wi-Fi ↔ LTE.
+        int wifiWeak = NetworkQualityHelper.autoReprobeAction(
+                true, Prefs.NET_MODE_BALANCED, 1, -1, true, true, true, false);
+        check(wifiWeak == NetworkQualityHelper.ACTION_NONE,
+                "слабый Wi-Fi сам по себе — не повод перепроверки");
 
-        // Решение о перепроверке учитывает диапазон. −84 дБм лежит между
-        // порогами: на 2,4 ГГц (−82) это уже тревога, на 5 ГГц (−86) ещё нет.
-        check(!NetworkQualityHelper.shouldAutoReprobe(
-                        true, Prefs.NET_MODE_BALANCED, true, true, true, true, -84, true),
-                "на 5 ГГц −84 дБм не повод дёргать канал");
-        check(NetworkQualityHelper.shouldAutoReprobe(
-                        true, Prefs.NET_MODE_BALANCED, true, true, true, true, -84, false),
-                "на 2,4 ГГц −84 дБм — повод перепроверить");
-        // Выключенный контроль слабого Wi-Fi и выключенный автолеч по-прежнему важнее.
-        check(!NetworkQualityHelper.shouldAutoReprobe(
-                        true, Prefs.NET_MODE_BALANCED, false, true, true, true, -95, false),
-                "контроль слабого Wi-Fi выключен — не дёргаем");
-        check(!NetworkQualityHelper.shouldAutoReprobe(
-                        false, Prefs.NET_MODE_ACTIVE, true, true, true, true, -95, false),
-                "автоулучшение выключено — не дёргаем");
-        // Залипание канала (не validated) лечим в любом режиме, кроме выключенного.
-        check(NetworkQualityHelper.shouldAutoReprobe(
-                        true, Prefs.NET_MODE_GENTLE, false, true, false, true, -95, false),
-                "залипание канала лечим даже в мягком режиме");
-        // Нет связи — лечить нечего.
-        check(!NetworkQualityHelper.shouldAutoReprobe(
-                        true, Prefs.NET_MODE_ACTIVE, true, false, false, false, -95, false),
+        // Слабая мобильная сеть при сильном Wi-Fi — тоже не повод: переключаться
+        // некуда, а перепроверка мобильной сети, которая не активна, бессмысленна.
+        int cellWeakWifiGood = NetworkQualityHelper.autoReprobeAction(
+                true, Prefs.NET_MODE_BALANCED, 3, 1, true, true, false, true);
+        check(cellWeakWifiGood == NetworkQualityHelper.ACTION_NONE,
+                "слабая мобильная сеть при активном Wi-Fi не дёргает канал");
+
+        // Залипание канала лечим на любом транспорте: система считает, что
+        // интернета нет, и перепроверка действительно помогает.
+        check(NetworkQualityHelper.autoReprobeAction(
+                        true, Prefs.NET_MODE_BALANCED, -1, -1, true, false, true, false)
+                        == NetworkQualityHelper.ACTION_REPROBE_AND_OFFER,
+                "залипание на Wi-Fi — перепроверка и предложение переключиться");
+        check(NetworkQualityHelper.autoReprobeAction(
+                        true, Prefs.NET_MODE_GENTLE, -1, -1, true, false, true, false)
+                        == NetworkQualityHelper.ACTION_REPROBE,
+                "в мягком режиме — только перепроверка, без предложений");
+
+        // Выключенное авто-улучшение важнее любого состояния сети.
+        check(NetworkQualityHelper.autoReprobeAction(
+                        false, Prefs.NET_MODE_ACTIVE, 0, 0, true, false, false, true)
+                        == NetworkQualityHelper.ACTION_NONE,
+                "автоулучшение выключено — не вмешиваемся");
+        // Нет активной сети — лечить нечего.
+        check(NetworkQualityHelper.autoReprobeAction(
+                        true, Prefs.NET_MODE_ACTIVE, 0, 0, false, false, false, false)
+                        == NetworkQualityHelper.ACTION_NONE,
                 "без активной сети перепроверка не нужна");
     }
 
-    private static void sensitivityShiftsThresholds() {
-        int calm24 = NetworkQualityHelper.weakWifiThresholdDbm(Prefs.NET_MODE_BALANCED, false,
-                Prefs.NET_SENSITIVITY_CALM);
-        int normal24 = NetworkQualityHelper.weakWifiThresholdDbm(Prefs.NET_MODE_BALANCED, false,
-                Prefs.NET_SENSITIVITY_NORMAL);
-        int eager24 = NetworkQualityHelper.weakWifiThresholdDbm(Prefs.NET_MODE_BALANCED, false,
-                Prefs.NET_SENSITIVITY_EAGER);
-        check(calm24 < normal24 && normal24 < eager24,
-                "чем тревожнее настройка, тем выше порог тревоги");
-        check(normal24 == NetworkQualityHelper.weakWifiThresholdDbm(
-                        Prefs.NET_MODE_BALANCED, false),
-                "без указания чувствительности работает обычная");
-        check(NetworkQualityHelper.shouldAutoReprobe(
-                        true, Prefs.NET_MODE_BALANCED, true, true, true, true, -79, false,
-                        Prefs.NET_SENSITIVITY_EAGER),
-                "тревожная настройка реагирует на −79 дБм");
-        check(!NetworkQualityHelper.shouldAutoReprobe(
-                        true, Prefs.NET_MODE_BALANCED, true, true, true, true, -79, false,
-                        Prefs.NET_SENSITIVITY_CALM),
-                "терпеливая настройка на −79 дБм молчит");
-        check(NetworkQualityHelper.sensitivitySummary(Prefs.NET_MODE_BALANCED,
-                        Prefs.NET_SENSITIVITY_NORMAL).contains("2,4 ГГц"),
-                "в подписи видны оба диапазона");
+    private static void levelsDecideSwitch() {
+        // Мобильная сеть 1 из 4, Wi-Fi заметно сильнее (3+) — предложение.
+        check(NetworkQualityHelper.autoReprobeAction(
+                        true, Prefs.NET_MODE_BALANCED, 3, 1, true, true, false, true)
+                        == NetworkQualityHelper.ACTION_NONE,
+                "переключаться некуда: активна мобильная, Wi-Fi не активен — решение за системой");
+        // Уровень > 1 не считается «еле дышит».
+        check(NetworkQualityHelper.autoReprobeAction(
+                        true, Prefs.NET_MODE_BALANCED, 4, 2, true, true, true, false)
+                        == NetworkQualityHelper.ACTION_NONE,
+                "уровень 2 из 4 — не повод вмешиваться");
+
+        check(NetworkQualityHelper.rssiToLevel(-50) == 4, "−50 дБм → 4 из 4");
+        check(NetworkQualityHelper.rssiToLevel(-70) == 2, "−70 дБм → 2 из 4");
+        check(NetworkQualityHelper.rssiToLevel(-100) == 0, "−100 дБм → 0 из 4");
+        check(NetworkQualityHelper.rssiToLevel(0) == -1, "0 дБм — нет данных");
+        check(NetworkQualityHelper.signalStrengthToLevel(-60) == 4, "сырой −60 → 4");
+        check(NetworkQualityHelper.signalStrengthToLevel(-90) == 1, "сырой −90 → 1");
+        check(NetworkQualityHelper.signalStrengthToLevel(0) == -1, "сырой 0 — нет данных");
+        check(NetworkQualityHelper.levelLabel(1).equals("Слабый"), "уровень 1 — «Слабый»");
+        check(NetworkQualityHelper.levelLabel(-1).isEmpty(), "без данных — пусто");
+        check(NetworkQualityHelper.autoReprobeScopeLabel().contains("мобильная"),
+                "в подписи сказано, что работаем только с мобильной сетью");
     }
 
     private static void journalSurvivesRestart() {

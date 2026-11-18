@@ -82,7 +82,6 @@ public final class BackupHelper {
             s.put("recentsRamPos", prefs.getRecentsRamPosition());
             s.put("autoNetworkAssist", prefs.isAutoNetworkAssist());
             s.put("autoNetMode", prefs.getAutoNetworkMode());
-            s.put("autoNetWeakWifi", prefs.isAutoNetworkWeakWifi());
             if (includeHidden) s.put("protectHidden", prefs.isProtectHiddenApps());
             s.put("showDrawerCategories", prefs.isShowDrawerCategories());
             s.put("showNotifDots", prefs.isShowNotificationDots());
@@ -311,7 +310,6 @@ public final class BackupHelper {
                 if (s.has("recentsRamPos")) prefs.setRecentsRamPosition(clamp(s.optInt("recentsRamPos", Prefs.RECENTS_RAM_POS_DEFAULT), 0, 2));
                 if (s.has("autoNetworkAssist")) prefs.setAutoNetworkAssist(s.optBoolean("autoNetworkAssist", true));
                 if (s.has("autoNetMode")) prefs.setAutoNetworkMode(clamp(s.optInt("autoNetMode", Prefs.NET_MODE_BALANCED), 0, 2));
-                if (s.has("autoNetWeakWifi")) prefs.setAutoNetworkWeakWifi(s.optBoolean("autoNetWeakWifi", true));
                 if (s.has("protectHidden")) {
                     prefs.setProtectHiddenApps(resolveImportedProtectHidden(
                             wasProtected, s.optBoolean("protectHidden", false), privacyAuthVerified));

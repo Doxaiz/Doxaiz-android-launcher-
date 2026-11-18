@@ -832,8 +832,6 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         networkHelper.startForegroundMonitor(
                 prefs.isAutoNetworkAssist(),
                 prefs.getAutoNetworkMode(),
-                prefs.isAutoNetworkWeakWifi(),
-                prefs.getAutoNetworkSensitivity(),
                 (status, autoReprobed) ->
                         uiHandler.post(() -> {
                             if (isFinishing() || isDestroyed()) return;
@@ -5644,6 +5642,55 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         }
     }
 
+    /**
+     * Объяснение, зачем сети две программы.
+     *
+     * Честно: лаунчеру для «улучшения сигнала» хватает системных сигналов и
+     * перепроверки канала. Замер скорости, тесты DNS и профили операторов
+     * требуют настоящих запросов, то есть разрешения INTERNET, которого у
+     * лаунчера нет и не должно быть — поэтому это отдельное приложение автора.
+     */
+    private void showNetOptimizerInfoModal() {
+        LinearLayout box = createModalBox();
+        TextView title = new TextView(this);
+        title.setText("Лаунчер и Net Optimizer: кто за что отвечает");
+        title.setTextColor(theme.textPrimary);
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16.5f);
+        title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        box.addView(title);
+
+        TextView msg = new TextView(this);
+        msg.setText(
+                "Лаунчер (это приложение)\n"
+                        + "• Следит за мобильной сетью: залипание канала, слабый уровень (1 из 4 и ниже).\n"
+                        + "• Перепроверяет канал средствами Android и говорит причину, если не вышло.\n"
+                        + "• Работает без INTERNET: ничего не скачивает и не отправляет.\n\n"
+                        + "Net Optimizer by Doxaiz\n"
+                        + "• Реальные замеры скорости и задержки, тесты DNS, профили операторов.\n"
+                        + "• Пороги слабого Wi-Fi и переключение диапазонов — там, где есть замеры.\n"
+                        + "• Отдельное приложение, потому что ему нужен INTERNET.\n\n"
+                        + "Почему не объединить. Разрешение INTERNET даётся приложению целиком,"
+                        + " а не отдельной кнопке. Оставив лаунчер без него, мы можем обещать:"
+                        + " рабочий стол не отправляет наружу ни строчки. Для замеров — отдельная"
+                        + " программа, которую можно не ставить.");
+        msg.setTextColor(theme.textSecondary);
+        msg.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f);
+        msg.setLineSpacing(dp(2), 1.0f);
+        LinearLayout.LayoutParams mLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        mLp.topMargin = dp(10);
+        mLp.bottomMargin = dp(12);
+        box.addView(msg, mLp);
+
+        LinearLayout btns = new LinearLayout(this);
+        btns.setOrientation(LinearLayout.HORIZONTAL);
+        btns.setGravity(Gravity.END);
+        addDialogButton(btns, "Понятно", theme.accentColor, this::dismissModal);
+        box.addView(btns);
+        showModalCard(box, Gravity.CENTER, false);
+    }
+
     private void showAutoNetworkInfoModal() {
         LinearLayout box = createModalBox();
         TextView title = new TextView(this);
@@ -5655,13 +5702,15 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
         TextView msg = new TextView(this);
         msg.setText(
-                "1. В фоне — без расхода трафика\n"
-                        + "Авто-улучшение не скачивает и не отправляет ничего: оно читает только системное состояние сети Android (ACCESS_NETWORK_STATE, LinkProperties, WifiInfo). У лаунчера нет разрешения INTERNET вовсе — замер скорости и задержки живёт в отдельном приложении Net Optimizer.\n\n"
+                "1. Только мобильная сеть\n"
+                        + "Авто-улучшение работает на LTE/5G и не трогает Wi-Fi. Перепроверка канала не может усилить сигнал Wi-Fi — он зависит от роутера и расстояния, — зато на прошивках с «умным» переключением частая перепроверка Wi-Fi заставляет телефон прыгать на LTE и обратно. Сила сигнала Wi-Fi и её пороги — в Net Optimizer, где есть настоящие замеры.\n\n"
                         + "2. Три режима и тихая работа без всплывашек\n"
-                        + "• Мягкий (30 с) — перепроверяет канал только при полном залипании (NET_CAPABILITY_VALIDATED снят).\n"
-                        + "• Сбалансированный (15 с) — залипание + контроль слабого Wi-Fi (<= -82 дБм, на 5 ГГц -86 дБм).\n"
-                        + "• Активный (10 с) — быстрая реакция на залипание и просадку Wi-Fi (<= -76 дБм, на 5 ГГц -80 дБм).\n"
-                        + "Чувствительность «Терпеливая / Обычная / Тревожная» сдвигает порог на 6 дБ, чтобы не вмешиваться раньше, чем нужно. Срабатывания происходят тихо в фоне и остаются в журнале, который хранится между запусками (20 событий).\n\n"
+                        + "• Мягкий (30 с) — только полное залипание канала (NET_CAPABILITY_VALIDATED снят).\n"
+                        + "• Сбалансированный (15 с) — залипание + слабая мобильная сеть (уровень 1 из 4).\n"
+                        + "• Активный (10 с) — то же, но реакция быстрее.\n"
+                        + "Срабатывания тихие, журнал хранится между запусками (20 событий).\n\n"
+                        + "3. Без расхода трафика\n"
+                        + "Лаунчер не скачивает и не отправляет ничего: только системное состояние сети Android. У него нет разрешения INTERNET.\n\n"
                         + "3. Что приложение НЕ может без root\n"
                         + "Принудительно переключить Wi-Fi на LTE или обратно, сменить канал Wi-Fi, измерить скорость скачивания без расхода трафика. Переключение транспорта делает только система: приложение может попросить перепроверку и открыть панель подключения.\n\n"
                         + "4. Быстрый Частный DNS, панель Wi-Fi/4G и плитка «Сеть+»\n"
@@ -8426,43 +8475,21 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             mhLp.topMargin = dp(6);
             netCard.addView(modeHint, mhLp);
 
-            if (autoNetMode != Prefs.NET_MODE_GENTLE) {
-                addDivider(netCard);
-                // Чувствительность: раньше порог слабого сигнала был зашит, и
-                // человек не мог выбрать, вмешиваться раньше или позже.
-                int netSensitivity = prefs.getAutoNetworkSensitivity();
-                addOptionGroup(
-                        netCard,
-                        "Чувствительность контроля сигнала",
-                        new String[]{"Терпеливая", "Обычная", "Тревожная"},
-                        netSensitivity,
-                        idx -> {
-                            prefs.setAutoNetworkSensitivity(idx);
-                            restartNetworkMonitor();
-                            rebuildSettingsContent();
-                        }
-                );
-                TextView sensHint = new TextView(this);
-                sensHint.setText(NetworkQualityHelper.sensitivitySummary(autoNetMode, netSensitivity)
-                        + " • " + NetworkQualityHelper.sensitivityLabel(netSensitivity));
-                sensHint.setTextColor(theme.textHint);
-                sensHint.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f);
-                LinearLayout.LayoutParams shLp = new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-                );
-                shLp.topMargin = dp(6);
-                netCard.addView(sensHint, shLp);
-
-                addDivider(netCard);
-                addToggleRow(netCard, "Контроль слабого Wi-Fi",
-                        "При слабом сигнале Wi-Fi запрашивать перепроверку канала для быстрого перехода на 4G",
-                        prefs.isAutoNetworkWeakWifi(),
-                        checked -> {
-                            prefs.setAutoNetworkWeakWifi(checked);
-                            restartNetworkMonitor();
-                            rebuildSettingsContent();
-                        });
-            }
+            // Чувствительность к слабому Wi-Fi и его пороги убраны из лаунчера:
+            // решение пользователя — этим занимается Net Optimizer, где есть
+            // реальные замеры и профили операторов. Лаунчер не пытается угадать
+            // «слабый ли Wi-Fi» по дБм и не дёргает канал зря.
+            TextView scopeHint = new TextView(this);
+            scopeHint.setText(NetworkQualityHelper.autoReprobeScopeLabel()
+                    + ".\n" + NetworkQualityHelper.cellScopeSummary());
+            scopeHint.setTextColor(theme.textHint);
+            scopeHint.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f);
+            scopeHint.setLineSpacing(dp(2), 1f);
+            LinearLayout.LayoutParams scopeLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            );
+            scopeLp.topMargin = dp(8);
+            netCard.addView(scopeHint, scopeLp);
         }
 
         addDivider(netCard);
@@ -8483,12 +8510,28 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                 });
 
         addDivider(netCard);
-        // Замер задержки и работу с интернетом вынесли в отдельное приложение:
-        // лаунчер не запрашивает INTERNET и занимается только качеством сигнала.
-        addActionRow(netCard, "Замер скорости и задержки — в Net Optimizer",
-                "Отдельное приложение net-optimizer-by_doxaiz • лаунчер остаётся без INTERNET",
-                () -> NetworkQualityHelper.openInBrowser(this,
-                        "https://github.com/Doxaiz/net-optimizer-by_doxaiz"));
+        // Замер скорости, DNS-профили, операторы и VPN-перехват — в отдельном
+        // приложении автора. Лаунчер не запрашивает INTERNET: он лишь открывает
+        // уже установленное приложение или даёт поставить его.
+        String netOptVersion = NetworkQualityHelper.installedVersion(this);
+        if (netOptVersion != null) {
+            addActionRow(netCard, "Net Optimizer by Doxaiz — установлен (" + netOptVersion + ")",
+                    "Скорость, DNS, профили операторов, перехват — открыть приложение автора",
+                    () -> {
+                        if (!NetworkQualityHelper.openNetOptimizer(this)) {
+                            Toast.makeText(this, "Net Optimizer не открылся — попробуйте из списка приложений",
+                                    Toast.LENGTH_SHORT).show();
+                        }
+                    });
+        } else {
+            addActionRow(netCard, "Установить Net Optimizer by Doxaiz",
+                    "Приложение автора для скорости, DNS и сети • лаунчер остаётся без INTERNET",
+                    () -> NetworkQualityHelper.openInBrowser(this,
+                            NetworkQualityHelper.NET_OPTIMIZER_RELEASE_URL));
+        }
+        addActionRow(netCard, "Зачем лаунчеру отдельная программа для сети?",
+                "Что делает лаунчер, а что — Net Optimizer, и почему это не одно и то же",
+                this::showNetOptimizerInfoModal);
 
         addDivider(netCard);
         addActionRow(netCard, "Быстрая панель интернета (Wi-Fi / 4G)",
