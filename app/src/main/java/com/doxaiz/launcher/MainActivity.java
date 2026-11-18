@@ -5647,8 +5647,10 @@ public class MainActivity extends Activity implements AppRepository.Listener {
      *
      * Зачем окно, а не сразу браузер: без объяснения пункт «Установить программу»
      * выглядит как реклама. Здесь сказано, что именно она делает и почему её нет
-     * внутри лаунчера, и видна ссылка на репозиторий целиком — её можно открыть
-     * или запомнить. Сети это не требует: лаунчер лишь передаёт ссылку браузеру.
+     * внутри лаунчера, и видна ссылка на профиль автора целиком — её можно
+     * открыть или запомнить. Ссылка ведёт на профиль, а не на репозиторий:
+     * программа в разработке, имя может измениться, профиль — нет.
+     * Сети это не требует: лаунчер лишь передаёт ссылку браузеру.
      */
     private void showNetOptimizerCard() {
         String version = NetworkQualityHelper.installedVersion(this);
@@ -5670,7 +5672,9 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                 : "Программа автора для качества сети: реальные замеры скорости и задержки,"
                         + " тесты DNS, профили операторов, работа с сигналом.\n\nОна отдельная,"
                         + " потому что для замеров нужен INTERNET; лаунчер его не запрашивает и"
-                        + " данные наружу не отправляет.\n\n" + NetworkQualityHelper.NET_OPTIMIZER_REPO_URL);
+                        + " данные наружу не отправляет.\n\nВ профиле автора она называется «"
+                        + NetworkQualityHelper.NET_OPTIMIZER_NAME + "»:\n"
+                        + NetworkQualityHelper.AUTHOR_PROFILE_URL);
         msg.setTextColor(theme.textSecondary);
         msg.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f);
         msg.setLineSpacing(dp(2), 1.0f);
@@ -5684,9 +5688,9 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         LinearLayout btns = new LinearLayout(this);
         btns.setOrientation(LinearLayout.HORIZONTAL);
         btns.setGravity(Gravity.END);
-        addDialogButton(btns, "Репозиторий", theme.textSecondary,
+        addDialogButton(btns, "Профиль автора", theme.textSecondary,
                 () -> NetworkQualityHelper.openInBrowser(this,
-                        NetworkQualityHelper.NET_OPTIMIZER_REPO_URL));
+                        NetworkQualityHelper.AUTHOR_PROFILE_URL));
         View gap = new View(this);
         gap.setLayoutParams(new LinearLayout.LayoutParams(dp(4), 1));
         btns.addView(gap);

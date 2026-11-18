@@ -217,45 +217,51 @@ jobs:
             app/build/outputs/apk/debug/*.apk
             apk-sha256.txt
 
-      # Единственный релиз проекта обновляется НА МЕСТЕ: новые теги и релизы не
-      # создаются. Поэтому шаг только перезаписывает ассеты существующего
-      # релиза `doxaiz-test` и никогда не создаёт новый — если релиза нет,
-      # шаг тихо ничего не делает (создаёт его человек, осознанно).
+      # Публичный релиз живёт по одному тегу и обновляется НА МЕСТЕ: новых
+      # тегов не появляется, история не превращается в свалку. Нумерация начата
+      # заново с 1.0.0 — прежние тестовые релизы удалены осознанно.
       #
-      # Зачем вообще: скачать артефакт CI из некоторых окружений нельзя
-      # (заблокирован хост хранилища артефактов), а APK из релиза доступен
-      # обычной ссылкой. Так «последняя проверенная сборка» всегда лежит в
-      # одном и том же месте.
-      - name: Обновить APK в единственном релизе
+      # Если релиза `v1.0.0` ещё нет, шаг создаёт его из текущего коммита main.
+      # Зачем: скачать артефакт CI из некоторых окружений нельзя (хост хранилища
+      # артефактов заблокирован), а APK из релиза доступен обычной ссылкой.
+      - name: Опубликовать APK в релизе
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          TAG="doxaiz-test"
+          TAG="v1.0.0"
           # Причина падения должна быть в аннотации, а не только в логе:
           # первая попытка упала из-за прав GITHUB_TOKEN (contents: read).
           fail() { echo "::error title=релиз::$1"; exit 1; }
-          if ! gh release view "$TAG" >/dev/null 2>&1; then
-            echo "::notice title=релиз::релиза $TAG нет — APK не публикуется (создаётся вручную)"
-            exit 0
-          fi
           APK="$(find app/build/outputs/apk/debug -name '*.apk' | head -1)"
           [ -f "$APK" ] || fail "APK не найден в app/build/outputs/apk/debug"
-          cp "$APK" doxaiz-6.0-test.apk
-          gh release upload "$TAG" doxaiz-6.0-test.apk --clobber \
+          cp "$APK" doxaiz-1.0.0.apk
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            # Первая публикация: создаём тег и релиз из текущего main.
+            gh release create "$TAG" doxaiz-1.0.0.apk \
+              --target "$GITHUB_SHA" \
+              --title "Doxaiz 1.0.0" \
+              --notes-file RELEASE_NOTES.md \
+              || fail "не удалось создать релиз $TAG"
+            echo "::notice title=релиз::создан $TAG"
+          else
+            echo "::notice title=релиз::релиз $TAG уже есть — обновляю на месте"
+            gh release edit "$TAG" --title "Doxaiz 1.0.0" \
+              --notes-file RELEASE_NOTES.md \
+              || fail "не удалось обновить заметки релиза $TAG"
+          fi
+          gh release upload "$TAG" doxaiz-1.0.0.apk --clobber \
             || fail "не удалось обновить APK в релизе $TAG"
           gh release upload "$TAG" apk-sha256.txt --clobber || true
-          gh release edit "$TAG" --notes-file RELEASE_NOTES.md \
-            || fail "не удалось обновить заметки релиза $TAG"
           # Видео-обзор экранов лежит в репозитории (docs/), потому что загрузка
           # ассетов из рабочей среды недоступна: хост uploads.github.com не в
           # списке разрешённых. Загружает его CI, у которого доступ есть.
-          if [ -f docs/doxaiz-6.0-overview.mp4 ]; then
-            gh release upload "$TAG" docs/doxaiz-6.0-overview.mp4 --clobber \
+          if [ -f docs/doxaiz-1.0-overview.mp4 ]; then
+            gh release upload "$TAG" docs/doxaiz-1.0-overview.mp4 --clobber \
               || fail "не удалось обновить видео в релизе $TAG"
           fi
-          echo "::notice title=релиз::APK и видео обновлены в $TAG (без нового тега)"
+          echo "::notice title=релиз::APK и видео обновлены в $TAG"
 
   emulator:
     name: Запуск на эмуляторе (API 34)

@@ -10,8 +10,11 @@ android {
         applicationId "com.doxaiz.launcher"
         minSdk 26
         targetSdk 34
-        versionCode 43
-        versionName "6.0-test"
+        // Нумерация начата заново с публичного релиза 1.0.0 (было 43 / 6.0-test).
+        // versionCode обязан быть меньше следующего релиза и больше нуля;
+        // сброс в 1 безопасен, пока публичного релиза не было.
+        versionCode 1
+        versionName "1.0.0"
     }
 
     buildTypes {
