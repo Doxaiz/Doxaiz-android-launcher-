@@ -112,4 +112,15 @@ echo "[6/6] Подпись APK (apksigner v2+v3; v1 не нужен при minSd
 
 echo "[Проверка подписи и манифеста]"
 "${BUILD_TOOLS}/apksigner" verify --min-sdk-version "${MIN_SDK}" --verbose "${OUT_APK}"
+
+# SHA-256 рядом с APK: человеку нужно с чем-то сверять скачанный файл, а не
+# доверять размеру. Формат тот же, что у релиза CI (sha256sum: «хеш  имя»).
+if command -v sha256sum >/dev/null 2>&1; then
+    ( cd "$(dirname "${OUT_APK}")" && sha256sum "$(basename "${OUT_APK}")" > "${OUT_APK}.sha256" )
+    echo "[SHA-256]"
+    cat "${OUT_APK}.sha256"
+else
+    echo "sha256sum не найден — хеш не записан (на APK это не влияет)" >&2
+fi
+
 ls -lh "${OUT_APK}"
