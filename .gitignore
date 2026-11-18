@@ -11,6 +11,7 @@ local.properties
 *.dex
 *.class
 Doxaiz-Launcher.apk
+Doxaiz-Launcher.apk.sha256
 /tmp/doxaiz-build/
 
 # Ключи и секреты подписи — только вне репозитория
