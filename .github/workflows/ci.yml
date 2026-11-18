@@ -248,7 +248,14 @@ jobs:
           gh release upload "$TAG" apk-sha256.txt --clobber || true
           gh release edit "$TAG" --notes-file RELEASE_NOTES.md \
             || fail "не удалось обновить заметки релиза $TAG"
-          echo "::notice title=релиз::APK обновлён в $TAG (без нового тега)"
+          # Видео-обзор экранов лежит в репозитории (docs/), потому что загрузка
+          # ассетов из рабочей среды недоступна: хост uploads.github.com не в
+          # списке разрешённых. Загружает его CI, у которого доступ есть.
+          if [ -f docs/doxaiz-6.0-overview.mp4 ]; then
+            gh release upload "$TAG" docs/doxaiz-6.0-overview.mp4 --clobber \
+              || fail "не удалось обновить видео в релизе $TAG"
+          fi
+          echo "::notice title=релиз::APK и видео обновлены в $TAG (без нового тега)"
 
   emulator:
     name: Запуск на эмуляторе (API 34)
