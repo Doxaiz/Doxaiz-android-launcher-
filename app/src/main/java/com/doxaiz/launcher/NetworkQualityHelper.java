@@ -24,8 +24,9 @@ import java.util.Locale;
  * - Отслеживает тип сети (Wi-Fi / 4G-5G / VPN), валидацию доступа, пропускную способность,
  *   реальное состояние Частного DNS (LinkProperties API 28+), лимитность сети (NOT_METERED),
  *   уровень сигнала (API 29+) и диапазон 2,4/5 ГГц (WifiInfo из TransportInfo, API 29+).
- * - Поддерживает 3 режима (Мягкий 30с / Сбалансированный 15с / Активный 10с) + контроль
- *   слабого Wi-Fi с настраиваемой чувствительностью.
+ * - Поддерживает 3 режима (Мягкий 30с / Сбалансированный 15с / Активный 10с).
+ * - Вмешивается только на мобильной сети (LTE/5G): слабый Wi-Fi — это не то, что
+ *   лечится перепроверкой канала, им занимается отдельное приложение Net Optimizer.
  * - Работает тихо в фоне и НЕ делает сетевых запросов: авто-улучшение читает только
  *   системное состояние. Лаунчер остаётся без разрешения INTERNET: замер задержки и
  *   работа с интернетом — отдельное приложение net-optimizer-by_doxaiz (AUDIT §29.5).
@@ -36,8 +37,6 @@ public final class NetworkQualityHelper {
     /** Сколько событий держим в памяти. Пользователь выбрал 20 — столько же
      *  сохраняется на диск, поэтому история не обрывается на 6 строках. */
     public static final int MAX_LOG_EVENTS = 20;
-    private static final int WEAK_WIFI_BALANCED_DBM = -82;
-    private static final int WEAK_WIFI_ACTIVE_DBM = -76;
 
     public static final class Status {
         public final boolean connected;
@@ -59,6 +58,12 @@ public final class NetworkQualityHelper {
         public final String advice;
         /** Диапазон 5 ГГц (только для Wi-Fi). */
         public final boolean is5Ghz;
+        /** Уровень сигнала мобильной сети 0..4; -1 — данных нет. */
+        public final int cellSignalLevel;
+        /** Уровень сигнала Wi-Fi 0..4; -1 — данных нет. */
+        public final int wifiSignalLevel;
+        /** Активная сеть — мобильная (LTE/5G). */
+        public final boolean isCell;
 
         public Status(boolean connected, boolean validated, boolean hasVpn,
                       String transportName, int downMbps, int upMbps,
@@ -67,7 +72,7 @@ public final class NetworkQualityHelper {
             // ложью — сеть не проверялась вовсе.
             this(connected, validated, hasVpn, false, false, Integer.MIN_VALUE,
                     false, "", transportName, downMbps, upMbps, headline, details,
-                    formatPrivateDnsSummary(false, ""), "", false, false);
+                    formatPrivateDnsSummary(false, ""), "", false, false, -1, -1, false);
         }
 
         public Status(boolean connected, boolean validated, boolean hasVpn, boolean isWifi,
@@ -76,7 +81,7 @@ public final class NetworkQualityHelper {
                       String headline, String details, String dnsSummary, String signalSummary) {
             this(connected, validated, hasVpn, isWifi, metered, signalDbm, privateDnsActive,
                     privateDnsServer, transportName, downMbps, upMbps, headline, details,
-                    dnsSummary, signalSummary, false, true);
+                    dnsSummary, signalSummary, false, true, -1, -1, false);
         }
 
         public Status(boolean connected, boolean validated, boolean hasVpn, boolean isWifi,
@@ -86,15 +91,30 @@ public final class NetworkQualityHelper {
                       boolean is5Ghz) {
             this(connected, validated, hasVpn, isWifi, metered, signalDbm, privateDnsActive,
                     privateDnsServer, transportName, downMbps, upMbps, headline, details,
-                    dnsSummary, signalSummary, is5Ghz, true);
+                    dnsSummary, signalSummary, is5Ghz, true, -1, -1, false);
+        }
+
+        /** Полный конструктор: используется в {@link #inspect()} — там есть уровни сигнала. */
+        public Status(boolean connected, boolean validated, boolean hasVpn, boolean isWifi,
+                      boolean metered, int signalDbm, boolean privateDnsActive, String privateDnsServer,
+                      String transportName, int downMbps, int upMbps,
+                      String headline, String details, String dnsSummary, String signalSummary,
+                      boolean is5Ghz, int cellSignalLevel, int wifiSignalLevel, boolean isCell) {
+            this(connected, validated, hasVpn, isWifi, metered, signalDbm, privateDnsActive,
+                    privateDnsServer, transportName, downMbps, upMbps, headline, details,
+                    dnsSummary, signalSummary, is5Ghz, true, cellSignalLevel, wifiSignalLevel, isCell);
         }
 
         private Status(boolean connected, boolean validated, boolean hasVpn, boolean isWifi,
                        boolean metered, int signalDbm, boolean privateDnsActive, String privateDnsServer,
                        String transportName, int downMbps, int upMbps,
                        String headline, String details, String dnsSummary, String signalSummary,
-                       boolean is5Ghz, boolean withAdvice) {
+                       boolean is5Ghz, boolean withAdvice,
+                       int cellSignalLevel, int wifiSignalLevel, boolean isCell) {
             this.is5Ghz = is5Ghz;
+            this.cellSignalLevel = cellSignalLevel;
+            this.wifiSignalLevel = wifiSignalLevel;
+            this.isCell = isCell;
             this.connected = connected;
             this.validated = validated;
             this.hasVpn = hasVpn;
@@ -147,8 +167,6 @@ public final class NetworkQualityHelper {
     private ConnectivityManager.NetworkCallback activeCallback;
     private boolean activeAutoHeal = false;
     private int activeMode = -1;
-    private boolean activeWeakWifi = false;
-    private int activeSensitivity = -1;
     private volatile long lastAutoReprobeTs = 0L;
 
     private volatile boolean lastReprobeAccepted = false;
@@ -190,9 +208,9 @@ public final class NetworkQualityHelper {
             return "Перепроверка только при полном залипании канала (интервал 30 с, нулевой расход батареи)";
         }
         if (mode == Prefs.NET_MODE_ACTIVE) {
-            return "Быстрая реакция (10 с) при залипании канала и просадке слабого Wi-Fi";
+            return "Быстрая реакция (10 с) на залипание канала и слабую мобильную сеть";
         }
-        return "Оптимальный режим (15 с): устранение залипаний + контроль слабого Wi-Fi";
+        return "Оптимальный режим (15 с): залипания + слабая мобильная сеть (1 из 4)";
     }
 
     /**
@@ -220,58 +238,139 @@ public final class NetworkQualityHelper {
         UNSUPPORTED
     }
 
-    public static boolean shouldAutoReprobe(
-            boolean autoEnabled,
-            int mode,
-            boolean weakWifiEnabled,
-            boolean connected,
-            boolean validated,
-            boolean isWifi,
-            int signalDbm
-    ) {
-        if (!autoEnabled || !connected) return false;
-        if (!validated) return true;
-        if (isWifi && weakWifiEnabled && mode != Prefs.NET_MODE_GENTLE
-                && signalDbm != Integer.MIN_VALUE && signalDbm > -120 && signalDbm < 0) {
-            return signalDbm <= weakWifiThresholdDbm(mode, false);
+    /**
+     * Нужна ли автоматическая перепроверка канала — и на какую сеть переключаться.
+     *
+     * Ключевое решение: авто-улучшение работает только на МОБИЛЬНОЙ сети.
+     *
+     * Почему. `reportNetworkConnectivity()` — грубый инструмент: он не говорит
+     * системе «этот канал плохой, поищи другой», а лишь просит перепроверить
+     * текущий. На Wi-Fi он не может улучшить сигнал: сила сигнала зависит от
+     * роутера и расстояния, а не от перепроверки. Зато на прошивках с «умным»
+     * переключением частая перепроверка Wi-Fi заставляет систему уводить трафик
+     * на LTE и обратно — то есть делает связь ХУЖЕ. На мобильной сети вызов
+     * осмыслен: оценка канала оператора действительно обновляется, и телефон
+     * быстрее уходит с залипшего канала на рабочий.
+     *
+     * Что возвращает. 0 — ничего не делать; 1 — перепроверить текущую сеть;
+     * 2 — перепроверить и предложить переключиться (системная панель), потому
+     * что сеть жива, но канал действительно плохой.
+     *
+     * @param autoEnabled       включено ли авто-улучшение
+     * @param mode              режим (мягкий/сбалансированный/активный)
+     * @param cellLevel         уровень сети мобильной связи (0..4), -1 если неизвестно
+     * @param connected         есть ли активная сеть
+     * @param validated         подтверждён ли выход в интернет
+     * @param isWifi            активная сеть — Wi-Fi
+     * @param isCell            активная сеть — мобильная
+     */
+    public static int autoReprobeAction(boolean autoEnabled, int mode,
+                                       int cellLevel,
+                                       boolean connected, boolean validated,
+                                       boolean isCell) {
+        if (!autoEnabled || !connected) return ACTION_NONE;
+
+        // Залипание канала — единственный случай, когда перепроверка помогает
+        // всегда и на любом транспорте: система считает, что интернета нет.
+        if (!validated) {
+            // На сбалансированном/активном режиме заодно предлагаем выход:
+            // если сеть есть, но не отвечает, переключение транспорта реально
+            // лечит ситуацию. В мягком режиме не вмешиваемся.
+            return (mode == Prefs.NET_MODE_GENTLE) ? ACTION_REPROBE : ACTION_REPROBE_AND_OFFER;
         }
-        return false;
+
+        // Дальше — только мобильная сеть: на ней перепроверка действительно
+        // обновляет оценку канала. На Wi-Fi она ничего не усиливает, а на
+        // прошивках с «умным» переключением заставляет телефон прыгать на LTE.
+        if (!isCell) return ACTION_NONE;
+
+        // Канал рабочий, но мобильная сеть еле дышит (1 из 4) — просим систему
+        // перепроверить: если сигнал реально плох, она уйдёт на Wi-Fi сама.
+        if (cellLevel >= 0 && cellLevel <= CELL_LEVEL_WEAK) {
+            return ACTION_REPROBE;
+        }
+        return ACTION_NONE;
     }
 
-    /** То же, но с учётом диапазона Wi-Fi: на 5 ГГц порог ниже. */
-    public static boolean shouldAutoReprobe(
-            boolean autoEnabled,
-            int mode,
-            boolean weakWifiEnabled,
-            boolean connected,
-            boolean validated,
-            boolean isWifi,
-            int signalDbm,
-            boolean is5Ghz
-    ) {
-        return shouldAutoReprobe(autoEnabled, mode, weakWifiEnabled, connected, validated,
-                isWifi, signalDbm, is5Ghz, Prefs.NET_SENSITIVITY_NORMAL);
+    /** Ничего не делать. */
+    public static final int ACTION_NONE = 0;
+    /** Перепроверить текущий канал. */
+    public static final int ACTION_REPROBE = 1;
+    /** Перепроверить и предложить переключиться на другую сеть. */
+    public static final int ACTION_REPROBE_AND_OFFER = 2;
+
+    /** Уровень мобильной сети, при котором она считается «еле дышит» (из 4). */
+    public static final int CELL_LEVEL_WEAK = 1;
+
+    /** Подпись для интерфейса: что именно сделает авто-улучшение. */
+    public static String autoReprobeScopeLabel() {
+        return "Только мобильная сеть: Wi-Fi не трогаем, им занимается Net Optimizer";
     }
 
-    /** То же с явной чувствительностью — её выбирает пользователь в настройках. */
-    public static boolean shouldAutoReprobe(
-            boolean autoEnabled,
-            int mode,
-            boolean weakWifiEnabled,
-            boolean connected,
-            boolean validated,
-            boolean isWifi,
-            int signalDbm,
-            boolean is5Ghz,
-            int sensitivity
-    ) {
-        if (!autoEnabled || !connected) return false;
-        if (!validated) return true;
-        if (isWifi && weakWifiEnabled && mode != Prefs.NET_MODE_GENTLE
-                && signalDbm != Integer.MIN_VALUE && signalDbm > -120 && signalDbm < 0) {
-            return signalDbm <= weakWifiThresholdDbm(mode, is5Ghz, sensitivity);
+    /** Уровень сигнала (0..4) для сотовой сети из NetworkCapabilities. */
+    public static int cellSignalLevel(NetworkCapabilities caps) {
+        if (caps == null) return -1;
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            try {
+                return clampLevel(caps.getSignalStrength());
+            } catch (Throwable ignored) {
+            }
         }
-        return false;
+        return -1;
+    }
+
+    /** Уровень сигнала (0..4) для Wi-Fi из WifiInfo без разрешений. */
+    public static int wifiSignalLevel(NetworkCapabilities caps) {
+        if (caps == null) return -1;
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            try {
+                android.net.TransportInfo ti = caps.getTransportInfo();
+                if (ti instanceof android.net.wifi.WifiInfo) {
+                    int rssi = ((android.net.wifi.WifiInfo) ti).getRssi();
+                    // RSSI в дБм → 0..4 по тем же границам, что ниже в signalLevel.
+                    return clampLevel(rssiToLevel(rssi));
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        return -1;
+    }
+
+    /** Пересчёт RSSI (дБм) в уровень 0..4. Чистая функция — её проверяет тест. */
+    public static int rssiToLevel(int rssi) {
+        if (rssi == Integer.MIN_VALUE || rssi <= -120 || rssi >= 0) return -1;
+        if (rssi >= -58) return 4;
+        if (rssi >= -67) return 3;
+        if (rssi >= -75) return 2;
+        if (rssi >= -85) return 1;
+        return 0;
+    }
+
+    /**
+     * Уровень из «сырых» единиц Android (дБм, примерно −113..−55) в 0..4.
+     *
+     * Границы выбраны так, чтобы −60 дБм (нормальный LTE) давал 4, а −90 дБм
+     * (крайний случай) — 1. Точная семантика у разных сетей своя (RSRP/RSRQ),
+     * поэтому шкала намеренно грубая: она нужна только для «вмешиваться или нет».
+     *
+     * @return 0..4 либо −1, если данных нет
+     */
+    public static int signalStrengthToLevel(int raw) {
+        // ВАЖНО: дБм отрицательные, поэтому «raw <= 0» отсекало бы ВСЕ реальные
+        // значения и уровень всегда был бы «нет данных» — именно эта ошибка и
+        // делала проверку слабой мобильной сети мёртвой. Нет данных — это 0 и
+        // положительные значения (так Android сообщает «неизвестно»).
+        if (raw >= -2 || raw < -140) return -1;
+        if (raw >= -65) return 4;
+        if (raw >= -75) return 3;
+        if (raw >= -85) return 2;
+        if (raw >= -95) return 1;
+        return 0;
+    }
+
+    static int clampLevel(int level) {
+        if (level < 0) return -1;
+        return Math.min(4, level);
     }
 
     public static String formatSignalQuality(int dbm) {
@@ -325,43 +424,26 @@ public final class NetworkQualityHelper {
     }
 
     /**
-     * Порог «слабого Wi-Fi» для авто-перепроверки.
+     * Подпись к уровню сети (0..4) для интерфейса.
      *
-     * Вынесен отдельно, чтобы его проверял тест: на 5 ГГц тревога должна
-     * подниматься позже, иначе приложение дёргает канал там, где он в порядке.
+     * Уровни, а не дБм: лаунчер больше не решает за Wi-Fi, «слабый» ли сигнал —
+     * это делает Net Optimizer с реальными замерами. Здесь достаточно грубой
+     * шкалы, которую даёт сама система.
      */
-    public static int weakWifiThresholdDbm(int mode, boolean is5Ghz) {
-        return weakWifiThresholdDbm(mode, is5Ghz, Prefs.NET_SENSITIVITY_NORMAL);
+    public static String levelLabel(int level) {
+        switch (level) {
+            case 4: return "Отличный";
+            case 3: return "Хороший";
+            case 2: return "Средний";
+            case 1: return "Слабый";
+            case 0: return "Очень слабый";
+            default: return "";
+        }
     }
 
-    /**
-     * Порог «слабого Wi-Fi» с учётом выбранной чувствительности.
-     *
-     * Решение пользователя: пороги зависят от диапазона и от того, насколько
-     * рано человек хочет, чтобы лаунчер вмешивался. Терпеливая настройка
-     * опускает порог на 6 дБ (сигнал должен стать совсем плохим), тревожная —
-     * поднимает на 6 дБ. Сдвиг в дБ, а не готовое число, чтобы правка базовых
-     * порогов не превращала уже выбранную настройку в другую.
-     */
-    public static int weakWifiThresholdDbm(int mode, boolean is5Ghz, int sensitivity) {
-        int base = (mode == Prefs.NET_MODE_ACTIVE) ? WEAK_WIFI_ACTIVE_DBM : WEAK_WIFI_BALANCED_DBM;
-        if (is5Ghz) base -= 4;
-        if (sensitivity == Prefs.NET_SENSITIVITY_CALM) base -= 6;
-        else if (sensitivity == Prefs.NET_SENSITIVITY_EAGER) base += 6;
-        return base;
-    }
-
-    /** Подпись для интерфейса: какие пороги действуют сейчас. */
-    public static String sensitivitySummary(int mode, int sensitivity) {
-        int dbm24 = weakWifiThresholdDbm(mode, false, sensitivity);
-        int dbm5 = weakWifiThresholdDbm(mode, true, sensitivity);
-        return "Порог тревоги: " + dbm24 + " дБм (2,4 ГГц) / " + dbm5 + " дБм (5 ГГц)";
-    }
-
-    public static String sensitivityLabel(int sensitivity) {
-        if (sensitivity == Prefs.NET_SENSITIVITY_CALM) return "Терпеливая";
-        if (sensitivity == Prefs.NET_SENSITIVITY_EAGER) return "Тревожная";
-        return "Обычная";
+    /** Подпись для интерфейса: как считается «еле дышит» у мобильной сети. */
+    public static String cellScopeSummary() {
+        return "Тревога при уровне 1 из 4 или ниже — система сама решит, уходить ли на Wi-Fi";
     }
 
     /**
@@ -385,8 +467,10 @@ public final class NetworkQualityHelper {
         }
         String level = signalLevel(signalDbm, is5Ghz);
         if (isWifi && "Слабый".equals(level)) {
-            return "Сигнал слабый: подойдите ближе к роутеру или переключитесь на "
-                    + (is5Ghz ? "2,4 ГГц" : "5 ГГц");
+            // Пороги Wi-Fi и замеры — в Net Optimizer; здесь только честная
+            // подсказка, что именно он умеет лучше лаунчера.
+            return "Сигнал Wi-Fi слабый: подойдите ближе к роутеру. Точные пороги"
+                    + " и замер — в Net Optimizer";
         }
         if (isWifi && privateDnsActive && metered) {
             return "Частный DNS включён на лимитной сети: при медленном ответе "
@@ -471,6 +555,10 @@ public final class NetworkQualityHelper {
                 }
             }
             boolean is5Ghz = is5GhzWifi(isWifi, wifiFrequencyMhz);
+            // Уровни сети (0..4) — по ним принимается решение «вмешиваться ли».
+            // ДБм остаётся только для показа: решение о Wi-Fi больше не наше.
+            int cellLevel = cellSignalLevel(caps);
+            int wifiLevel = wifiSignalLevel(caps);
 
             String transport;
             if (isWifi) transport = "Wi-Fi";
@@ -514,7 +602,8 @@ public final class NetworkQualityHelper {
 
             return new Status(true, validated, isVpn, isWifi, metered, signalDbm,
                     dnsActive, dnsServer, transport, downMbps, upMbps,
-                    headline, det.toString(), dnsSummary, sigSummary, is5Ghz);
+                    headline, det.toString(), dnsSummary, sigSummary, is5Ghz,
+                    cellLevel, wifiLevel, isCell);
         } catch (Throwable ignored) {
             return new Status(false, false, false, "Нет данных", 0, 0,
                     "Не удалось проверить сеть", "Откройте системные параметры сети");
@@ -956,33 +1045,25 @@ public final class NetworkQualityHelper {
     }
 
     public synchronized void startForegroundMonitor(final boolean autoHealEnabled, final AutoHealListener listener) {
-        startForegroundMonitor(autoHealEnabled, Prefs.NET_MODE_BALANCED,
-                prefs.isAutoNetworkWeakWifi(), prefs.getAutoNetworkSensitivity(), listener);
+        startForegroundMonitor(autoHealEnabled, Prefs.NET_MODE_BALANCED, listener);
     }
 
+    /**
+     * Регистрация системного колбэка сети.
+     *
+     * Параметров «контроль слабого Wi-Fi» и «чувствительность» больше нет: они
+     * относились к Wi-Fi, а пороги силы сигнала Wi-Fi переехали в Net Optimizer
+     * (там реальные замеры). Лаунчер следит за мобильной сетью и залипанием.
+     */
     public synchronized void startForegroundMonitor(
             final boolean autoHealEnabled,
             final int mode,
-            final boolean weakWifiEnabled,
-            final AutoHealListener listener
-    ) {
-        startForegroundMonitor(autoHealEnabled, mode, weakWifiEnabled,
-                prefs.getAutoNetworkSensitivity(), listener);
-    }
-
-    public synchronized void startForegroundMonitor(
-            final boolean autoHealEnabled,
-            final int mode,
-            final boolean weakWifiEnabled,
-            final int sensitivity,
             final AutoHealListener listener
     ) {
         // Не перерегистрируем системный NetworkCallback впустую, если параметры не изменились
         if (activeCallback != null
                 && activeAutoHeal == autoHealEnabled
-                && activeMode == mode
-                && activeWeakWifi == weakWifiEnabled
-                && activeSensitivity == sensitivity) {
+                && activeMode == mode) {
             return;
         }
         stopForegroundMonitor();
@@ -991,24 +1072,22 @@ public final class NetworkQualityHelper {
             activeCallback = new ConnectivityManager.NetworkCallback() {
                 @Override
                 public void onCapabilitiesChanged(Network network, NetworkCapabilities caps) {
-                    evaluate(autoHealEnabled, mode, weakWifiEnabled, sensitivity, listener);
+                    evaluate(autoHealEnabled, mode, listener);
                 }
 
                 @Override
                 public void onAvailable(Network network) {
-                    evaluate(autoHealEnabled, mode, weakWifiEnabled, sensitivity, listener);
+                    evaluate(autoHealEnabled, mode, listener);
                 }
 
                 @Override
                 public void onLost(Network network) {
-                    evaluate(false, mode, false, sensitivity, listener);
+                    evaluate(false, mode, listener);
                 }
             };
             cm.registerDefaultNetworkCallback(activeCallback);
             activeAutoHeal = autoHealEnabled;
             activeMode = mode;
-            activeWeakWifi = weakWifiEnabled;
-            activeSensitivity = sensitivity;
         } catch (Throwable ignored) {
             activeCallback = null;
             activeMode = -1;
@@ -1023,22 +1102,25 @@ public final class NetworkQualityHelper {
             }
             activeCallback = null;
             activeMode = -1;
-            activeSensitivity = -1;
         }
     }
 
-    private void evaluate(boolean autoHealEnabled, int mode, boolean weakWifiEnabled,
-                          int sensitivity, AutoHealListener listener) {
+    private void evaluate(boolean autoHealEnabled, int mode, AutoHealListener listener) {
         Status st = inspect();
         boolean healed = false;
-        if (!permissionDeniedThisSession
-                && shouldAutoReprobe(autoHealEnabled, mode, weakWifiEnabled,
-                st.connected, st.validated, st.isWifi, st.signalDbm, st.is5Ghz, sensitivity)) {
+        // Решение принимает чистая функция autoReprobeAction — её проверяет тест,
+        // поэтому «когда вмешиваться» не спрятано в колбэке системного API.
+        int action = autoReprobeAction(autoHealEnabled, mode,
+                st.cellSignalLevel,
+                st.connected, st.validated, st.isCell);
+        if (action != ACTION_NONE && !permissionDeniedThisSession) {
             long now = SystemClock.elapsedRealtime();
             long cooldown = cooldownForMode(mode);
             if (lastAutoReprobeTs == 0L || (now - lastAutoReprobeTs) >= cooldown) {
                 lastAutoReprobeTs = now;
-                String reason = !st.validated ? "Авто: залипание канала" : "Авто: слабый Wi-Fi";
+                String reason = !st.validated
+                        ? "Авто: залипание канала"
+                        : "Авто: слабая мобильная сеть";
                 healed = triggerSystemReprobe(reason);
             }
         }
@@ -1095,6 +1177,49 @@ public final class NetworkQualityHelper {
                 return;
             } catch (Throwable ignored) {
             }
+        }
+    }
+
+    /**
+     * Пакет отдельного приложения автора для работы с интернетом.
+     *
+     * Лаунчер не запрашивает INTERNET и не меряет скорость. Всё, что связано с
+     * замером, DNS-профилями, операторами и VPN-перехватом, живёт в Net
+     * Optimizer. Здесь только точка входа: «открыть, если установлен» либо
+     * «поставить», без запросов из лаунчера.
+     */
+    public static final String NET_OPTIMIZER_PACKAGE = "com.doxaiz.netoptimizer";
+
+    /** Ссылка на репозиторий автора — то, что человек видит в интерфейсе. */
+    public static final String NET_OPTIMIZER_REPO_URL =
+            "https://github.com/Doxaiz/net-optimizer-by_doxaiz";
+
+    /** Страница последнего релиза Net Optimizer (браузер, не наш процесс). */
+    public static final String NET_OPTIMIZER_RELEASE_URL =
+            NET_OPTIMIZER_REPO_URL + "/releases/latest";
+
+    /** Версия установленного Net Optimizer или null. */
+    public static String installedVersion(Context ctx) {
+        try {
+            android.content.pm.PackageInfo pi = ctx.getPackageManager()
+                    .getPackageInfo(NET_OPTIMIZER_PACKAGE, 0);
+            return (pi.versionName != null) ? pi.versionName : "?";
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    /** Открыть установленный Net Optimizer; false — если он не ставился. */
+    public static boolean openNetOptimizer(Context ctx) {
+        try {
+            Intent i = ctx.getPackageManager()
+                    .getLaunchIntentForPackage(NET_OPTIMIZER_PACKAGE);
+            if (i == null) return false;
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            ctx.startActivity(i);
+            return true;
+        } catch (Throwable ignored) {
+            return false;
         }
     }
 
