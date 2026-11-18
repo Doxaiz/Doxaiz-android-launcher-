@@ -61,7 +61,7 @@ public final class NetworkQualityTests {
         String noEffect = NetworkQualityHelper.reprobeMessage(
                 NetworkQualityHelper.ReprobeResult.NO_EFFECT);
         check(!noPerm.equals(noEffect), "у «нет права» свой текст");
-        check(noPerm.toLowerCase(java.util.Locale.ROOT).contains("настройк"),
+        check(noPerm.toLowerCase(java.util.Locale.ROOT).contains("изменение настроек"),
                 "в тексте про право сказано, что включить: " + noPerm);
         for (NetworkQualityHelper.ReprobeResult r : NetworkQualityHelper.ReprobeResult.values()) {
             String msg = NetworkQualityHelper.reprobeMessage(r);
