@@ -1,0 +1,26 @@
+name: Предложение
+description: Идея функции или улучшения
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Какую задачу это решает
+      description: Лучше описать ситуацию, а не готовое решение.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Как это могло бы работать
+    validations:
+      required: false
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Границы проекта
+      options:
+        - label: Предложение не требует разрешения INTERNET (лаунчер сознательно работает без сети)
+          required: false
+        - label: Предложение не требует root
+          required: false

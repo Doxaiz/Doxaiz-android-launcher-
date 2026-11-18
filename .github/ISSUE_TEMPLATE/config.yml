@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Вопрос по установке и службе спецвозможностей
+    url: https://github.com/Doxaiz/Doxaiz-android-launcher-/blob/main/README.md#если-служба-не-включается-настройки-с-ограниченным-доступом
+    about: Пошаговый разбор «Настроек с ограниченным доступом» на Android 13+, Shizuku и ADB
+  - name: Известные ограничения и аудит
+    url: https://github.com/Doxaiz/Doxaiz-android-launcher-/blob/main/docs/maintenance/AUDIT.md
+    about: Что проверено, что осталось открытым и почему
