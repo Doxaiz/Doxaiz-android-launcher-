@@ -102,13 +102,14 @@ public final class NetworkQualityTests {
         check(NetworkQualityHelper.weakWifiThresholdDbm(Prefs.NET_MODE_ACTIVE, false) > fast24,
                 "активный режим поднимает тревогу раньше сбалансированного");
 
-        // Решение о перепроверке учитывает диапазон.
+        // Решение о перепроверке учитывает диапазон. −84 дБм лежит между
+        // порогами: на 2,4 ГГц (−82) это уже тревога, на 5 ГГц (−86) ещё нет.
         check(!NetworkQualityHelper.shouldAutoReprobe(
-                        true, Prefs.NET_MODE_BALANCED, true, true, true, true, -88, true),
-                "на 5 ГГц −88 дБм не повод дёргать канал");
+                        true, Prefs.NET_MODE_BALANCED, true, true, true, true, -84, true),
+                "на 5 ГГц −84 дБм не повод дёргать канал");
         check(NetworkQualityHelper.shouldAutoReprobe(
-                        true, Prefs.NET_MODE_BALANCED, true, true, true, true, -88, false),
-                "на 2,4 ГГц −88 дБм — повод перепроверить");
+                        true, Prefs.NET_MODE_BALANCED, true, true, true, true, -84, false),
+                "на 2,4 ГГц −84 дБм — повод перепроверить");
         // Выключенный контроль слабого Wi-Fi и выключенный автолеч по-прежнему важнее.
         check(!NetworkQualityHelper.shouldAutoReprobe(
                         true, Prefs.NET_MODE_BALANCED, false, true, true, true, -95, false),
