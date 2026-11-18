@@ -3219,6 +3219,76 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         pageSingleHint.setVisibility(View.VISIBLE);
     }
 
+    /**
+     * Объяснение «Настроек с ограниченным доступом» с двумя кнопками.
+     *
+     * Показывается вместо тупика: человек открывает спецвозможности, видит
+     * отказ системы и не знает, что переключатель службы серый не из-за
+     * прошивки и не из-за Doxaiz, а потому что Android 13+ запрещает
+     * спецвозможности приложению, установленному из APK вручную.
+     *
+     * Кнопки ведут туда, где ограничение снимается (настройки приложения)
+     * и туда, где после этого включается служба.
+     */
+    private void showRestrictedSettingsHelp() {
+        LinearLayout box = createModalBox();
+
+        TextView title = new TextView(this);
+        title.setText("Настройки с ограниченным доступом");
+        title.setTextColor(theme.textPrimary);
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
+        title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        box.addView(title);
+
+        TextView why = new TextView(this);
+        why.setText(AccessibilitySetup.restrictedSettingsReason());
+        why.setTextColor(theme.textSecondary);
+        why.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        why.setLineSpacing(dp(3), 1f);
+        LinearLayout.LayoutParams wLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        wLp.topMargin = dp(8);
+        box.addView(why, wLp);
+
+        TextView steps = new TextView(this);
+        steps.setText(AccessibilitySetup.restrictedSettingsStep());
+        steps.setTextColor(theme.textPrimary);
+        steps.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f);
+        steps.setLineSpacing(dp(4), 1f);
+        steps.setBackground(GlassTheme.makeGlassRect(
+                this, theme.chipInactiveBg, theme.cardBorderColor, 14f, 1f
+        ));
+        steps.setPadding(dp(14), dp(12), dp(14), dp(12));
+        LinearLayout.LayoutParams sLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        sLp.topMargin = dp(12);
+        sLp.bottomMargin = dp(14);
+        box.addView(steps, sLp);
+
+        // Кнопки идут в порядке шагов: сначала снять ограничение, потом включить службу.
+        addModalAction(box, "Шаг 1 · Снять ограничение\n"
+                        + "Настройки → Приложения → Doxaiz → «"
+                        + AccessibilitySetup.RESTRICTED_SETTINGS_TITLE + "»",
+                theme.accentColor, () -> {
+                    dismissModal();
+                    if (!AccessibilitySetup.openRestrictedSettings(this)) {
+                        Toast.makeText(this, "Не удалось открыть настройки",
+                                Toast.LENGTH_SHORT).show();
+                    }
+                });
+        addModalAction(box, "Шаг 2 · Открыть спецвозможности\n"
+                        + "там включите «Doxaiz — Панель ОЗУ и блокировка»",
+                theme.textPrimary, () -> {
+                    dismissModal();
+                    AccessibilitySetup.open(this, null);
+                });
+        addModalAction(box, "Закрыть", theme.textSecondary, this::dismissModal);
+
+        showModalCard(box, Gravity.CENTER, false);
+    }
+
     /** Короткое объяснение и две кнопки: добавить страницу или открыть «Страницы». */
     private void showSinglePageHintModal() {
         LinearLayout box = createModalBox();
@@ -8168,6 +8238,10 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             addActionRow(recentsRamCard, "Активировать панель ОЗУ и мусорку в недавних",
                     "Спец. возможности → Doxaiz (работает по умолчанию)",
                     this::openAccessibilitySettings);
+            addDivider(recentsRamCard);
+            addActionRow(recentsRamCard, "Служба не включается? «Настройки с ограниченным доступом»",
+                    "Android 13+: сначала снять ограничение в настройках приложения — два шага",
+                    this::showRestrictedSettingsHelp);
             settingsContent.addView(recentsRamCard);
         }
 
@@ -8682,7 +8756,19 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                 });
         addDivider(card);
         addReadinessRow(card, "bolt", "Служба жестов и ОЗУ", "ОЗУ в недавних, блокировка и снимок",
-                okA11y, this::openAccessibilitySettings);
+                okA11y, () -> {
+                    // Пока служба выключена, сначала объясняем порядок шагов:
+                    // при установке из APK на Android 13+ переключатель в
+                    // спецвозможностях серый до снятия ограничения.
+                    if (DoxaizLockService.isRunning()) openAccessibilitySettings();
+                    else showRestrictedSettingsHelp();
+                });
+        if (!okA11y) {
+            addDivider(card);
+            addReadinessRow(card, "lock", "Настройки с ограниченным доступом",
+                    "Android 13+: снять ограничение в настройках приложения",
+                    false, this::showRestrictedSettingsHelp);
+        }
         addDivider(card);
         addReadinessRow(card, "sun", "Яркость и сон экрана", "Ползунок яркости, автояркость и тайм-аут",
                 okWrite, () -> {
