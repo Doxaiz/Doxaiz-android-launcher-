@@ -58,6 +58,11 @@ public class LauncherChecksTest {
         run("GestureRulesTests", () -> GestureRulesTests.main(new String[0]));
     }
 
+    @Test
+    public void pagerScrollRules() {
+        run("PagerRulesTests", () -> PagerRulesTests.main(new String[0]));
+    }
+
     private interface Check {
         void run() throws Exception;
     }
