@@ -258,7 +258,6 @@ public final class NetworkQualityHelper {
      *
      * @param autoEnabled       включено ли авто-улучшение
      * @param mode              режим (мягкий/сбалансированный/активный)
-     * @param wifiLevel         уровень сети Wi-Fi (0..4, 4 — почти рядом с роутером), -1 если неизвестно
      * @param cellLevel         уровень сети мобильной связи (0..4), -1 если неизвестно
      * @param connected         есть ли активная сеть
      * @param validated         подтверждён ли выход в интернет
@@ -266,9 +265,9 @@ public final class NetworkQualityHelper {
      * @param isCell            активная сеть — мобильная
      */
     public static int autoReprobeAction(boolean autoEnabled, int mode,
-                                       int wifiLevel, int cellLevel,
+                                       int cellLevel,
                                        boolean connected, boolean validated,
-                                       boolean isWifi, boolean isCell) {
+                                       boolean isCell) {
         if (!autoEnabled || !connected) return ACTION_NONE;
 
         // Залипание канала — единственный случай, когда перепроверка помогает
@@ -280,15 +279,15 @@ public final class NetworkQualityHelper {
             return (mode == Prefs.NET_MODE_GENTLE) ? ACTION_REPROBE : ACTION_REPROBE_AND_OFFER;
         }
 
-        // Дальше — только мобильная сеть. Wi-Fi не трогаем: пороги силы сигнала
-        // для Wi-Fi живут в Net Optimizer, где есть реальные замеры.
+        // Дальше — только мобильная сеть: на ней перепроверка действительно
+        // обновляет оценку канала. На Wi-Fi она ничего не усиливает, а на
+        // прошивках с «умным» переключением заставляет телефон прыгать на LTE.
         if (!isCell) return ACTION_NONE;
 
-        // Канал рабочий, но мобильная сеть еле дышит: Wi-Fi есть и заметно
-        // сильнее — предлагаем переключиться на него (система решает сама).
-        if (wifiLevel >= 0 && cellLevel >= 0 && mode != Prefs.NET_MODE_GENTLE
-                && cellLevel <= CELL_LEVEL_WEAK && wifiLevel >= wifiLevelOf(cellLevel) + 2) {
-            return ACTION_REPROBE_AND_OFFER;
+        // Канал рабочий, но мобильная сеть еле дышит (1 из 4) — просим систему
+        // перепроверить: если сигнал реально плох, она уйдёт на Wi-Fi сама.
+        if (cellLevel >= 0 && cellLevel <= CELL_LEVEL_WEAK) {
+            return ACTION_REPROBE;
         }
         return ACTION_NONE;
     }
@@ -300,13 +299,8 @@ public final class NetworkQualityHelper {
     /** Перепроверить и предложить переключиться на другую сеть. */
     public static final int ACTION_REPROBE_AND_OFFER = 2;
 
-    /** Уровень мобильной сети, ниже которого она считается «еле дышит» (из 4). */
+    /** Уровень мобильной сети, при котором она считается «еле дышит» (из 4). */
     public static final int CELL_LEVEL_WEAK = 1;
-
-    /** Уровень, с которого Wi-Fi считается заметно лучше мобильной сети. */
-    static int wifiLevelOf(int cellLevel) {
-        return (cellLevel >= 3) ? 2 : 1;
-    }
 
     /** Подпись для интерфейса: что именно сделает авто-улучшение. */
     public static String autoReprobeScopeLabel() {
@@ -437,8 +431,7 @@ public final class NetworkQualityHelper {
 
     /** Подпись для интерфейса: как считается «еле дышит» у мобильной сети. */
     public static String cellScopeSummary() {
-        return "Тревога при уровне 1 из 4 или ниже; предложение переключиться —"
-                + " если Wi-Fi сильнее минимум на 2 ступени";
+        return "Тревога при уровне 1 из 4 или ниже — система сама решит, уходить ли на Wi-Fi";
     }
 
     /**
@@ -1106,8 +1099,8 @@ public final class NetworkQualityHelper {
         // Решение принимает чистая функция autoReprobeAction — её проверяет тест,
         // поэтому «когда вмешиваться» не спрятано в колбэке системного API.
         int action = autoReprobeAction(autoHealEnabled, mode,
-                st.wifiSignalLevel, st.cellSignalLevel,
-                st.connected, st.validated, st.isWifi, st.isCell);
+                st.cellSignalLevel,
+                st.connected, st.validated, st.isCell);
         if (action != ACTION_NONE && !permissionDeniedThisSession) {
             long now = SystemClock.elapsedRealtime();
             long cooldown = cooldownForMode(mode);
@@ -1185,14 +1178,13 @@ public final class NetworkQualityHelper {
      */
     public static final String NET_OPTIMIZER_PACKAGE = "com.doxaiz.netoptimizer";
 
+    /** Ссылка на репозиторий автора — то, что человек видит в интерфейсе. */
+    public static final String NET_OPTIMIZER_REPO_URL =
+            "https://github.com/Doxaiz/net-optimizer-by_doxaiz";
+
     /** Страница последнего релиза Net Optimizer (браузер, не наш процесс). */
     public static final String NET_OPTIMIZER_RELEASE_URL =
-            "https://github.com/Doxaiz/net-optimizer-by_doxaiz/releases/latest";
-
-    /** Установлен ли Net Optimizer. Ошибки доступа трактуем как «не установлен». */
-    public static boolean isNetOptimizerInstalled(Context ctx) {
-        return installedVersion(ctx) != null;
-    }
+            NET_OPTIMIZER_REPO_URL + "/releases/latest";
 
     /** Версия установленного Net Optimizer или null. */
     public static String installedVersion(Context ctx) {

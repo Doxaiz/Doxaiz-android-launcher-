@@ -5643,36 +5643,34 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     }
 
     /**
-     * Объяснение, зачем сети две программы.
+     * Одно окно про программу автора: установлена — открыть, нет — установить.
      *
-     * Честно: лаунчеру для «улучшения сигнала» хватает системных сигналов и
-     * перепроверки канала. Замер скорости, тесты DNS и профили операторов
-     * требуют настоящих запросов, то есть разрешения INTERNET, которого у
-     * лаунчера нет и не должно быть — поэтому это отдельное приложение автора.
+     * Зачем окно, а не сразу браузер: без объяснения пункт «Установить программу»
+     * выглядит как реклама. Здесь сказано, что именно она делает и почему её нет
+     * внутри лаунчера, и видна ссылка на репозиторий целиком — её можно открыть
+     * или запомнить. Сети это не требует: лаунчер лишь передаёт ссылку браузеру.
      */
-    private void showNetOptimizerInfoModal() {
+    private void showNetOptimizerCard() {
+        String version = NetworkQualityHelper.installedVersion(this);
         LinearLayout box = createModalBox();
         TextView title = new TextView(this);
-        title.setText("Лаунчер и Net Optimizer: кто за что отвечает");
+        title.setText(version != null
+                ? "Net Optimizer установлен (" + version + ")"
+                : "Улучшение сети: Net Optimizer by Doxaiz");
         title.setTextColor(theme.textPrimary);
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16.5f);
         title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         box.addView(title);
 
         TextView msg = new TextView(this);
-        msg.setText(
-                "Лаунчер (это приложение)\n"
-                        + "• Следит за мобильной сетью: залипание канала, слабый уровень (1 из 4 и ниже).\n"
-                        + "• Перепроверяет канал средствами Android и говорит причину, если не вышло.\n"
-                        + "• Работает без INTERNET: ничего не скачивает и не отправляет.\n\n"
-                        + "Net Optimizer by Doxaiz\n"
-                        + "• Реальные замеры скорости и задержки, тесты DNS, профили операторов.\n"
-                        + "• Пороги слабого Wi-Fi и переключение диапазонов — там, где есть замеры.\n"
-                        + "• Отдельное приложение, потому что ему нужен INTERNET.\n\n"
-                        + "Почему не объединить. Разрешение INTERNET даётся приложению целиком,"
-                        + " а не отдельной кнопке. Оставив лаунчер без него, мы можем обещать:"
-                        + " рабочий стол не отправляет наружу ни строчки. Для замеров — отдельная"
-                        + " программа, которую можно не ставить.");
+        msg.setText(version != null
+                ? "Открыть приложение автора: замеры скорости и задержки, тесты DNS,"
+                        + " профили операторов, работа с сигналом.\n\nЛаунчер при этом"
+                        + " остаётся без INTERNET — он не отправляет данные наружу."
+                : "Программа автора для качества сети: реальные замеры скорости и задержки,"
+                        + " тесты DNS, профили операторов, работа с сигналом.\n\nОна отдельная,"
+                        + " потому что для замеров нужен INTERNET; лаунчер его не запрашивает и"
+                        + " данные наружу не отправляет.\n\n" + NetworkQualityHelper.NET_OPTIMIZER_REPO_URL);
         msg.setTextColor(theme.textSecondary);
         msg.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f);
         msg.setLineSpacing(dp(2), 1.0f);
@@ -5686,7 +5684,21 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         LinearLayout btns = new LinearLayout(this);
         btns.setOrientation(LinearLayout.HORIZONTAL);
         btns.setGravity(Gravity.END);
-        addDialogButton(btns, "Понятно", theme.accentColor, this::dismissModal);
+        addDialogButton(btns, "Репозиторий", theme.textSecondary,
+                () -> NetworkQualityHelper.openInBrowser(this,
+                        NetworkQualityHelper.NET_OPTIMIZER_REPO_URL));
+        View gap = new View(this);
+        gap.setLayoutParams(new LinearLayout.LayoutParams(dp(4), 1));
+        btns.addView(gap);
+        addDialogButton(btns, version != null ? "Открыть" : "Установить", theme.accentColor, () -> {
+            if (version != null && NetworkQualityHelper.openNetOptimizer(this)) {
+                dismissModal();
+                return;
+            }
+            // Не установлен (или не открылся) — ведём на страницу релизов.
+            NetworkQualityHelper.openInBrowser(this,
+                    NetworkQualityHelper.NET_OPTIMIZER_RELEASE_URL);
+        });
         box.addView(btns);
         showModalCard(box, Gravity.CENTER, false);
     }
@@ -8509,29 +8521,13 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                     }
                 });
 
+        // Единственное, что лаунчер говорит про качество сети, — «возьмите
+        // программу автора». Решение пользователя: одна скромная строка и ссылка
+        // на репозиторий, без встроенной статистики и без INTERNET.
         addDivider(netCard);
-        // Замер скорости, DNS-профили, операторы и VPN-перехват — в отдельном
-        // приложении автора. Лаунчер не запрашивает INTERNET: он лишь открывает
-        // уже установленное приложение или даёт поставить его.
-        String netOptVersion = NetworkQualityHelper.installedVersion(this);
-        if (netOptVersion != null) {
-            addActionRow(netCard, "Net Optimizer by Doxaiz — установлен (" + netOptVersion + ")",
-                    "Скорость, DNS, профили операторов, перехват — открыть приложение автора",
-                    () -> {
-                        if (!NetworkQualityHelper.openNetOptimizer(this)) {
-                            Toast.makeText(this, "Net Optimizer не открылся — попробуйте из списка приложений",
-                                    Toast.LENGTH_SHORT).show();
-                        }
-                    });
-        } else {
-            addActionRow(netCard, "Установить Net Optimizer by Doxaiz",
-                    "Приложение автора для скорости, DNS и сети • лаунчер остаётся без INTERNET",
-                    () -> NetworkQualityHelper.openInBrowser(this,
-                            NetworkQualityHelper.NET_OPTIMIZER_RELEASE_URL));
-        }
-        addActionRow(netCard, "Зачем лаунчеру отдельная программа для сети?",
-                "Что делает лаунчер, а что — Net Optimizer, и почему это не одно и то же",
-                this::showNetOptimizerInfoModal);
+        addActionRow(netCard, "Установить программу для улучшения сети от автора",
+                "Net Optimizer by Doxaiz • скорость, DNS, сигнал, профили операторов",
+                this::showNetOptimizerCard);
 
         addDivider(netCard);
         addActionRow(netCard, "Быстрая панель интернета (Wi-Fi / 4G)",

@@ -95,50 +95,51 @@ public final class NetworkQualityTests {
         // ГЛАВНОЕ РЕШЕНИЕ: слабый Wi-Fi больше не повод вмешиваться. Раньше
         // лаунчер по дБм угадывал «слабый Wi-Fi» и дёргал канал, из-за чего на
         // прошивках с умным переключением телефон прыгал Wi-Fi ↔ LTE.
-        int wifiWeak = NetworkQualityHelper.autoReprobeAction(
-                true, Prefs.NET_MODE_BALANCED, 1, -1, true, true, true, false);
-        check(wifiWeak == NetworkQualityHelper.ACTION_NONE,
+        // Активна Wi-Fi, уровень какой угодно — не повод: перепроверка сигнал
+        // Wi-Fi не усиливает, зато может заставить телефон уйти на LTE.
+        check(NetworkQualityHelper.autoReprobeAction(
+                        true, Prefs.NET_MODE_ACTIVE, 0, true, true, false)
+                        == NetworkQualityHelper.ACTION_NONE,
                 "слабый Wi-Fi сам по себе — не повод перепроверки");
 
-        // Слабая мобильная сеть при сильном Wi-Fi — тоже не повод: переключаться
-        // некуда, а перепроверка мобильной сети, которая не активна, бессмысленна.
-        int cellWeakWifiGood = NetworkQualityHelper.autoReprobeAction(
-                true, Prefs.NET_MODE_BALANCED, 3, 1, true, true, false, true);
-        check(cellWeakWifiGood == NetworkQualityHelper.ACTION_NONE,
-                "слабая мобильная сеть при активном Wi-Fi не дёргает канал");
+        // Активна мобильная сеть и еле дышит (1 из 4) — просим перепроверить.
+        check(NetworkQualityHelper.autoReprobeAction(
+                        true, Prefs.NET_MODE_BALANCED, 1, true, true, true)
+                        == NetworkQualityHelper.ACTION_REPROBE,
+                "слабая мобильная сеть — перепроверка канала");
 
         // Залипание канала лечим на любом транспорте: система считает, что
         // интернета нет, и перепроверка действительно помогает.
         check(NetworkQualityHelper.autoReprobeAction(
-                        true, Prefs.NET_MODE_BALANCED, -1, -1, true, false, true, false)
+                        true, Prefs.NET_MODE_BALANCED, -1, true, false, false)
                         == NetworkQualityHelper.ACTION_REPROBE_AND_OFFER,
                 "залипание на Wi-Fi — перепроверка и предложение переключиться");
         check(NetworkQualityHelper.autoReprobeAction(
-                        true, Prefs.NET_MODE_GENTLE, -1, -1, true, false, true, false)
+                        true, Prefs.NET_MODE_GENTLE, -1, true, false, false)
                         == NetworkQualityHelper.ACTION_REPROBE,
                 "в мягком режиме — только перепроверка, без предложений");
 
         // Выключенное авто-улучшение важнее любого состояния сети.
         check(NetworkQualityHelper.autoReprobeAction(
-                        false, Prefs.NET_MODE_ACTIVE, 0, 0, true, false, false, true)
+                        false, Prefs.NET_MODE_ACTIVE, 0, true, true, true)
                         == NetworkQualityHelper.ACTION_NONE,
                 "автоулучшение выключено — не вмешиваемся");
         // Нет активной сети — лечить нечего.
         check(NetworkQualityHelper.autoReprobeAction(
-                        true, Prefs.NET_MODE_ACTIVE, 0, 0, false, false, false, false)
+                        true, Prefs.NET_MODE_ACTIVE, 0, false, false, false)
                         == NetworkQualityHelper.ACTION_NONE,
                 "без активной сети перепроверка не нужна");
     }
 
     private static void levelsDecideSwitch() {
-        // Мобильная сеть 1 из 4, Wi-Fi заметно сильнее (3+) — предложение.
+        // Без данных об уровне мобильной сети решение не выдумываем.
         check(NetworkQualityHelper.autoReprobeAction(
-                        true, Prefs.NET_MODE_BALANCED, 3, 1, true, true, false, true)
+                        true, Prefs.NET_MODE_BALANCED, -1, true, true, true)
                         == NetworkQualityHelper.ACTION_NONE,
-                "переключаться некуда: активна мобильная, Wi-Fi не активен — решение за системой");
+                "без данных об уровне сети не вмешиваемся");
         // Уровень > 1 не считается «еле дышит».
         check(NetworkQualityHelper.autoReprobeAction(
-                        true, Prefs.NET_MODE_BALANCED, 4, 2, true, true, true, false)
+                        true, Prefs.NET_MODE_BALANCED, 2, true, true, true)
                         == NetworkQualityHelper.ACTION_NONE,
                 "уровень 2 из 4 — не повод вмешиваться");
 
