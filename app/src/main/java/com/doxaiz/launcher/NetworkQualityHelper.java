@@ -27,10 +27,9 @@ import java.util.Locale;
  * - Поддерживает 3 режима (Мягкий 30с / Сбалансированный 15с / Активный 10с) + контроль
  *   слабого Wi-Fi с настраиваемой чувствительностью.
  * - Работает тихо в фоне и НЕ делает сетевых запросов: авто-улучшение читает только
- *   системное состояние. Реальный замер задержки — отдельно и только по кнопке (NetworkProbe).
+ *   системное состояние. Лаунчер остаётся без разрешения INTERNET: замер задержки и
+ *   работа с интернетом — отдельное приложение net-optimizer-by_doxaiz (AUDIT §29.5).
  * - Журнал перепроверок переживает перезапуск (20 событий), причины отказа различаются.
- *
- * Разрешение INTERNET нужно исключительно для замера по кнопке, см. AUDIT §29.5.
  */
 public final class NetworkQualityHelper {
 
@@ -396,6 +395,8 @@ public final class NetworkQualityHelper {
         if (metered) {
             return "Лимитная сеть: следите за расходом — учёт трафика есть в этой панели";
         }
+        // Замер скорости — не задача лаунчера (нет INTERNET): он занимается
+        // качеством сигнала и канала.
         return "";
     }
 
@@ -1094,6 +1095,22 @@ public final class NetworkQualityHelper {
                 return;
             } catch (Throwable ignored) {
             }
+        }
+    }
+
+    /**
+     * Открывает ссылку в браузере.
+     *
+     * Нужно для перехода к отдельному приложению Net Optimizer: лаунчер сам
+     * ничего не скачивает (нет INTERNET), поэтому «замер скорости» — не его
+     * работа, но подсказать, где он есть, он может.
+     */
+    public static void openInBrowser(Context ctx, String url) {
+        try {
+            Intent i = new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url));
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            ctx.startActivity(i);
+        } catch (Throwable ignored) {
         }
     }
 

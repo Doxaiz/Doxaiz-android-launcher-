@@ -811,27 +811,6 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         return super.onKeyDown(keyCode, event);
     }
 
-    /** Текст последнего замера задержки; пусто — замера ещё не было. */
-    private String lastProbeText = "";
-
-    /**
-     * Замер задержки по кнопке.
-     *
-     * Почему кнопка, а не фон: замер делает реальные запросы (DNS + TCP), и
-     * запускать их по таймеру значило бы тратить трафик и батарею человека без
-     * его участия. Результат живёт до следующего замера и виден подписью.
-     */
-    private void runNetworkProbe() {
-        lastProbeText = "Замер выполняется…";
-        rebuildSettingsContent();
-        NetworkProbe.runAsync(NetworkProbe.DEFAULT_HOST, 2500, result -> uiHandler.post(() -> {
-            if (isFinishing() || isDestroyed()) return;
-            lastProbeText = NetworkProbe.describe(result);
-            Toast.makeText(this, NetworkProbe.describe(result), Toast.LENGTH_LONG).show();
-            if (currentScreen == SCREEN_SETTINGS) rebuildSettingsContent();
-        }));
-    }
-
     /**
      * Экран «Изменение настроек» — второй путь, которым Android разрешает
      * reportNetworkConnectivity(). CHANGE_NETWORK_STATE выдаётся при установке,
@@ -5677,7 +5656,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         TextView msg = new TextView(this);
         msg.setText(
                 "1. В фоне — без расхода трафика\n"
-                        + "Авто-улучшение не скачивает и не отправляет ничего: оно читает только системное состояние сети Android (ACCESS_NETWORK_STATE, LinkProperties). Реальный замер задержки есть отдельной кнопкой «Замерить задержку сети» — он идёт один раз и только по вашему нажатию.\n\n"
+                        + "Авто-улучшение не скачивает и не отправляет ничего: оно читает только системное состояние сети Android (ACCESS_NETWORK_STATE, LinkProperties, WifiInfo). У лаунчера нет разрешения INTERNET вовсе — замер скорости и задержки живёт в отдельном приложении Net Optimizer.\n\n"
                         + "2. Три режима и тихая работа без всплывашек\n"
                         + "• Мягкий (30 с) — перепроверяет канал только при полном залипании (NET_CAPABILITY_VALIDATED снят).\n"
                         + "• Сбалансированный (15 с) — залипание + контроль слабого Wi-Fi (<= -82 дБм, на 5 ГГц -86 дБм).\n"
@@ -8295,9 +8274,6 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         }
 
         addSectionTitle("Сеть и авто-улучшение связи");
-        // Результат последнего замера переживает перестройку экрана: без этого
-        // строка обнулялась бы при каждом обновлении настроек.
-        String probeSubtitle = lastProbeText;
         LinearLayout netCard = createGlassSectionCard();
         NetworkQualityHelper.Status netStatus = (networkHelper != null)
                 ? networkHelper.inspect()
@@ -8507,14 +8483,12 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                 });
 
         addDivider(netCard);
-        // Реальный замер задержки. Идёт только по кнопке: в фоне приложение
-        // остаётся без сетевых запросов, иначе «улучшение сети» незаметно
-        // превратилось бы в постоянный расход трафика.
-        addActionRow(netCard, "Замерить задержку сети",
-                probeSubtitle.isEmpty()
-                        ? "Один запрос по кнопке: DNS + соединение • сети не нагружает"
-                        : probeSubtitle,
-                this::runNetworkProbe);
+        // Замер задержки и работу с интернетом вынесли в отдельное приложение:
+        // лаунчер не запрашивает INTERNET и занимается только качеством сигнала.
+        addActionRow(netCard, "Замер скорости и задержки — в Net Optimizer",
+                "Отдельное приложение net-optimizer-by_doxaiz • лаунчер остаётся без INTERNET",
+                () -> NetworkQualityHelper.openInBrowser(this,
+                        "https://github.com/Doxaiz/net-optimizer-by_doxaiz"));
 
         addDivider(netCard);
         addActionRow(netCard, "Быстрая панель интернета (Wi-Fi / 4G)",

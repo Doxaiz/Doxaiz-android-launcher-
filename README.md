@@ -12,7 +12,7 @@ APK подписан отладочным ключом CI — он не обно
 
 ## Сборка
 
-Проект собирается штатным Gradle: `./gradlew assembleDebug` (Android SDK Platform 34, AGP 8.2.2, Gradle wrapper 8.7, JDK 17). Для проверки правил R8: `./gradlew assembleRelease`. Приложение запрашивает `INTERNET` только для замера задержки сети по кнопке (см. `AUDIT.md` §29.5) и не делает фоновых запросов; сеть также нужна для загрузки инструментов сборки.
+Проект собирается штатным Gradle: `./gradlew assembleDebug` (Android SDK Platform 34, AGP 8.2.2, Gradle wrapper 8.7, JDK 17). Для проверки правил R8: `./gradlew assembleRelease`. Приложение не запрашивает разрешение INTERNET; сеть нужна только для загрузки инструментов сборки. Замер скорости и работа с интернетом — отдельное приложение [Net Optimizer](https://github.com/Doxaiz/net-optimizer-by_doxaiz), см. `AUDIT.md` §29.5.
 
 Для сборки подписанного APK через `build.sh` требуются JDK, Android SDK Platform 34 и Build Tools 34 (скрипт ожидает их в `platforms/android-34` и `build-tools/android-14` внутри `ANDROID_SDK_ROOT`), bash и zip. Передайте путь к приватному хранилищу ключей через `DOXAIZ_KEYSTORE`, пароль хранилища через `DOXAIZ_KEYSTORE_PASSWORD`, пароль ключа через `DOXAIZ_KEY_PASSWORD`, при необходимости алиас через `DOXAIZ_KEY_ALIAS` (по умолчанию `doxaiz`). Затем выполните `bash build.sh`. Скрипт не генерирует ключ и не содержит пароль.
 

@@ -15,13 +15,10 @@
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
     <!-- Жест свайпа вниз для шторки уведомлений -->
     <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />
-    <!-- Чтение статуса сети для авто-перепроверки при залипании -->
+    <!-- Чтение статуса сети для авто-перепроверки при залипании. Лаунчер остаётся
+         без INTERNET: замер скорости и работа с интернетом — отдельное приложение
+         net-optimizer-by_doxaiz (AUDIT §29.5). -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <!-- Реальный замер качества сети (задержка и ответ DNS) — решение пользователя,
-         см. AUDIT §29.5. Разрешение появилось не «на всякий случай»: без него нельзя
-         отличить «канал залип» от «канал медленный», и приложение показывало оценку
-         только по косвенным сигналам. Замер идёт ТОЛЬКО по кнопке, не в фоне. -->
-    <uses-permission android:name="android.permission.INTERNET" />
     <!-- Перепроверка канала: ConnectivityManager.reportNetworkConnectivity() требует
          CHANGE_NETWORK_STATE (protection level normal, выдаётся при установке) ЛИБО
          права менять системные настройки. Без этой строки вызов падал с

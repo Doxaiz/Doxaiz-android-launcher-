@@ -31,7 +31,6 @@ public final class NetworkQualityTests {
         signalLevelsDontLie();
         sensitivityShiftsThresholds();
         journalSurvivesRestart();
-        probeGradesAndTotals();
         placeholderHasNoFalseAdvice();
 
         System.out.println("NETWORK_QUALITY_TESTS=" + n);
@@ -98,7 +97,9 @@ public final class NetworkQualityTests {
         int fast24 = NetworkQualityHelper.weakWifiThresholdDbm(Prefs.NET_MODE_BALANCED, false);
         int fast5 = NetworkQualityHelper.weakWifiThresholdDbm(Prefs.NET_MODE_BALANCED, true);
         check(fast5 < fast24, "порог 5 ГГц ниже порога 2,4 ГГц");
-        check(NetworkQualityHelper.weakWifiThresholdDbm(Prefs.NET_MODE_ACTIVE, false) < fast24,
+        // Внимание: чем ВЫШЕ порог, тем раньше срабатывает тревога. Первая
+        // версия теста утверждала обратное — CI это поймал.
+        check(NetworkQualityHelper.weakWifiThresholdDbm(Prefs.NET_MODE_ACTIVE, false) > fast24,
                 "активный режим поднимает тревогу раньше сбалансированного");
 
         // Решение о перепроверке учитывает диапазон.
@@ -179,22 +180,6 @@ public final class NetworkQualityTests {
         check(!real.advice.isEmpty(), "при реальной проверке совет есть");
     }
 
-    private static void probeGradesAndTotals() {
-        check(NetworkProbe.totalMs(30, 50) == 80, "задержка складывается из DNS и соединения");
-        check(NetworkProbe.totalMs(-1, 50) == -1, "неудачный шаг — нет суммы");
-        check(NetworkProbe.grade(80).equals("Отличная"), "80 мс — отличная");
-        check(NetworkProbe.grade(250).equals("Хорошая"), "250 мс — хорошая");
-        check(NetworkProbe.grade(600).equals("Средняя"), "600 мс — средняя");
-        check(NetworkProbe.grade(1500).equals("Слабая"), "1500 мс — слабая");
-        check(NetworkProbe.grade(-1).isEmpty(), "без замера оценки нет");
-        NetworkProbe.Result failed = NetworkProbe.Result.failed("x", "DNS не ответил");
-        check(!failed.reachable, "неудачный замер помечен как недоступный");
-        check(NetworkProbe.describe(failed).contains("DNS не ответил"),
-                "причина отказа попадает в текст");
-        NetworkProbe.Result ok = new NetworkProbe.Result("x", 20, 40, "");
-        check(NetworkProbe.describe(ok).contains("60 мс"), "в тексте есть итоговая задержка");
-        check(NetworkProbe.describe(ok).contains("DNS 20"), "в тексте есть разбивка");
-    }
 
     private static void signalLevelsDontLie() {
         check(NetworkQualityHelper.signalLevel(Integer.MIN_VALUE).isEmpty(),
