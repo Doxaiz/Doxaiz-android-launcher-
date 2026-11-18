@@ -53,6 +53,11 @@ public class LauncherChecksTest {
         run("Audit60Tests", () -> Audit60Tests.main(new String[0]));
     }
 
+    @Test
+    public void drawerGestureRules() {
+        run("GestureRulesTests", () -> GestureRulesTests.main(new String[0]));
+    }
+
     private interface Check {
         void run() throws Exception;
     }

@@ -6062,7 +6062,7 @@ public final class QuickShadeHelper {
         if (!DoxaizLockService.isRunning()) {
             dismiss();
             host.showToast("Включите службу жестов Doxaiz в Спецвозможностях");
-            openSystemAction(Settings.ACTION_ACCESSIBILITY_SETTINGS, Settings.ACTION_SETTINGS);
+            AccessibilitySetup.open(activity, null);
             return;
         }
         dismiss();
@@ -6128,7 +6128,7 @@ public final class QuickShadeHelper {
                     performHaptic(v);
                     if (dlgRef[0] != null) dlgRef[0].dismiss();
                     dismiss();
-                    openSystemAction(Settings.ACTION_ACCESSIBILITY_SETTINGS, Settings.ACTION_SETTINGS);
+                    AccessibilitySetup.open(activity, null);
                 });
                 card.addView(status);
             }
