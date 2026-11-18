@@ -86,7 +86,7 @@ public final class LayoutImporter {
      * OOM в фоновом потоке импорта. Реальная раскладка — это 8 страниц × 24
      * иконки + док + папки, то есть меньше 300 строк, так что предел с запасом.
      */
-    private static final int MAX_IMPORT_ROWS = 2000;
+    static final int MAX_IMPORT_ROWS = 2000;
 
     /** Предел длины подписи иконки при импорте: чужое имя может быть любым. */
     private static final int MAX_IMPORT_TEXT_LEN = 256;
