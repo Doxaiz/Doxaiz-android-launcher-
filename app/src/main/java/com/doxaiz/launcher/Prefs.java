@@ -331,6 +331,23 @@ public final class Prefs {
         return sp.getBoolean("auto_network_weak_wifi", true);
     }
 
+    // Чувствительность контроля слабого Wi-Fi: 0 — «терпеливая», 1 — по умолчанию,
+    // 2 — «тревожная». Хранится как сдвиг порога в дБ, а не как готовое число,
+    // чтобы будущая правка базовых порогов не ломала уже выбранные настройки.
+    public static final int NET_SENSITIVITY_CALM = 0;
+    public static final int NET_SENSITIVITY_NORMAL = 1;
+    public static final int NET_SENSITIVITY_EAGER = 2;
+
+    public int getAutoNetworkSensitivity() {
+        int v = sp.getInt("auto_network_sensitivity", NET_SENSITIVITY_NORMAL);
+        return (v >= NET_SENSITIVITY_CALM && v <= NET_SENSITIVITY_EAGER) ? v : NET_SENSITIVITY_NORMAL;
+    }
+
+    public void setAutoNetworkSensitivity(int value) {
+        int safe = Math.max(NET_SENSITIVITY_CALM, Math.min(NET_SENSITIVITY_EAGER, value));
+        sp.edit().putInt("auto_network_sensitivity", safe).apply();
+    }
+
     public void setAutoNetworkWeakWifi(boolean enabled) {
         sp.edit().putBoolean("auto_network_weak_wifi", enabled).apply();
     }

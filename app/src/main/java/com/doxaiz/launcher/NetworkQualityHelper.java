@@ -20,16 +20,23 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Честный контроль и тихое авто-улучшение качества сети без root и без разрешения INTERNET:
+ * Честный контроль и тихое авто-улучшение качества сети без root:
  * - Отслеживает тип сети (Wi-Fi / 4G-5G / VPN), валидацию доступа, пропускную способность,
- *   реальное состояние Частного DNS (LinkProperties API 28+), лимитность сети (NOT_METERED)
- *   и уровень сигнала (API 29+ getSignalStrength без геолокации).
- * - Поддерживает 3 режима (Мягкий 30с / Сбалансированный 15с / Активный 10с) + контроль слабого Wi-Fi.
- * - Работает тихо в фоне без всплывашек: фиксирует статистику и журнал восстановлений в памяти.
+ *   реальное состояние Частного DNS (LinkProperties API 28+), лимитность сети (NOT_METERED),
+ *   уровень сигнала (API 29+) и диапазон 2,4/5 ГГц (LinkProperties#getFrequency, API 30+).
+ * - Поддерживает 3 режима (Мягкий 30с / Сбалансированный 15с / Активный 10с) + контроль
+ *   слабого Wi-Fi с настраиваемой чувствительностью.
+ * - Работает тихо в фоне и НЕ делает сетевых запросов: авто-улучшение читает только
+ *   системное состояние. Реальный замер задержки — отдельно и только по кнопке (NetworkProbe).
+ * - Журнал перепроверок переживает перезапуск (20 событий), причины отказа различаются.
+ *
+ * Разрешение INTERNET нужно исключительно для замера по кнопке, см. AUDIT §29.5.
  */
 public final class NetworkQualityHelper {
 
-    public static final int MAX_LOG_EVENTS = 6;
+    /** Сколько событий держим в памяти. Пользователь выбрал 20 — столько же
+     *  сохраняется на диск, поэтому история не обрывается на 6 строках. */
+    public static final int MAX_LOG_EVENTS = 20;
     private static final int WEAK_WIFI_BALANCED_DBM = -82;
     private static final int WEAK_WIFI_ACTIVE_DBM = -76;
 
@@ -49,19 +56,46 @@ public final class NetworkQualityHelper {
         public final String details;
         public final String dnsSummary;
         public final String signalSummary;
+        /** Что конкретно сделать при текущем состоянии сети; пусто — всё в порядке. */
+        public final String advice;
+        /** Диапазон 5 ГГц (только для Wi-Fi). */
+        public final boolean is5Ghz;
 
         public Status(boolean connected, boolean validated, boolean hasVpn,
                       String transportName, int downMbps, int upMbps,
                       String headline, String details) {
+            // Заглушка «служба недоступна»: совет «включите Wi-Fi» здесь был бы
+            // ложью — сеть не проверялась вовсе.
             this(connected, validated, hasVpn, false, false, Integer.MIN_VALUE,
                     false, "", transportName, downMbps, upMbps, headline, details,
-                    formatPrivateDnsSummary(false, ""), "");
+                    formatPrivateDnsSummary(false, ""), "", false, false);
         }
 
         public Status(boolean connected, boolean validated, boolean hasVpn, boolean isWifi,
                       boolean metered, int signalDbm, boolean privateDnsActive, String privateDnsServer,
                       String transportName, int downMbps, int upMbps,
                       String headline, String details, String dnsSummary, String signalSummary) {
+            this(connected, validated, hasVpn, isWifi, metered, signalDbm, privateDnsActive,
+                    privateDnsServer, transportName, downMbps, upMbps, headline, details,
+                    dnsSummary, signalSummary, false, true);
+        }
+
+        public Status(boolean connected, boolean validated, boolean hasVpn, boolean isWifi,
+                      boolean metered, int signalDbm, boolean privateDnsActive, String privateDnsServer,
+                      String transportName, int downMbps, int upMbps,
+                      String headline, String details, String dnsSummary, String signalSummary,
+                      boolean is5Ghz) {
+            this(connected, validated, hasVpn, isWifi, metered, signalDbm, privateDnsActive,
+                    privateDnsServer, transportName, downMbps, upMbps, headline, details,
+                    dnsSummary, signalSummary, is5Ghz, true);
+        }
+
+        private Status(boolean connected, boolean validated, boolean hasVpn, boolean isWifi,
+                       boolean metered, int signalDbm, boolean privateDnsActive, String privateDnsServer,
+                       String transportName, int downMbps, int upMbps,
+                       String headline, String details, String dnsSummary, String signalSummary,
+                       boolean is5Ghz, boolean withAdvice) {
+            this.is5Ghz = is5Ghz;
             this.connected = connected;
             this.validated = validated;
             this.hasVpn = hasVpn;
@@ -77,6 +111,10 @@ public final class NetworkQualityHelper {
             this.details = details;
             this.dnsSummary = (dnsSummary != null) ? dnsSummary : "";
             this.signalSummary = (signalSummary != null) ? signalSummary : "";
+            this.advice = withAdvice
+                    ? networkAdvice(connected, validated, isWifi, metered,
+                            signalDbm, is5Ghz, privateDnsActive)
+                    : "";
         }
     }
 
@@ -111,6 +149,7 @@ public final class NetworkQualityHelper {
     private boolean activeAutoHeal = false;
     private int activeMode = -1;
     private boolean activeWeakWifi = false;
+    private int activeSensitivity = -1;
     private volatile long lastAutoReprobeTs = 0L;
 
     private volatile boolean lastReprobeAccepted = false;
@@ -157,6 +196,31 @@ public final class NetworkQualityHelper {
         return "Оптимальный режим (15 с): устранение залипаний + контроль слабого Wi-Fi";
     }
 
+    /**
+     * Почему перепроверка канала не сработала.
+     *
+     * Раньше `triggerSystemReprobe` возвращал boolean, а внутри стоял
+     * `catch (Throwable ignored)`: вызов `reportNetworkConnectivity()` без
+     * разрешения `CHANGE_NETWORK_STATE` бросал SecurityException на КАЖДОМ
+     * нажатии, и снаружи это выглядело как «система не подтвердила» —
+     * неотличимо от честного «нет подключения». Из-за этого «улучшение сети»
+     * не работало никогда, а сообщения были правдоподобными.
+     *
+     * Теперь причина называется прямо, а интерфейс говорит, что делать.
+     */
+    public enum ReprobeResult {
+        /** Система приняла запрос и сеть валидна. */
+        ACCEPTED,
+        /** Запрос ушёл, но сеть так и не стала валидной. */
+        NO_EFFECT,
+        /** Активной сети нет. */
+        NO_NETWORK,
+        /** Нет разрешения CHANGE_NETWORK_STATE и нет права менять настройки. */
+        NO_PERMISSION,
+        /** Прошивка не поддержала вызов. */
+        UNSUPPORTED
+    }
+
     public static boolean shouldAutoReprobe(
             boolean autoEnabled,
             int mode,
@@ -170,20 +234,169 @@ public final class NetworkQualityHelper {
         if (!validated) return true;
         if (isWifi && weakWifiEnabled && mode != Prefs.NET_MODE_GENTLE
                 && signalDbm != Integer.MIN_VALUE && signalDbm > -120 && signalDbm < 0) {
-            int threshold = (mode == Prefs.NET_MODE_ACTIVE) ? WEAK_WIFI_ACTIVE_DBM : WEAK_WIFI_BALANCED_DBM;
-            return signalDbm <= threshold;
+            return signalDbm <= weakWifiThresholdDbm(mode, false);
+        }
+        return false;
+    }
+
+    /** То же, но с учётом диапазона Wi-Fi: на 5 ГГц порог ниже. */
+    public static boolean shouldAutoReprobe(
+            boolean autoEnabled,
+            int mode,
+            boolean weakWifiEnabled,
+            boolean connected,
+            boolean validated,
+            boolean isWifi,
+            int signalDbm,
+            boolean is5Ghz
+    ) {
+        return shouldAutoReprobe(autoEnabled, mode, weakWifiEnabled, connected, validated,
+                isWifi, signalDbm, is5Ghz, Prefs.NET_SENSITIVITY_NORMAL);
+    }
+
+    /** То же с явной чувствительностью — её выбирает пользователь в настройках. */
+    public static boolean shouldAutoReprobe(
+            boolean autoEnabled,
+            int mode,
+            boolean weakWifiEnabled,
+            boolean connected,
+            boolean validated,
+            boolean isWifi,
+            int signalDbm,
+            boolean is5Ghz,
+            int sensitivity
+    ) {
+        if (!autoEnabled || !connected) return false;
+        if (!validated) return true;
+        if (isWifi && weakWifiEnabled && mode != Prefs.NET_MODE_GENTLE
+                && signalDbm != Integer.MIN_VALUE && signalDbm > -120 && signalDbm < 0) {
+            return signalDbm <= weakWifiThresholdDbm(mode, is5Ghz, sensitivity);
         }
         return false;
     }
 
     public static String formatSignalQuality(int dbm) {
+        return formatSignalQuality(dbm, false);
+    }
+
+    public static String formatSignalQuality(int dbm, boolean is5Ghz) {
+        String level = signalLevel(dbm, is5Ghz);
+        if (level.isEmpty()) return "";
+        String band = is5Ghz ? "5 ГГц" : "2,4 ГГц";
+        return level + " (" + dbm + " дБм, " + band + ")";
+    }
+
+    /**
+     * Уровень сигнала словами.
+     *
+     * Пороги 2,4 ГГц и 5 ГГц различаются по физике: на 5 ГГц те же −75 дБм
+     * означают нормальный канал, а на 2,4 ГГц — уже просадку. Раньше порог был
+     * один, поэтому на 5 ГГц приложение звало «слабый Wi-Fi» там, где всё
+     * работало, и наоборот.
+     *
+     * @param dbm    уровень сигнала (dBm), значения вне диапазона — «нет данных»
+     * @param is5Ghz признак диапазона 5 ГГц (если неизвестно — false)
+     */
+    public static String signalLevel(int dbm, boolean is5Ghz) {
         if (dbm == Integer.MIN_VALUE || dbm <= -120 || dbm >= 0) return "";
-        String level;
-        if (dbm >= -60) level = "Отличный";
-        else if (dbm >= -70) level = "Хороший";
-        else if (dbm >= -79) level = "Средний";
-        else level = "Слабый";
-        return level + " (" + dbm + " дБм)";
+        int excellent = is5Ghz ? -62 : -58;
+        int good = is5Ghz ? -70 : -67;
+        int fair = is5Ghz ? -76 : -75;
+        if (dbm >= excellent) return "Отличный";
+        if (dbm >= good) return "Хороший";
+        if (dbm >= fair) return "Средний";
+        return "Слабый";
+    }
+
+    /**
+     * Признак 5 ГГц.
+     *
+     * Без разрешений и без геолокации узнать диапазон можно только через
+     * {@code LinkProperties#getFrequency()} (API 30+). Если данных нет,
+     * возвращаем false: тогда работают консервативные пороги 2,4 ГГц, и
+     * приложение не поднимает ложную тревогу на хорошем канале.
+     */
+    static boolean is5GhzWifi(boolean isWifi, int frequencyMhz) {
+        return isWifi && frequencyMhz >= 4900 && frequencyMhz <= 5900;
+    }
+
+    /** Прежний вызов без диапазона — консервативные пороги 2,4 ГГц. */
+    public static String signalLevel(int dbm) {
+        return signalLevel(dbm, false);
+    }
+
+    /**
+     * Порог «слабого Wi-Fi» для авто-перепроверки.
+     *
+     * Вынесен отдельно, чтобы его проверял тест: на 5 ГГц тревога должна
+     * подниматься позже, иначе приложение дёргает канал там, где он в порядке.
+     */
+    public static int weakWifiThresholdDbm(int mode, boolean is5Ghz) {
+        return weakWifiThresholdDbm(mode, is5Ghz, Prefs.NET_SENSITIVITY_NORMAL);
+    }
+
+    /**
+     * Порог «слабого Wi-Fi» с учётом выбранной чувствительности.
+     *
+     * Решение пользователя: пороги зависят от диапазона и от того, насколько
+     * рано человек хочет, чтобы лаунчер вмешивался. Терпеливая настройка
+     * опускает порог на 6 дБ (сигнал должен стать совсем плохим), тревожная —
+     * поднимает на 6 дБ. Сдвиг в дБ, а не готовое число, чтобы правка базовых
+     * порогов не превращала уже выбранную настройку в другую.
+     */
+    public static int weakWifiThresholdDbm(int mode, boolean is5Ghz, int sensitivity) {
+        int base = (mode == Prefs.NET_MODE_ACTIVE) ? WEAK_WIFI_ACTIVE_DBM : WEAK_WIFI_BALANCED_DBM;
+        if (is5Ghz) base -= 4;
+        if (sensitivity == Prefs.NET_SENSITIVITY_CALM) base -= 6;
+        else if (sensitivity == Prefs.NET_SENSITIVITY_EAGER) base += 6;
+        return base;
+    }
+
+    /** Подпись для интерфейса: какие пороги действуют сейчас. */
+    public static String sensitivitySummary(int mode, int sensitivity) {
+        int dbm24 = weakWifiThresholdDbm(mode, false, sensitivity);
+        int dbm5 = weakWifiThresholdDbm(mode, true, sensitivity);
+        return "Порог тревоги: " + dbm24 + " дБм (2,4 ГГц) / " + dbm5 + " дБм (5 ГГц)";
+    }
+
+    public static String sensitivityLabel(int sensitivity) {
+        if (sensitivity == Prefs.NET_SENSITIVITY_CALM) return "Терпеливая";
+        if (sensitivity == Prefs.NET_SENSITIVITY_EAGER) return "Тревожная";
+        return "Обычная";
+    }
+
+    /**
+     * Подсказка «что сделать», а не только «плохо».
+     *
+     * Прежний экран говорил «Канал не отвечает (залипание)» и предлагал
+     * перепроверку — даже когда причина была в другом: сеть лимитная, сигнал
+     * слабый, DNS частный и медленный. Совет теперь зависит от причины.
+     */
+    public static String networkAdvice(boolean connected, boolean validated, boolean isWifi,
+                                       boolean metered, int signalDbm, boolean is5Ghz,
+                                       boolean privateDnsActive) {
+        if (!connected) {
+            return "Включите Wi-Fi или мобильный интернет — активной сети нет";
+        }
+        if (!validated) {
+            if (metered) {
+                return "Сеть отвечает не сразу: проверьте остаток трафика и переключитесь на Wi-Fi";
+            }
+            return "Канал не отвечает: перепроверьте соединение или переподключите Wi-Fi";
+        }
+        String level = signalLevel(signalDbm, is5Ghz);
+        if (isWifi && "Слабый".equals(level)) {
+            return "Сигнал слабый: подойдите ближе к роутеру или переключитесь на "
+                    + (is5Ghz ? "2,4 ГГц" : "5 ГГц");
+        }
+        if (isWifi && privateDnsActive && metered) {
+            return "Частный DNS включён на лимитной сети: при медленном ответе "
+                    + "попробуйте автоматический DNS";
+        }
+        if (metered) {
+            return "Лимитная сеть: следите за расходом — учёт трафика есть в этой панели";
+        }
+        return "";
     }
 
     public static String formatPrivateDnsSummary(boolean active, String serverName) {
@@ -196,6 +409,10 @@ public final class NetworkQualityHelper {
 
     public Status inspect() {
         accumulateTraffic(System.currentTimeMillis());
+        if (!permissionFlagChecked) {
+            permissionFlagChecked = true;
+            refreshPermissionFlag();
+        }
         if (cm == null) {
             return new Status(false, false, false, "Нет данных", 0, 0,
                     "Сеть недоступна", "Служба подключения не отвечает");
@@ -229,6 +446,7 @@ public final class NetworkQualityHelper {
 
             boolean dnsActive = false;
             String dnsServer = "";
+            int wifiFrequencyMhz = 0;
             if (Build.VERSION.SDK_INT >= 28) {
                 try {
                     LinkProperties lp = cm.getLinkProperties(net);
@@ -236,10 +454,16 @@ public final class NetworkQualityHelper {
                         dnsActive = lp.isPrivateDnsActive();
                         String srv = lp.getPrivateDnsServerName();
                         if (srv != null) dnsServer = srv.trim();
+                        // Частота нужна, чтобы различать 2,4 и 5 ГГц: пороги
+                        // «слабого сигнала» у них разные. API 30+, без разрешений.
+                        if (Build.VERSION.SDK_INT >= 30) {
+                            wifiFrequencyMhz = lp.getFrequency();
+                        }
                     }
                 } catch (Throwable ignored) {
                 }
             }
+            boolean is5Ghz = is5GhzWifi(isWifi, wifiFrequencyMhz);
 
             String transport;
             if (isWifi) transport = "Wi-Fi";
@@ -255,7 +479,7 @@ public final class NetworkQualityHelper {
             int downMbps = Math.round(downKbps / 1000f);
             int upMbps = Math.round(upKbps / 1000f);
 
-            String sigSummary = formatSignalQuality(signalDbm);
+            String sigSummary = formatSignalQuality(signalDbm, is5Ghz);
             String dnsSummary = formatPrivateDnsSummary(dnsActive, dnsServer);
 
             String headline;
@@ -283,7 +507,7 @@ public final class NetworkQualityHelper {
 
             return new Status(true, validated, isVpn, isWifi, metered, signalDbm,
                     dnsActive, dnsServer, transport, downMbps, upMbps,
-                    headline, det.toString(), dnsSummary, sigSummary);
+                    headline, det.toString(), dnsSummary, sigSummary, is5Ghz);
         } catch (Throwable ignored) {
             return new Status(false, false, false, "Нет данных", 0, 0,
                     "Не удалось проверить сеть", "Откройте системные параметры сети");
@@ -299,22 +523,121 @@ public final class NetworkQualityHelper {
     }
 
     public boolean triggerSystemReprobe(String reason) {
-        if (cm == null) return false;
+        return triggerSystemReprobeDetailed(reason) == ReprobeResult.ACCEPTED;
+    }
+
+    /**
+     * Перепроверка канала с причиной результата.
+     *
+     * Ключевое отличие от прежней версии: проверяем разрешение ДО вызова и
+     * различаем «система отказала», «сети нет», «нет права» и «нет эффекта».
+     * `reportNetworkConnectivity()` требует `CHANGE_NETWORK_STATE` либо права
+     * менять системные настройки (`Settings.System.canWrite`), поэтому одного
+     * манифеста мало: на части прошивок разрешение выдаётся только вручную.
+     */
+    public ReprobeResult triggerSystemReprobeDetailed(String reason) {
+        if (cm == null) return ReprobeResult.NO_NETWORK;
+        Network net;
         try {
-            Network net = cm.getActiveNetwork();
-            if (net == null) return false;
-            // reportNetworkConnectivity() вне @SystemApi доступен, но поведение зависит
-            // от прошивки: часть OEM-сборок молча игнорирует вызов. Раньше результат
-            // никак не отражался и функция выглядела «сработавшей» всегда.
-            cm.reportNetworkConnectivity(net, false);
-            Status st = inspect();
-            boolean reported = st.connected && st.validated;
-            lastReprobeAccepted = reported;
-            recordHealEvent(st.transportName, reported ? reason : (reason + " (без эффекта)"));
-            return reported;
-        } catch (Throwable ignored) {
+            net = cm.getActiveNetwork();
+        } catch (Throwable t) {
+            return ReprobeResult.UNSUPPORTED;
+        }
+        if (net == null) {
             lastReprobeAccepted = false;
+            recordHealEvent("Сеть", (reason != null ? reason : "Перепроверка") + " (нет сети)");
+            return ReprobeResult.NO_NETWORK;
+        }
+        if (!canReportConnectivity()) {
+            lastReprobeAccepted = false;
+            recordHealEvent("Сеть", (reason != null ? reason : "Перепроверка") + " (нет разрешения)");
+            // Право не выдаётся само по себе и не появляется от повторных попыток:
+            // запоминаем отказ, чтобы автоцикл не писал одно и то же в журнал
+            // каждые 10 секунд и не будил систему впустую.
+            permissionDeniedThisSession = true;
+            return ReprobeResult.NO_PERMISSION;
+        }
+        try {
+            // Второй аргумент — «удалось ли приложению выйти в интернет».
+            // false заставляет систему перепроверить канал заново; true не
+            // используется намеренно: он лишь подтверждает статус-кво.
+            cm.reportNetworkConnectivity(net, false);
+        } catch (SecurityException se) {
+            // Разрешение могло быть отозвано после проверки — не выдаём это за «нет эффекта».
+            lastReprobeAccepted = false;
+            recordHealEvent("Сеть", (reason != null ? reason : "Перепроверка") + " (нет разрешения)");
+            return ReprobeResult.NO_PERMISSION;
+        } catch (Throwable t) {
+            lastReprobeAccepted = false;
+            recordHealEvent("Сеть", (reason != null ? reason : "Перепроверка") + " (прошивка не поддержала)");
+            return ReprobeResult.UNSUPPORTED;
+        }
+        Status st = inspect();
+        boolean reported = st.connected && st.validated;
+        lastReprobeAccepted = reported;
+        recordHealEvent(st.transportName,
+                reported ? (reason != null ? reason : "Перепроверка") : (reason + " (без эффекта)"));
+        return reported ? ReprobeResult.ACCEPTED : ReprobeResult.NO_EFFECT;
+    }
+
+    /**
+     * Есть ли право перепроверить канал.
+     *
+     * В манифесте `CHANGE_NETWORK_STATE` объявлен (protection level — normal,
+     * то есть выдаётся при установке). Но система принимает и право менять
+     * системные настройки, а на части прошивок именно оно и спрашивается,
+     * поэтому проверяем оба пути. Отдельный метод — чтобы это можно было
+     * проверить тестом без Android.
+     */
+    public boolean canReportConnectivity() {
+        if (hasChangeNetworkState) return true;
+        try {
+            return Settings.System.canWrite(appContext);
+        } catch (Throwable ignored) {
             return false;
+        }
+    }
+
+    /** Признак выданного CHANGE_NETWORK_STATE; выставляется проверкой при старте. */
+    private boolean hasChangeNetworkState = false;
+    private volatile boolean permissionFlagChecked = false;
+    /** Право на перепроверку уже отказано в этом сеансе — автоцикл молчит. */
+    private volatile boolean permissionDeniedThisSession = false;
+    /** Журнал с диска догружается один раз и лениво. */
+    private boolean journalLoaded = false;
+
+    /**
+     * Проверяет разрешение через PackageManager и запоминает результат.
+     * Вызывается из {@link #inspect()} лениво: лишний IPC на каждый кадр не нужен.
+     */
+    private void refreshPermissionFlag() {
+        try {
+            // checkSelfPermission есть с API 23, minSdk проекта — 26.
+            hasChangeNetworkState = appContext.checkSelfPermission(
+                    android.Manifest.permission.CHANGE_NETWORK_STATE)
+                    == android.content.pm.PackageManager.PERMISSION_GRANTED;
+        } catch (Throwable ignored) {
+            hasChangeNetworkState = false;
+        }
+        // Право могли выдать после отказа (человек сходил в настройки) —
+        // тогда автоцикл снова имеет смысл.
+        if (hasChangeNetworkState) permissionDeniedThisSession = false;
+    }
+
+    /** Человеческое объяснение результата для интерфейса. */
+    public static String reprobeMessage(ReprobeResult result) {
+        switch (result) {
+            case ACCEPTED:
+                return "Канал перепроверен: сеть активна";
+            case NO_EFFECT:
+                return "Перепроверка не помогла — сеть так и не ответила";
+            case NO_NETWORK:
+                return "Активной сети нет";
+            case NO_PERMISSION:
+                return "Нет права менять состояние сети — включите «Изменение настроек» для Doxaiz";
+            case UNSUPPORTED:
+            default:
+                return "Прошивка не поддержала перепроверку канала";
         }
     }
 
@@ -324,6 +647,10 @@ public final class NetworkQualityHelper {
     }
 
     private void recordHealEvent(String transport, String reason) {
+        // Сначала подтягиваем историю с диска: если записать новое событие при
+        // ещё не загруженном журнале, сохранённая история будет затёрта одной
+        // строкой. Вызов идёт до synchronized — ensureJournalLoaded сам берёт lock.
+        ensureJournalLoaded();
         long now = System.currentTimeMillis();
         synchronized (statsLock) {
             healCount++;
@@ -332,10 +659,102 @@ public final class NetworkQualityHelper {
             while (recentEvents.size() > MAX_LOG_EVENTS) {
                 recentEvents.remove(recentEvents.size() - 1);
             }
+            persistJournalLocked();
+        }
+    }
+
+    // Журнал перепроверок: раньше жил только в памяти и исчезал при перезапуске,
+    // поэтому ответить на вопрос «а помогает ли это вообще?» было нельзя.
+    // Пишем в те же SharedPreferences, что и настройки, но отдельными ключами:
+    // строка на событие, чтобы не заводить JSON и не ломать чтение старых данных.
+    static final String KEY_JOURNAL_COUNT = "net_journal_count";
+    static final String KEY_JOURNAL_EVENT = "net_journal_ev";
+    /** Сколько событий переживает перезапуск. Пользователь выбрал 20. */
+    public static final int MAX_PERSISTED_EVENTS = 20;
+
+    /** Формат строки журнала: время|транспорт|причина. Разделитель — табуляция. */
+    static String encodeEvent(long timeMs, String transport, String reason) {
+        return timeMs + "\t" + sanitizeField(transport) + "\t" + sanitizeField(reason);
+    }
+
+    /** Разбор строки журнала; null, если строка повреждена. */
+    static HealEvent decodeEvent(String raw) {
+        if (raw == null) return null;
+        String[] parts = raw.split("\t", 3);
+        if (parts.length != 3) return null;
+        try {
+            long ts = Long.parseLong(parts[0]);
+            return new HealEvent(ts, parts[1], parts[2]);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** Табуляция и перевод строки ломают формат — заменяем пробелом. */
+    private static String sanitizeField(String v) {
+        if (v == null) return "";
+        return v.replace('\t', ' ').replace('\n', ' ').replace('\r', ' ');
+    }
+
+    /** Догрузка журнала с диска; вызывается лениво из getRecentEvents()/getHealCount(). */
+    private void ensureJournalLoaded() {
+        if (journalLoaded) return;
+        journalLoaded = true;
+        try {
+            SharedPreferences sp = prefs.getSharedPreferences();
+            if (sp == null) return;
+            int cnt = Math.min(MAX_PERSISTED_EVENTS, Math.max(0, sp.getInt(KEY_JOURNAL_COUNT, 0)));
+            List<HealEvent> loaded = new ArrayList<>();
+            for (int i = 0; i < cnt; i++) {
+                HealEvent ev = decodeEvent(sp.getString(KEY_JOURNAL_EVENT + i, null));
+                if (ev != null) loaded.add(ev);
+            }
+            long lastTs = sp.getLong("net_journal_last_ts", 0L);
+            synchronized (statsLock) {
+                // Свежие события сеанса важнее и стоят первыми (типичный случай —
+                // первый запуск, когда в памяти ещё пусто).
+                if (recentEvents.isEmpty()) {
+                    recentEvents.addAll(loaded);
+                    healCount = Math.max(healCount, sp.getInt("net_journal_total", 0));
+                } else {
+                    // Уже есть события этого сеанса — дописываем историю следом,
+                    // иначе счётчик показывал бы цифру с диска при пустом журнале.
+                    for (HealEvent old : loaded) {
+                        if (recentEvents.size() >= MAX_PERSISTED_EVENTS) break;
+                        recentEvents.add(old);
+                    }
+                }
+                if (lastHealTimeMs == 0L) lastHealTimeMs = lastTs;
+            }
+        } catch (Throwable t) {
+            // Битый журнал не должен мешать работе — начинаем заново.
+        }
+    }
+
+    /** Сохранение журнала. Вызывается под statsLock из recordHealEvent. */
+    private void persistJournalLocked() {
+        try {
+            SharedPreferences sp = prefs.getSharedPreferences();
+            if (sp == null) return;
+            int cnt = Math.min(MAX_PERSISTED_EVENTS, recentEvents.size());
+            SharedPreferences.Editor ed = sp.edit();
+            ed.putInt(KEY_JOURNAL_COUNT, cnt);
+            for (int i = 0; i < cnt; i++) {
+                HealEvent ev = recentEvents.get(i);
+                ed.putString(KEY_JOURNAL_EVENT + i, encodeEvent(ev.timeMs, ev.transport, ev.reason));
+            }
+            ed.putLong("net_journal_last_ts", lastHealTimeMs);
+            ed.putInt("net_journal_total", healCount);
+            ed.apply();
+        } catch (Throwable t) {
+            // Не сохранили — не повод падать: журнал не критичен для работы сети.
         }
     }
 
     public int getHealCount() {
+        // Без догрузки карточка настроек после перезапуска показывала бы
+        // «перепроверок не было», хотя журнал лежит на диске.
+        ensureJournalLoaded();
         synchronized (statsLock) {
             return healCount;
         }
@@ -348,9 +767,15 @@ public final class NetworkQualityHelper {
     }
 
     public List<HealEvent> getRecentEvents() {
+        ensureJournalLoaded();
         synchronized (statsLock) {
             return new ArrayList<>(recentEvents);
         }
+    }
+
+    /** Сколько событий переживает перезапуск (для подписи в настройках). */
+    public static int persistedCapacity() {
+        return MAX_PERSISTED_EVENTS;
     }
 
     public void clearHealStats() {
@@ -358,6 +783,23 @@ public final class NetworkQualityHelper {
             healCount = 0;
             lastHealTimeMs = 0L;
             recentEvents.clear();
+            // Кнопка «Сбросить» должна стирать и сохранённую историю: иначе
+            // после перезапуска журнал возвращался бы, будто сброса не было.
+            try {
+                SharedPreferences sp = prefs.getSharedPreferences();
+                if (sp != null) {
+                    SharedPreferences.Editor ed = sp.edit();
+                    ed.putInt(KEY_JOURNAL_COUNT, 0);
+                    ed.putLong("net_journal_last_ts", 0L);
+                    ed.putInt("net_journal_total", 0);
+                    for (int i = 0; i < MAX_PERSISTED_EVENTS; i++) {
+                        ed.remove(KEY_JOURNAL_EVENT + i);
+                    }
+                    ed.apply();
+                }
+            } catch (Throwable ignored) {
+            }
+            journalLoaded = true;
         }
     }
 
@@ -507,7 +949,8 @@ public final class NetworkQualityHelper {
     }
 
     public synchronized void startForegroundMonitor(final boolean autoHealEnabled, final AutoHealListener listener) {
-        startForegroundMonitor(autoHealEnabled, Prefs.NET_MODE_BALANCED, true, listener);
+        startForegroundMonitor(autoHealEnabled, Prefs.NET_MODE_BALANCED,
+                prefs.isAutoNetworkWeakWifi(), prefs.getAutoNetworkSensitivity(), listener);
     }
 
     public synchronized void startForegroundMonitor(
@@ -516,11 +959,23 @@ public final class NetworkQualityHelper {
             final boolean weakWifiEnabled,
             final AutoHealListener listener
     ) {
+        startForegroundMonitor(autoHealEnabled, mode, weakWifiEnabled,
+                prefs.getAutoNetworkSensitivity(), listener);
+    }
+
+    public synchronized void startForegroundMonitor(
+            final boolean autoHealEnabled,
+            final int mode,
+            final boolean weakWifiEnabled,
+            final int sensitivity,
+            final AutoHealListener listener
+    ) {
         // Не перерегистрируем системный NetworkCallback впустую, если параметры не изменились
         if (activeCallback != null
                 && activeAutoHeal == autoHealEnabled
                 && activeMode == mode
-                && activeWeakWifi == weakWifiEnabled) {
+                && activeWeakWifi == weakWifiEnabled
+                && activeSensitivity == sensitivity) {
             return;
         }
         stopForegroundMonitor();
@@ -529,23 +984,24 @@ public final class NetworkQualityHelper {
             activeCallback = new ConnectivityManager.NetworkCallback() {
                 @Override
                 public void onCapabilitiesChanged(Network network, NetworkCapabilities caps) {
-                    evaluate(autoHealEnabled, mode, weakWifiEnabled, listener);
+                    evaluate(autoHealEnabled, mode, weakWifiEnabled, sensitivity, listener);
                 }
 
                 @Override
                 public void onAvailable(Network network) {
-                    evaluate(autoHealEnabled, mode, weakWifiEnabled, listener);
+                    evaluate(autoHealEnabled, mode, weakWifiEnabled, sensitivity, listener);
                 }
 
                 @Override
                 public void onLost(Network network) {
-                    evaluate(false, mode, false, listener);
+                    evaluate(false, mode, false, sensitivity, listener);
                 }
             };
             cm.registerDefaultNetworkCallback(activeCallback);
             activeAutoHeal = autoHealEnabled;
             activeMode = mode;
             activeWeakWifi = weakWifiEnabled;
+            activeSensitivity = sensitivity;
         } catch (Throwable ignored) {
             activeCallback = null;
             activeMode = -1;
@@ -560,14 +1016,17 @@ public final class NetworkQualityHelper {
             }
             activeCallback = null;
             activeMode = -1;
+            activeSensitivity = -1;
         }
     }
 
-    private void evaluate(boolean autoHealEnabled, int mode, boolean weakWifiEnabled, AutoHealListener listener) {
+    private void evaluate(boolean autoHealEnabled, int mode, boolean weakWifiEnabled,
+                          int sensitivity, AutoHealListener listener) {
         Status st = inspect();
         boolean healed = false;
-        if (shouldAutoReprobe(autoHealEnabled, mode, weakWifiEnabled,
-                st.connected, st.validated, st.isWifi, st.signalDbm)) {
+        if (!permissionDeniedThisSession
+                && shouldAutoReprobe(autoHealEnabled, mode, weakWifiEnabled,
+                st.connected, st.validated, st.isWifi, st.signalDbm, st.is5Ghz, sensitivity)) {
             long now = SystemClock.elapsedRealtime();
             long cooldown = cooldownForMode(mode);
             if (lastAutoReprobeTs == 0L || (now - lastAutoReprobeTs) >= cooldown) {
