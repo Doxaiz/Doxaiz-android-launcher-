@@ -149,7 +149,16 @@ public final class GlassTheme {
     }
 
     public static GlassTheme create(int styleMode, int opacityLevel, boolean ornamentsEnabled) {
-        return createResolved(Prefs.sanitizeVisualStyle(styleMode), opacityLevel);
+        return createResolved(Prefs.sanitizeVisualStyle(styleMode), opacityLevel, ornamentsEnabled);
+    }
+
+    /**
+     * Вариант по умолчанию: декоративные уголки включены (это же значение
+     * возвращает {@code Prefs.isAnimeOrnamentsEnabled()}). Нужен тестам и тем
+     * вызовам, которым важен только цвет.
+     */
+    static GlassTheme createResolved(int safeStyle, int opacityLevel) {
+        return createResolved(safeStyle, opacityLevel, true);
     }
 
     /**
@@ -158,9 +167,19 @@ public final class GlassTheme {
      * и в unit-тестах, где Android-классы недоступны.
      *
      * Видимость package-private: снаружи пользуйтесь {@code create(...)}.
+     *
+     * <h3>Про ornamentsRequested</h3>
+     * Раньше третий аргумент {@code create(...)} молча игнорировался, а внутри
+     * стояло жёсткое {@code false} — поэтому декоративные уголки (свитки Дунхуа
+     * в Сакуре, HUD-скобы в Кибер-Аниме) не рисовались никогда, хотя для них
+     * готово всё: цвета {@code ORNAMENT_*}, {@link AnimeStyleDrawable} и
+     * настройка {@code Prefs.isAnimeOrnamentsEnabled()}. Настройка и параметр
+     * были мёртвыми, а стили теряли ровно ту деталь, которая отличает их от
+     * «просто скруглённого прямоугольника». Теперь запрос уважается; у
+     * классического графита уголков нет по определению (там нет и цвета).
      */
-    static GlassTheme createResolved(int safeStyle, int opacityLevel) {
-        boolean orn = false;
+    static GlassTheme createResolved(int safeStyle, int opacityLevel, boolean ornamentsRequested) {
+        boolean orn = ornamentsRequested && safeStyle != 3;
         // Числа OPACITY_* продублированы: обращение к Prefs здесь сломало бы
         // расчёт в unit-тестах.
         int d = (opacityLevel == 0) ? -34 : (opacityLevel == 2 ? 32 : 0);

@@ -73,10 +73,9 @@ public class SafeModeActivity extends Activity {
         super.onCreate(savedInstanceState);
         prefs = new Prefs(this);
 
-        // Аварийный экран — тоже HOME-активность: если пользователь нажмёт
-        // «Домой» и останется этот экран, кнопка не должна открывать падающий
-        // рабочий стол. Поэтому main-фильтр здесь, а выбор лаунчера не
-        // выполняется: пользователю и так предложены выходы.
+        // Экран открывается только изнутри приложения (в манифесте
+        // exported="false"), своего фильтра HOME у него нет: иначе приложение
+        // предлагало бы «два домашних экрана Doxaiz / Doxaiz».
         String reason = null;
         try {
             Intent intent = getIntent();
@@ -86,6 +85,9 @@ public class SafeModeActivity extends Activity {
         }
 
         setContentView(buildUi(reason));
+        // Аварийный экран — последняя точка, где ещё виден журнал: сбрасываем
+        // его на диск сразу, чтобы записи о сбое пережили перезапуск.
+        Diagnostics.flushNow();
     }
 
     private View buildUi(String reason) {

@@ -17,6 +17,24 @@ public final class BiometricHelper {
 
     public static final int REQ_DEVICE_CREDENTIAL = 5109;
 
+    /**
+     * Отложенное действие текущей проверки: из {@link #tryConfirmCredentialFallback}
+     * нельзя вернуть результат вызывающему, поэтому успешное подтверждение
+     * системным PIN-кодом приходит в onActivityResult, а действие, ради которого
+     * проверка запускалась, живёт здесь.
+     *
+     * <h3>Почему поле, а не только колбэк активности</h3>
+     * На Android 8–10 (и на прошивках без рабочей биометрии) запрос уходит в
+     * {@code KeyguardManager}, ответ приходит отдельным result-кодом. Раньше
+     * действие хранила вызывающая активность в одном общем поле, и оно же
+     * обнулялось при каждом новом запросе защиты: отмена проверки оставляла
+     * «висящее» действие, а следующая проверка могла выполнить ЧУЖОЕ действие
+     * (например, подтвердить PIN для скрытых приложений и получить экспорт
+     * защищённой копии). Здесь действие привязано к самой проверке и снимается
+     * при её запуске и при её завершении.
+     */
+    private static final PendingAuthAction sPendingCredential = new PendingAuthAction();
+
     private BiometricHelper() {}
 
     public static boolean isDeviceSecure(Context context) {
@@ -79,13 +97,18 @@ public final class BiometricHelper {
             final Runnable onCancelOrError
     ) {
         if (activity == null || activity.isFinishing() || activity.isDestroyed()) {
-            if (onCancelOrError != null) onCancelOrError.run();
+            finishWithError(onCancelOrError);
             return;
         }
         if (!isDeviceSecure(activity)) {
-            if (onCancelOrError != null) onCancelOrError.run();
+            finishWithError(onCancelOrError);
             return;
         }
+
+        // Действие и отмена этой проверки фиксируются ДО любого диалога: если
+        // система уйдёт в KeyguardManager, ответ придёт в onActivityResult и
+        // возьмёт ровно то, что просили здесь.
+        sPendingCredential.set(onSuccess, onCancelOrError);
 
         if (Build.VERSION.SDK_INT >= 30) {
             try {
@@ -102,6 +125,8 @@ public final class BiometricHelper {
                         new BiometricPrompt.AuthenticationCallback() {
                             @Override
                             public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result) {
+                                // Диалог ответил сам: отложенное действие больше не нужно.
+                                clearPendingCredentialAction();
                                 if (!activity.isFinishing() && !activity.isDestroyed() && onSuccess != null) {
                                     onSuccess.run();
                                 }
@@ -119,7 +144,7 @@ public final class BiometricHelper {
                                         return;
                                     }
                                 }
-                                if (onCancelOrError != null) onCancelOrError.run();
+                                finishWithError(onCancelOrError);
                             }
                         });
                 return;
@@ -139,6 +164,7 @@ public final class BiometricHelper {
                         new BiometricPrompt.AuthenticationCallback() {
                             @Override
                             public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result) {
+                                clearPendingCredentialAction();
                                 if (!activity.isFinishing() && !activity.isDestroyed() && onSuccess != null) {
                                     onSuccess.run();
                                 }
@@ -146,7 +172,7 @@ public final class BiometricHelper {
 
                             @Override
                             public void onAuthenticationError(int errorCode, CharSequence errString) {
-                                if (onCancelOrError != null) onCancelOrError.run();
+                                finishWithError(onCancelOrError);
                             }
                         });
                 return;
@@ -160,6 +186,39 @@ public final class BiometricHelper {
         }
 
         // Fail-closed: устройство защищено паролем/отпечатком, но системная проверка недоступна — не обходим защиту!
-        if (onCancelOrError != null) onCancelOrError.run();
+        finishWithError(onCancelOrError);
+    }
+
+    /**
+     * Единая точка «проверка не удалась»: снимает отложенное действие и зовёт
+     * отмену. Через неё проходят ВСЕ пути отказа, иначе ожидание осталось бы
+     * висеть, а следующий системный ответ выполнил бы чужое действие.
+     */
+    private static void finishWithError(Runnable onCancelOrError) {
+        clearPendingCredentialAction();
+        if (onCancelOrError != null) {
+            try {
+                onCancelOrError.run();
+            } catch (Throwable t) {
+                Diagnostics.record("BiometricHelper.onCancel", t);
+            }
+        }
+    }
+
+    /**
+     * Итог системного подтверждения PIN-кодом (Android 8–10 и прошивки без
+     * биометрии). Вызывается активностью из onActivityResult с кодом
+     * {@link #REQ_DEVICE_CREDENTIAL}.
+     *
+     * @return true, если было отложенное действие — то есть этот результат
+     *         относится к нашей проверке, а не к постороннему диалогу
+     */
+    public static boolean deliverCredentialResult(boolean success) {
+        return sPendingCredential.deliver(success);
+    }
+
+    /** Снимает отложенное действие: новый запрос заменяет предыдущий. */
+    public static void clearPendingCredentialAction() {
+        sPendingCredential.clear();
     }
 }
