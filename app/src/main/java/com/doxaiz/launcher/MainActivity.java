@@ -275,6 +275,16 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     private float drawerDragDownStartX;
     private float drawerDragDownStartY;
     private boolean drawerDragDownActive = false;
+    /**
+     * Жест начался на экране каталога.
+     *
+     * Каталог открывается свайпом вверх по рабочему столу: ACTION_DOWN такого
+     * жеста уходит в ветку рабочего стола, а сюда приходит уже ACTION_MOVE.
+     * Без этого флага стартовые координаты оставались нулевыми, дельта
+     * равнялась всему экрану, и каталог закрывался тем же движением, которым
+     * его открыли.
+     */
+    private boolean drawerDragDownArmed = false;
     private boolean drawerClosingAnim = false;
 
     private Object backInvokedCallback;
@@ -2097,6 +2107,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         syncAmbientParticles();
         drawerClosingAnim = false;
         drawerDragDownActive = false;
+        drawerDragDownArmed = false;
 
         homeContainer.animate().cancel();
         drawerContainer.animate().cancel();
@@ -2109,6 +2120,10 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             drawerContainer.setVisibility(View.VISIBLE);
             int h = rootContainer.getHeight();
             float startY = Math.max(dp(140), h > 0 ? h * 0.22f : dp(180));
+            // Стартовое смещение — всегда от полной высоты, а не от того, где
+            // контейнер оказался в прошлый раз (иначе при быстром повторном
+            // открытии анимация начиналась «из середины»).
+            drawerContainer.animate().cancel();
             drawerContainer.setAlpha(0.24f);
             drawerContainer.setTranslationY(startY);
             drawerContainer.animate()
@@ -2196,6 +2211,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         if (drawerBatchMode) exitDrawerBatchMode();
         drawerClosingAnim = true;
         drawerDragDownActive = false;
+        drawerDragDownArmed = false;
         currentScreen = SCREEN_HOME;
 
         homeContainer.animate().cancel();
@@ -2245,6 +2261,14 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     }
 
     private void openDrawer(boolean forceFocusSearch) {
+        // Открытие могло прийти в середине анимации закрытия или с недотянутым
+        // пальцем контейнером: сбрасываем обе трансформации до showScreen,
+        // иначе каталог отрисуется со старым смещением и «дёрнется».
+        drawerContainer.animate().cancel();
+        drawerContainer.setTranslationY(0f);
+        drawerContainer.setAlpha(1f);
+        drawerDragDownActive = false;
+        drawerDragDownArmed = false;
         showScreen(SCREEN_DRAWER);
         if (forceFocusSearch || prefs.isAutoKeyboardDrawer()) {
             drawerSearchInput.requestFocus();
@@ -5170,8 +5194,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                     if (!verticalSwipeTriggered && ev.getPointerCount() == 1) {
                         float dx = ev.getRawX() - touchDownX;
                         float dy = ev.getRawY() - touchDownY;
-                        if (Math.abs(dy) > Math.max(touchSlop * 1.6f, dp(36))
-                                && Math.abs(dy) > Math.abs(dx) * 1.35f) {
+                        if (GestureRules.isVerticalSwipe(dy, dx, touchSlop, dp(36))) {
                             verticalSwipeTriggered = true;
                             lastEmptyTapTime = 0L;
                             MotionEvent cancel = MotionEvent.obtain(ev);
@@ -5230,15 +5253,18 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                     drawerDragDownStartX = ev.getRawX();
                     drawerDragDownStartY = ev.getRawY();
                     drawerDragDownActive = false;
+                    // Жест начался именно здесь — только такой может закрыть каталог.
+                    drawerDragDownArmed = true;
                     break;
                 case MotionEvent.ACTION_MOVE:
-                    if (ev.getPointerCount() == 1) {
+                    if (ev.getPointerCount() == 1 && drawerDragDownArmed) {
                         float dx = ev.getRawX() - drawerDragDownStartX;
                         float dy = ev.getRawY() - drawerDragDownStartY;
                         boolean inTopHeader = drawerDragDownStartY < (insetTop + dp(128));
-                        if (!drawerDragDownActive && dy > Math.max(touchSlop * 1.4f, dp(22))
-                                && dy > Math.abs(dx) * 1.4f
-                                && (inTopHeader || isDrawerScrolledToTop())) {
+                        if (!drawerDragDownActive && GestureRules.allowsDrawerDragDown(
+                                drawerDragDownArmed, dy, dx, touchSlop,
+                                dp(GestureRules.DOWN_DRAG_MIN_DP),
+                                inTopHeader, isDrawerScrolledToTop())) {
                             drawerDragDownActive = true;
                             hideKeyboard();
                             homeContainer.setVisibility(View.VISIBLE);
@@ -5262,6 +5288,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                     break;
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_CANCEL:
+                    drawerDragDownArmed = false;
                     if (drawerDragDownActive) {
                         float ty = drawerContainer.getTranslationY();
                         drawerDragDownActive = false;
@@ -10051,12 +10078,15 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         showModalCard(box, Gravity.BOTTOM, false);
     }
 
+    /**
+     * Открывает настройки спецвозможностей сразу на нашей службе (Android 11+),
+     * а не на общем списке: на прошивках Transsion/MIUI путь «общий список →
+     * найти Doxaiz» часто упирается в диалог «Настройки с ограниченным
+     * доступом», и человек не понимает, что делать дальше. Подробности —
+     * в AccessibilitySetup.
+     */
     private void openAccessibilitySettings() {
-        try {
-            startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
-        } catch (Throwable ignored) {
-            openSystemSettings();
-        }
+        AccessibilitySetup.open(this, null);
     }
 
     /** Защищает от повторного запуска фонового импорта в одном процессе. */
