@@ -49,6 +49,7 @@ import android.telephony.TelephonyManager;
 import android.text.Editable;
 import android.text.TextUtils;
 import android.text.TextWatcher;
+import android.util.LruCache;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
 import android.view.KeyEvent;
@@ -161,19 +162,36 @@ public final class QuickShadeHelper {
             "volume", "settings"
     );
 
-    private static final SimpleDateFormat TIME_FMT = new SimpleDateFormat("HH:mm", Locale.getDefault());
-    private static final SimpleDateFormat DATE_FMT = new SimpleDateFormat("EEE, d MMM", Locale.forLanguageTag("ru-RU"));
-    private static final SimpleDateFormat NOTIF_TIME_FMT = new SimpleDateFormat("HH:mm", Locale.getDefault());
+    /**
+     * Шаблоны времени. Сами SimpleDateFormat не создаются как static-поля:
+     * SimpleDateFormat не потокобезопасен, а форматирование идёт и из
+     * UI-потока (часы, уведомления), и из фонового (панель сети
+     * NetworkQualityHelper). Общий экземпляр под нагрузкой даёт «рваные»
+     * строки и редкие ArrayIndexOutOfBounds внутри Calendar.
+     */
+    private static final String TIME_PATTERN = "HH:mm";
+    private static final java.util.Locale DATE_LOCALE = Locale.forLanguageTag("ru-RU");
 
     /**
-     * Актуализирует часовой пояс форматтера (защита от залипания часов при перелёте / смене TimeZone).
+     * Форматирует время в текущем часовом поясе. Часовой пояс берётся в момент
+     * форматирования (защита от залипания часов при перелёте / смене TimeZone),
+     * поэтому форматтер создаётся локально — дешёвая операция по сравнению с
+     * риском гонки на общем экземпляре.
      */
-    static String formatWithCurrentTimeZone(SimpleDateFormat fmt, Date date) {
+    static String formatWithCurrentTimeZone(String pattern, java.util.Locale locale, Date date) {
+        if (date == null) return "";
+        SimpleDateFormat fmt = new SimpleDateFormat(pattern, locale);
         java.util.TimeZone tz = java.util.TimeZone.getDefault();
-        if (tz != null && !tz.getID().equals(fmt.getTimeZone().getID())) {
-            fmt.setTimeZone(tz);
-        }
+        if (tz != null) fmt.setTimeZone(tz);
         return fmt.format(date);
+    }
+
+    static String formatTime(Date date) {
+        return formatWithCurrentTimeZone(TIME_PATTERN, Locale.getDefault(), date);
+    }
+
+    static String formatDate(Date date) {
+        return formatWithCurrentTimeZone("EEE, d MMM", DATE_LOCALE, date);
     }
 
     private final Activity activity;
@@ -293,8 +311,26 @@ public final class QuickShadeHelper {
     private float shadeSwipeStartY = 0f;
     private final Set<String> expandedNotifKeys = new HashSet<>();
     private final Set<String> expandedGroupPackages = new HashSet<>();
-    private final Map<String, Drawable> appIconCache = new HashMap<>();
-    private final Map<String, String> appLabelCache = new HashMap<>();
+    /**
+     * Кэши иконок и подписей приложений для строк уведомлений.
+     *
+     * LruCache, а не HashMap: при переполнении вытесняется одна самая старая
+     * запись, а не весь кэш. Иначе каждая прокрутка списка уведомлений заново
+     * спрашивала PackageManager (IPC + разбор resources.apk) для всех строк.
+     * Предел по количеству прежний — 64 записи.
+     */
+    private final LruCache<String, Drawable> appIconCache = new LruCache<String, Drawable>(64) {
+        @Override
+        protected int sizeOf(String key, Drawable value) {
+            return 1; // считаем записи, а не байты: Drawable разного веса, но их мало
+        }
+    };
+    private final LruCache<String, String> appLabelCache = new LruCache<String, String>(64) {
+        @Override
+        protected int sizeOf(String key, String value) {
+            return 1;
+        }
+    };
 
     // Doxaiz 4.5: фильтры Центра уведомлений, защита ввода/свайпа и сохранение скролла
     private static final int FILTER_APP = 3;
@@ -390,8 +426,8 @@ public final class QuickShadeHelper {
         lastLiveNetIconKey = "";
         expandedNotifKeys.clear();
         expandedGroupPackages.clear();
-        if (appIconCache.size() > 80) appIconCache.clear();
-        if (appLabelCache.size() > 80) appLabelCache.clear();
+        // appIconCache/appLabelCache чистить не нужно: LruCache сам вытесняет
+        // лишнее и никогда не превышает свой предел.
     }
 
     private void dismissChildDialog() {
@@ -866,14 +902,14 @@ public final class QuickShadeHelper {
         left.setOrientation(LinearLayout.VERTICAL);
 
         TextView clockTv = new TextView(activity);
-        clockTv.setText(formatWithCurrentTimeZone(TIME_FMT, now));
+        clockTv.setText(formatTime(now));
         clockTv.setTextColor(Color.WHITE);
         clockTv.setTextSize(32f);
         clockTv.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
         left.addView(clockTv);
 
         TextView dateTv = new TextView(activity);
-        String dStr = formatWithCurrentTimeZone(DATE_FMT, now);
+        String dStr = formatDate(now);
         if (!dStr.isEmpty()) {
             dStr = Character.toUpperCase(dStr.charAt(0)) + dStr.substring(1);
         }
@@ -1810,7 +1846,7 @@ public final class QuickShadeHelper {
 
         String appName = loadAppLabelCached(pkg);
         String relTime = NotificationTools.formatRelativeTime(
-                latest.postTime, System.currentTimeMillis(), formatWithCurrentTimeZone(NOTIF_TIME_FMT, new Date(latest.postTime)));
+                latest.postTime, System.currentTimeMillis(), formatTime(new Date(latest.postTime)));
         TextView meta = new TextView(activity);
         meta.setText(appName + " • " + relTime);
         meta.setTextColor(GlassTheme.TEXT_SECONDARY);
@@ -2138,7 +2174,7 @@ public final class QuickShadeHelper {
                     top.addView(iv, iLp);
                 }
                 TextView m = new TextView(activity);
-                m.setText(appLbl + " • " + formatWithCurrentTimeZone(NOTIF_TIME_FMT, new Date(hi.removedTime)));
+                m.setText(appLbl + " • " + formatTime(new Date(hi.removedTime)));
                 m.setTextColor(GlassTheme.TEXT_SECONDARY);
                 m.setTextSize(11.5f);
                 m.setSingleLine(true);
@@ -2407,7 +2443,7 @@ public final class QuickShadeHelper {
 
         String appName = loadAppLabelCached(item.packageName);
         String relTime = NotificationTools.formatRelativeTime(
-                item.postTime, System.currentTimeMillis(), formatWithCurrentTimeZone(NOTIF_TIME_FMT, new Date(item.postTime)));
+                item.postTime, System.currentTimeMillis(), formatTime(new Date(item.postTime)));
         String metaStr = appName
                 + (!item.subText.isEmpty() ? (" • " + item.subText) : "")
                 + " • " + relTime;
@@ -3303,14 +3339,14 @@ public final class QuickShadeHelper {
         left.setOrientation(LinearLayout.VERTICAL);
 
         TextView clk = new TextView(activity);
-        clk.setText(formatWithCurrentTimeZone(TIME_FMT, now));
+        clk.setText(formatTime(now));
         clk.setTextColor(Color.WHITE);
         clk.setTextSize(28f);
         clk.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
         left.addView(clk);
 
         TextView dt = new TextView(activity);
-        dt.setText(formatWithCurrentTimeZone(DATE_FMT, now));
+        dt.setText(formatDate(now));
         dt.setTextColor(GlassTheme.TEXT_SECONDARY);
         dt.setTextSize(12.5f);
         left.addView(dt);
@@ -6325,10 +6361,10 @@ public final class QuickShadeHelper {
 
     private Drawable loadAppIconCached(String pkg) {
         if (pkg == null) return null;
-        if (appIconCache.containsKey(pkg)) return appIconCache.get(pkg);
+        Drawable cached = appIconCache.get(pkg);
+        if (cached != null) return cached;
         try {
             Drawable d = activity.getPackageManager().getApplicationIcon(pkg);
-            if (appIconCache.size() > 64) appIconCache.clear();
             appIconCache.put(pkg, d);
             return d;
         } catch (Throwable ignored) {
@@ -6345,7 +6381,6 @@ public final class QuickShadeHelper {
             ApplicationInfo ai = pm.getApplicationInfo(pkg, 0);
             CharSequence lbl = pm.getApplicationLabel(ai);
             String res = (lbl != null && lbl.length() > 0) ? lbl.toString() : pkg;
-            if (appLabelCache.size() > 64) appLabelCache.clear();
             appLabelCache.put(pkg, res);
             return res;
         } catch (Throwable ignored) {

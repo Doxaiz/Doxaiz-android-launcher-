@@ -7463,16 +7463,14 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                 Toast.makeText(this, "Для доступа сначала установите PIN или пароль экрана в настройках Android", Toast.LENGTH_LONG).show();
                 return;
             }
+            // См. комментарий у экспорта: поле снимает onActivityResult.
             pendingPrivateSpaceAction = this::showHiddenAppsModal;
             BiometricHelper.authenticate(
                     this,
                     "Скрытые приложения",
                     "Подтвердите отпечатком пальца или PIN-кодом",
-                    () -> {
-                        pendingPrivateSpaceAction = null;
-                        showHiddenAppsModal();
-                    },
-                    () -> pendingPrivateSpaceAction = null
+                    this::showHiddenAppsModal,
+                    () -> { }
             );
         } else {
             showHiddenAppsModal();
@@ -8208,14 +8206,10 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                                 "Отключение защиты",
                                 "Подтвердите отпечатком пальца или PIN-кодом",
                                 () -> {
-                                    pendingPrivateSpaceAction = null;
                                     prefs.setProtectHiddenApps(false);
                                     rebuildSettingsContent();
                                 },
-                                () -> {
-                                    pendingPrivateSpaceAction = null;
-                                    rebuildSettingsContent();
-                                }
+                                this::rebuildSettingsContent
                         );
                         return;
                     }
@@ -10417,14 +10411,14 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             pendingExportIncludesPrivate = false;
             return;
         }
+        // Поле снимает только onActivityResult(REQ_DEVICE_CREDENTIAL): при
+        // подтверждении через системный экран PIN результат приходит туда, и
+        // очистка здесь оставила бы пользователя без действия.
         pendingPrivateSpaceAction = this::launchExportBackupPicker;
         BiometricHelper.authenticate(this, "Сохранение копии",
                 "Файл содержит список скрытых приложений. Подтвердите отпечатком или PIN.",
-                () -> { pendingPrivateSpaceAction = null; launchExportBackupPicker(); },
-                () -> {
-                    pendingPrivateSpaceAction = null;
-                    pendingExportIncludesPrivate = false;
-                });
+                this::launchExportBackupPicker,
+                () -> pendingExportIncludesPrivate = false);
     }
 
     /**
@@ -10478,11 +10472,8 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                     this,
                     "Восстановление копии",
                     "Подтвердите отпечатком или PIN для импорта защищённых настроек",
-                    () -> {
-                        pendingPrivateSpaceAction = null;
-                        launchImportBackupPicker(true);
-                    },
-                    () -> pendingPrivateSpaceAction = null
+                    () -> launchImportBackupPicker(true),
+                    () -> { }
             );
             return;
         }

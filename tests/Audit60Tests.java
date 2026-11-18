@@ -47,6 +47,8 @@ public final class Audit60Tests {
         diskStatsCacheIsIsolated();
         importResultHasContent();
         emptyLayoutIsNotInitialized();
+        formatWithCurrentTimeZoneIsIndependentOfSavedTimeZone();
+        formatWithCurrentTimeZoneHandlesNullDate();
 
         System.out.println("Audit60Tests: " + n + " проверок пройдено");
     }
@@ -419,5 +421,53 @@ public final class Audit60Tests {
                 clear = false;
             }
         }
+    }
+
+    // ------------------------------------- 6. форматирование времени в шторке
+
+    /**
+     * Раньше в QuickShadeHelper лежали static SimpleDateFormat и метод,
+     * который менял их часовой пояс. SimpleDateFormat не потокобезопасен, а
+     * вызывается и из UI-потока, и из фонового (панель сети). Теперь форматтер
+     * создаётся внутри вызова — проверяем, что результат не зависит от
+     * предыдущих вызовов и учитывает смену часового пояса.
+     */
+    private static void formatWithCurrentTimeZoneIsIndependentOfSavedTimeZone() {
+        java.util.TimeZone original = java.util.TimeZone.getDefault();
+        try {
+            java.util.TimeZone utc = java.util.TimeZone.getTimeZone("UTC");
+            java.util.TimeZone plus3 = java.util.TimeZone.getTimeZone("Etc/GMT-3");
+            java.util.Date at = new java.util.Date(1_700_000_000_000L);
+
+            java.util.TimeZone.setDefault(utc);
+            String utcText = QuickShadeHelper.formatWithCurrentTimeZone(
+                    "HH:mm", java.util.Locale.US, at);
+
+            java.util.TimeZone.setDefault(plus3);
+            String plus3Text = QuickShadeHelper.formatWithCurrentTimeZone(
+                    "HH:mm", java.util.Locale.US, at);
+
+            check(utcText.length() == 5 && utcText.charAt(2) == ':',
+                    "время формата HH:mm, получено " + utcText);
+            // Перелёт/смена пояса должна менять время, а не «залипать» на старом.
+            check(!utcText.equals(plus3Text),
+                    "смена часового пояса меняет время: " + utcText + " -> " + plus3Text);
+
+            // Повторный вызов после возврата пояса даёт исходную строку: нет
+            // накопленного состояния (это и было свойством static-форматтера).
+            java.util.TimeZone.setDefault(utc);
+            check(utcText.equals(QuickShadeHelper.formatWithCurrentTimeZone(
+                            "HH:mm", java.util.Locale.US, at)),
+                    "повторный вызов не зависит от предыдущего");
+        } finally {
+            java.util.TimeZone.setDefault(original);
+        }
+    }
+
+    /** Пустая дата не должна ронять форматирование (был бы NPE внутри format). */
+    private static void formatWithCurrentTimeZoneHandlesNullDate() {
+        check("".equals(QuickShadeHelper.formatWithCurrentTimeZone(
+                        "HH:mm", java.util.Locale.US, null)),
+                "null-дата даёт пустую строку, а не падение");
     }
 }
