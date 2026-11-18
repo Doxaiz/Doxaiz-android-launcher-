@@ -385,8 +385,9 @@ public final class QuickShadeHelper {
     }
 
     public void clearIconCache() {
-        appIconCache.clear();
-        appLabelCache.clear();
+        // LruCache, в отличие от HashMap, очищается через evictAll().
+        appIconCache.evictAll();
+        appLabelCache.evictAll();
     }
 
     public void destroy() {
