@@ -303,6 +303,23 @@ jobs:
           fi
           echo "::notice title=релиз::APK в $TAG совпадает с собранным"
 
+      # Тег должен указывать на коммит, из которого собран APK. Иначе скачавший
+      # релиз не может понять, какой код внутри: 18.11 тег остался на 4890c04,
+      # а APK был пересобран из более позднего main. Релиз один и обновляется на
+      # месте — значит, и тег переезжает вместе с ним.
+      - name: Сдвинуть тег релиза на опубликованный коммит
+        if: >-
+          github.ref == 'refs/heads/main' &&
+          (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/v1.0.0" \
+            -f sha="$GITHUB_SHA" -F force=true >/dev/null \
+            || { echo "::error title=тег::не удалось сдвинуть v1.0.0 на $GITHUB_SHA"; exit 1; }
+          echo "::notice title=тег::v1.0.0 теперь указывает на ${GITHUB_SHA:0:7}"
+
   emulator:
     name: Запуск на эмуляторе (API 34)
     runs-on: ubuntu-latest
