@@ -8048,13 +8048,13 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                 logHdr.addView(resetLogBtn);
                 logWrap.addView(logHdr);
 
-                java.text.SimpleDateFormat evFmt = new java.text.SimpleDateFormat("HH:mm:ss", Locale.getDefault());
                 int showLim = Math.min(3, evs.size());
                 StringBuilder logText = new StringBuilder();
                 for (int i = 0; i < showLim; i++) {
                     NetworkQualityHelper.HealEvent ev = evs.get(i);
                     if (i > 0) logText.append('\n');
-                    logText.append(evFmt.format(new java.util.Date(ev.timeMs)))
+                    logText.append(QuickShadeHelper.formatWithCurrentTimeZone(
+                                    "HH:mm:ss", Locale.getDefault(), new java.util.Date(ev.timeMs)))
                             .append(" • ").append(ev.transport)
                             .append(" — ").append(ev.reason);
                 }
