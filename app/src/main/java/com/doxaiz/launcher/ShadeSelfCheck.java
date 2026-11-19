@@ -44,6 +44,42 @@ public final class ShadeSelfCheck {
     /** Имя extras-флага. Строка одна и та же здесь и в MainActivity. */
     public static final String EXTRA_RUN = "doxaiz_shade_selfcheck";
 
+    /**
+     * Тема, которую прогон просит выставить перед показом шторки.
+     *
+     * Передаётся в intent, а не правкой shared_prefs: правка файла настроек
+     * снаружи (sed через run-as) уже один раз сломала разбор XML в CI —
+     * «PARSED=0, invalid character number». Intent не трогает состояние
+     * приложения на диске в момент, когда его читает сам процесс.
+     */
+    public static final String EXTRA_STYLE = "doxaiz_style";
+
+    /**
+     * Применяет тему из intent, если она там есть.
+     *
+     * @return запрошенный стиль или -1
+     */
+    public static int applyRequestedStyle(Activity activity, Prefs prefs) {
+        if (activity == null || prefs == null) return -1;
+        if (!BuildConfig.DEBUG) return -1;
+        try {
+            android.content.Intent intent = activity.getIntent();
+            if (intent == null || !intent.hasExtra(EXTRA_STYLE)) return -1;
+            int style = intent.getIntExtra(EXTRA_STYLE, -1);
+            // Только известные стили: значение приходит извне, а предпочтение
+            // «любое число» уже один раз приводило к непонятной теме.
+            if (style != Prefs.STYLE_CLASSIC_LIGHT && style != Prefs.STYLE_CLASSIC_DARK
+                    && style != Prefs.STYLE_SAKURA_JADE && style != Prefs.STYLE_CYBER_ANIME) {
+                return -1;
+            }
+            prefs.setVisualStyle(style);
+            return style;
+        } catch (Throwable t) {
+            Diagnostics.record("ShadeSelfCheck.applyStyle", t);
+            return -1;
+        }
+    }
+
     private static final String OUT_FILE = "shade_selfcheck.txt";
 
     /** Доля пикселей, которые обязаны принадлежать одной из поверхностей темы. */

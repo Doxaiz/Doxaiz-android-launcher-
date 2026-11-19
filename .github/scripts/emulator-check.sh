@@ -619,23 +619,15 @@ log "Светлая тема: шторка в реальных пикселях"
 # рисует её в Bitmap и сверяет пиксели с палитрой темы.
 smoke_light_shade() {
     local theme="$1" label="$2"
-    # Тему выставляем через файл настроек: приложение читает его при старте.
-    # run-as доступен на debug-сборке, поэтому правим XML напрямую.
     adb shell am force-stop "$PKG" >/dev/null 2>&1 || true
     sleep 1
-    adb shell run-as "$PKG" sed -i \
-        "s|<int name=\"simple_visual_style\" value=\"[0-9]*\" />|<int name=\"simple_visual_style\" value=\"$theme\" />|" \
-        shared_prefs/doxaiz_prefs.xml >/dev/null 2>&1 || true
-    # Ключа могло не быть вовсе (значение по умолчанию) — тогда добавляем.
-    if ! adb shell "run-as $PKG cat shared_prefs/doxaiz_prefs.xml" 2>/dev/null \
-            | grep -q "simple_visual_style"; then
-        adb shell "run-as $PKG sed -i 's|</map>|<int name=\"simple_visual_style\" value=\"$theme\" /></map>|' \
-            shared_prefs/doxaiz_prefs.xml" >/dev/null 2>&1 || true
-    fi
-    adb shell rm -f "files/shade_selfcheck.txt" >/dev/null 2>&1 || true
     adb shell "run-as $PKG rm -f files/shade_selfcheck.txt" >/dev/null 2>&1 || true
 
-    adb shell am start -W -n "$PKG/.MainActivity" --ez doxaiz_shade_selfcheck true \
+    # Тема передаётся параметром intent, а не правкой shared_prefs. Правка была
+    # в первой версии этого шага и сломала разбор prefs.xml (PARSED=0, invalid
+    # character number): файл менялся в тот момент, когда его писал сам процесс.
+    adb shell am start -W -n "$PKG/.MainActivity" \
+        --ez doxaiz_shade_selfcheck true --ei doxaiz_style "$theme" \
         > "$OUT/shade-selfcheck-start-$label.txt" 2>&1 || true
     # Открытие шторки отложено (1,2 с + 0,7 с на кадр) — ждём с запасом.
     local waited=0 report=""
@@ -650,11 +642,18 @@ smoke_light_shade() {
         report_fail "Светлая тема ($label): самопроверка шторки не оставила отчёт за ${waited} с"
         return 1
     fi
+    # Отчёт — в summary, а в аннотацию только короткая строка: аннотаций не
+    # больше 10 на прогон, и лишняя вытесняет ту, которая важнее.
     summary "шторка-$label" "$report"
-    note "шторка-$label" "$(printf '%s' "$report" | tr '\n' ' ' | cut -c1-220)"
+    note "шторка-$label" "$(printf '%s' "$report" | tr '\n' ' ' | cut -c1-200)"
+    # Полный отчёт дублируется в аннотацию только при провале: тогда важна
+    # каждая цифра, а обрезанная строка не даёт разобраться.
     case "$report" in
         OK*) return 0 ;;
-        *) report_fail "Светлая тема ($label): $(printf '%s' "$report" | tr '\n' ' ' | cut -c1-200)"; return 1 ;;
+        *)
+            printf '%s\n' "$report" > "$OUT/shade-fail-$label.txt"
+            report_fail "Светлая тема ($label): $(printf '%s' "$report" | tr '\n' '; ' | cut -c1-400)"
+            return 1 ;;
     esac
 }
 
@@ -663,8 +662,11 @@ smoke_light_shade() {
 # светлый цвет применился ко всем стилям подряд.
 smoke_light_shade 3 "light" || true
 smoke_light_shade 2 "dark" || true
-# Возвращаем светлую тему: остальные шаги должны видеть то же, что и раньше.
+# Возвращаем исходную тему (графит) и перезапускаем приложение, чтобы
+# остальные шаги прогона не зависели от того, что мы тут выставили.
 adb shell am force-stop "$PKG" >/dev/null 2>&1 || true
+adb shell am start -W -n "$PKG/.MainActivity" --ei doxaiz_style 2 >/dev/null 2>&1 || true
+sleep 2
 endlog
 
 log "Отзывчивость: набор текста в поиске каталога"

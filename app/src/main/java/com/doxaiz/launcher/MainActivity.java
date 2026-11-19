@@ -367,6 +367,10 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         super.onCreate(savedInstanceState);
 
         prefs = new Prefs(this);
+        // Тема из intent — только в debug и только для самопроверки шторки.
+        // Нужна, чтобы прогон в CI мог проверить конкретную палитру, не правя
+        // shared_prefs снаружи (такая правка уже ломала разбор XML в CI).
+        int requestedStyle = ShadeSelfCheck.applyRequestedStyle(this, prefs);
         // Журнал сбоев поднимается ДО загрузки раскладки: иначе ошибки чтения
         // desktop_layout_json (битый JSON, сбой миграции) некуда записать (F-07).
         Diagnostics.init(prefs.getSharedPreferences());
@@ -509,7 +513,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         // измеряются её пиксели.
         if (BuildConfig.DEBUG && getIntent() != null
                 && getIntent().getBooleanExtra(ShadeSelfCheck.EXTRA_RUN, false)) {
-            ShadeSelfCheck.schedule(this, quickShadeHelper);
+            ShadeSelfCheck.schedule(this, quickShadeHelper, requestedStyle);
         }
         rootContainer.post(() -> {
             if (isFinishing() || isDestroyed()) return;
