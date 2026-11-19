@@ -187,10 +187,10 @@ public final class ContrastTest {
         check(GlassTheme.LIGHT_SURFACES, "светлая палитра помечена как светлая");
 
         // Поверхности светлые: это и есть суть правки.
-        requireAtLeast(Legibility.contrastRatio(0xF2, 0xF3, 0xF6, 0xFF, 0xFF, 0xFF), 1.0,
-                "фон шторки почти белый (проверка на «случайно тёмный» — ниже)");
-        requireBelow(Legibility.contrastRatio(0xF2, 0xF3, 0xF6, 0x00, 0x00, 0x00), 3.0,
-                "фон шторки светлый относительно чёрного");
+        requireBelow(textOn(GlassTheme.SHADE_BG, 0xFFFFFFFF), 3.0,
+                "фон шторки близок к белому");
+        requireAtLeast(textOn(GlassTheme.SHADE_BG, 0xFF000000), 3.0,
+                "фон шторки далеко от чёрного");
         // Подписи на поверхностях — порог обычного текста.
         requireAtLeast(textOn(GlassTheme.TEXT_PRIMARY, GlassTheme.TILE_INACTIVE), 4.5,
                 "подпись на неактивной плитке светлой шторки");
@@ -214,6 +214,31 @@ public final class ContrastTest {
         requireAtLeast(textOn(GlassTheme.ACCENT_AMBER, GlassTheme.SHADE_BG), 4.5,
                 "предупреждающий акцент на светлой шторке");
 
+        // Карточки и поля внутри шторки раньше красились литералами #1A1A1E /
+        // #1F1F24 / #2E2E34 прямо в QuickShadeHelper — на светлой палитре это
+        // давало чёрные карточки на белом фоне. Теперь цвет берётся из темы,
+        // и подписи на этих поверхностях обязаны читаться.
+        requireAtLeast(textOn(GlassTheme.TEXT_PRIMARY, GlassTheme.SHADE_CARD), 4.5,
+                "подпись на карточке светлой шторки");
+        requireAtLeast(textOn(GlassTheme.TEXT_PRIMARY, GlassTheme.SHADE_FIELD), 4.5,
+                "подпись в поле ввода светлой шторки");
+        requireAtLeast(textOn(GlassTheme.TEXT_PRIMARY, GlassTheme.SHADE_TILE_OFF), 4.5,
+                "подпись на выключенной круглой плитке");
+        requireAtLeast(textOn(GlassTheme.TEXT_SECONDARY, GlassTheme.SHADE_CARD), 4.5,
+                "второстепенная подпись на карточке светлой шторки");
+        requireAtLeast(textOn(GlassTheme.TEXT_MUTED, GlassTheme.SHADE_CARD), 4.5,
+                "подсказка на карточке светлой шторки");
+        requireAtLeast(textOn(GlassTheme.TEXT_MUTED, GlassTheme.SHADE_FIELD), 4.5,
+                "подсказка в поле ввода светлой шторки");
+        // Поверхности светлее фона шторки быть не обязаны, но быть тёмными — нет.
+        requireAtLeast(textOn(GlassTheme.SHADE_CARD, 0xFF000000), 3.0,
+                "карточка шторки не чёрная");
+        requireAtLeast(textOn(GlassTheme.SHADE_FIELD, 0xFF000000), 3.0,
+                "поле ввода шторки не чёрное");
+        // Опасное действие: белый текст на красном темы.
+        requireAtLeast(textOn(0xFFFFFFFF, GlassTheme.ACCENT_RED), 4.5,
+                "белая подпись на красной плашке светлой шторки");
+
         // Тёмные стили после правки не должны «посветлеть»: у них LIGHT_SURFACES
         // обязан оставаться false, иначе белые иконки заменятся на тёмные.
         int[] darkStyles = {Prefs.STYLE_CLASSIC_DARK, Prefs.STYLE_CYBER_ANIME, Prefs.STYLE_SAKURA_JADE};
@@ -225,6 +250,12 @@ public final class ContrastTest {
                     GlassTheme.SHADE_BG & 0xFF, 0, 0, 0), 3.0,
                     "фон шторки стиля " + st + " тёмный");
             check(t.cardBgColor != 0, "палитра стиля " + st + " построилась");
+            // В тёмных стилях поверхности шторки остались тёмными, а основной
+            // текст — светлым. Если кто-то перепутает ветки, это всплывёт здесь.
+            requireAtLeast(textOn(GlassTheme.TEXT_PRIMARY, GlassTheme.SHADE_CARD), 7.0,
+                    "подпись на карточке тёмного стиля " + st);
+            requireBelow(textOn(GlassTheme.SHADE_CARD, 0xFF000000), 3.0,
+                    "карточка тёмного стиля " + st + " осталась тёмной");
         }
 
         System.out.println("CONTRAST_TESTS=" + n);

@@ -587,11 +587,11 @@ public final class QuickShadeHelper {
         shadeDialog = new Dialog(activity, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
         Window w = shadeDialog.getWindow();
         if (w != null) {
-            w.setBackgroundDrawable(GlassTheme.makeRoundedRect(0xFF000000, 0));
+            w.setBackgroundDrawable(GlassTheme.makeRoundedRect(GlassTheme.SHADE_BG, 0));
             w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
             w.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
-            w.setStatusBarColor(0xFF000000);
-            w.setNavigationBarColor(0xFF000000);
+            w.setStatusBarColor(GlassTheme.SHADE_BG);
+            w.setNavigationBarColor(GlassTheme.SHADE_BG);
             if (Build.VERSION.SDK_INT >= 28) {
                 WindowManager.LayoutParams lp = w.getAttributes();
                 lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
@@ -1026,7 +1026,7 @@ public final class QuickShadeHelper {
         LinearLayout pill = new LinearLayout(activity);
         pill.setOrientation(LinearLayout.HORIZONTAL);
         pill.setGravity(Gravity.CENTER_VERTICAL);
-        pill.setBackground(GlassTheme.makeRoundedRect(0xFF1A1A1E, dp(16)));
+        pill.setBackground(GlassTheme.makeRoundedRect(GlassTheme.SHADE_FIELD, dp(16)));
         pill.setPadding(dp(12), dp(9), dp(14), dp(9));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -1444,7 +1444,7 @@ public final class QuickShadeHelper {
         GradientDrawable dashed = new GradientDrawable();
         dashed.setShape(GradientDrawable.RECTANGLE);
         dashed.setCornerRadius(dp(18));
-        dashed.setColor(0xFF1A1A1E);
+        dashed.setColor(GlassTheme.SHADE_FIELD);
         dashed.setStroke(dp(1), 0x45FFFFFF);
         box.setBackground(dashed);
 
@@ -1531,7 +1531,7 @@ public final class QuickShadeHelper {
         // Круглая векторная кнопка очистки по центру внизу
         if (hasAccess && !items.isEmpty()) {
             FrameLayout clearCircle = new FrameLayout(activity);
-            clearCircle.setBackground(GlassTheme.makeCircle(0xFF2E2E32));
+            clearCircle.setBackground(GlassTheme.makeCircle(GlassTheme.SHADE_TILE_OFF));
             LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(dp(48), dp(48));
             clp.gravity = Gravity.CENTER_HORIZONTAL;
             clp.topMargin = dp(6);
@@ -1655,7 +1655,7 @@ public final class QuickShadeHelper {
         tv.setTextColor(onTileColor(active));
         tv.setTextSize(12f);
         tv.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        tv.setBackground(GlassTheme.makePill(active ? activeColor : 0xFF1F1F24));
+        tv.setBackground(GlassTheme.makePill(active ? activeColor : GlassTheme.SHADE_FIELD));
         tv.setPadding(dp(12), dp(6), dp(12), dp(6));
         // Длинное название приложения не должно растягивать ряд чипов за экран:
         // ограничиваем ширину и отдаём обрезку TextView (многоточие по метрикам
@@ -1698,7 +1698,7 @@ public final class QuickShadeHelper {
         LinearLayout undoPill = new LinearLayout(activity);
         undoPill.setOrientation(LinearLayout.HORIZONTAL);
         undoPill.setGravity(Gravity.CENTER_VERTICAL);
-        undoPill.setBackground(GlassTheme.makeRoundedRect(0xFF1F2430, dp(16), GlassTheme.ACCENT_SOFT_BG, dp(1)));
+        undoPill.setBackground(GlassTheme.makeRoundedRect(GlassTheme.SHADE_FIELD, dp(16), GlassTheme.ACCENT_SOFT_BG, dp(1)));
         undoPill.setPadding(dp(12), dp(7), dp(12), dp(7));
         LinearLayout.LayoutParams upLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -1830,7 +1830,7 @@ public final class QuickShadeHelper {
 
                 TextView clearGrpBtn = new TextView(activity);
                 clearGrpBtn.setText("Убрать все");
-                clearGrpBtn.setTextColor(0xFFFCA5A5);
+                clearGrpBtn.setTextColor(GlassTheme.ACCENT_RED);
                 clearGrpBtn.setTextSize(12f);
                 clearGrpBtn.setPadding(dp(6), dp(4), dp(4), dp(4));
                 clearGrpBtn.setOnClickListener(v -> {
@@ -2056,10 +2056,10 @@ public final class QuickShadeHelper {
         trackChildDialog(dlg);
         Window w = dlg.getWindow();
         if (w != null) {
-            w.setBackgroundDrawable(GlassTheme.makeRoundedRect(0xFF000000, 0));
+            w.setBackgroundDrawable(GlassTheme.makeRoundedRect(GlassTheme.SHADE_BG, 0));
             w.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
-            w.setStatusBarColor(0xFF000000);
-            w.setNavigationBarColor(0xFF000000);
+            w.setStatusBarColor(GlassTheme.SHADE_BG);
+            w.setNavigationBarColor(GlassTheme.SHADE_BG);
             if (Build.VERSION.SDK_INT >= 28) {
                 WindowManager.LayoutParams lp = w.getAttributes();
                 lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
@@ -2069,7 +2069,7 @@ public final class QuickShadeHelper {
 
         LinearLayout root = new LinearLayout(activity);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(0xFF000000);
+        root.setBackgroundColor(GlassTheme.SHADE_BG);
         int topInset = Math.max(dp(26), readSystemBarDimen("status_bar_height") + dp(6));
         int botInset = Math.max(dp(16), readSystemBarDimen("navigation_bar_height") + dp(6));
         root.setPadding(dp(16), topInset, dp(16), botInset);
@@ -2080,7 +2080,7 @@ public final class QuickShadeHelper {
         hdr.setPadding(0, 0, 0, dp(14));
 
         FrameLayout backBtn = new FrameLayout(activity);
-        backBtn.setBackground(GlassTheme.makeCircle(0xFF1A1A1E));
+        backBtn.setBackground(GlassTheme.makeCircle(GlassTheme.SHADE_FIELD));
         ImageView bIco = VectorGlyphs.makeIconView(activity, "close", 15, onSurfaceColor());
         FrameLayout.LayoutParams biLp = new FrameLayout.LayoutParams(dp(15), dp(15));
         biLp.gravity = Gravity.CENTER;
@@ -2110,7 +2110,7 @@ public final class QuickShadeHelper {
         if (!hist.isEmpty()) {
             TextView clearBtn = new TextView(activity);
             clearBtn.setText("Очистить");
-            clearBtn.setTextColor(0xFFFCA5A5);
+            clearBtn.setTextColor(GlassTheme.ACCENT_RED);
             clearBtn.setTextSize(12.5f);
             clearBtn.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
             clearBtn.setBackground(GlassTheme.makeRoundedRect(0x28EF4444, dp(12)));
@@ -2132,7 +2132,7 @@ public final class QuickShadeHelper {
             LinearLayout searchBar = new LinearLayout(activity);
             searchBar.setOrientation(LinearLayout.HORIZONTAL);
             searchBar.setGravity(Gravity.CENTER_VERTICAL);
-            searchBar.setBackground(GlassTheme.makeRoundedRect(0xFF1A1A1E, dp(16)));
+            searchBar.setBackground(GlassTheme.makeRoundedRect(GlassTheme.SHADE_FIELD, dp(16)));
             searchBar.setPadding(dp(12), dp(4), dp(10), dp(4));
             LinearLayout.LayoutParams sbLp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -2192,7 +2192,7 @@ public final class QuickShadeHelper {
                 shown++;
                 LinearLayout card = new LinearLayout(activity);
                 card.setOrientation(LinearLayout.VERTICAL);
-                card.setBackground(GlassTheme.makeRoundedRect(0xFF1A1A1E, dp(18)));
+                card.setBackground(GlassTheme.makeRoundedRect(GlassTheme.SHADE_FIELD, dp(18)));
                 card.setPadding(dp(14), dp(11), dp(14), dp(11));
                 LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -2410,7 +2410,7 @@ public final class QuickShadeHelper {
                 ImageView badge = new ImageView(activity);
                 badge.setImageDrawable(appIcon);
                 badge.setScaleType(ImageView.ScaleType.FIT_CENTER);
-                badge.setBackground(GlassTheme.makeCircle(0xFF1F1F24));
+                badge.setBackground(GlassTheme.makeCircle(GlassTheme.SHADE_CARD));
                 badge.setPadding(dp(1), dp(1), dp(1), dp(1));
                 FrameLayout.LayoutParams bgLp = new FrameLayout.LayoutParams(dp(14), dp(14));
                 bgLp.gravity = Gravity.BOTTOM | Gravity.END;
@@ -2445,7 +2445,7 @@ public final class QuickShadeHelper {
 
         final FrameLayout dismissBackdrop = new FrameLayout(activity);
         if (item.clearable) {
-            dismissBackdrop.setBackground(GlassTheme.makeRoundedRect(0xFF991B1B, dp(20)));
+            dismissBackdrop.setBackground(GlassTheme.makeRoundedRect(GlassTheme.ACCENT_RED, dp(20)));
             dismissBackdrop.setAlpha(0f);
             ImageView leftTrash = VectorGlyphs.makeIconView(activity, "trash", 18, onSurfaceColor());
             FrameLayout.LayoutParams ltLp = new FrameLayout.LayoutParams(dp(18), dp(18));
@@ -2581,7 +2581,7 @@ public final class QuickShadeHelper {
             }
             try {
                 pb.setProgressTintList(android.content.res.ColorStateList.valueOf(GlassTheme.TILE_ACTIVE_BLUE));
-                pb.setProgressBackgroundTintList(android.content.res.ColorStateList.valueOf(0xFF34363F));
+                pb.setProgressBackgroundTintList(android.content.res.ColorStateList.valueOf(GlassTheme.SLIDER_TRACK));
                 pb.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(GlassTheme.TILE_ACTIVE_BLUE));
             } catch (Throwable ignored) {}
             progRow.addView(pb, new LinearLayout.LayoutParams(0, dp(5), 1f));
@@ -2621,7 +2621,7 @@ public final class QuickShadeHelper {
         inlineReplyBox.setOrientation(LinearLayout.VERTICAL);
         inlineReplyBox.setVisibility(View.GONE);
         inlineReplyBox.setPadding(dp(10), dp(7), dp(8), dp(7));
-        inlineReplyBox.setBackground(GlassTheme.makeRoundedRect(0xFF17181D, dp(14), GlassTheme.ACCENT_SOFT_BG, dp(1)));
+        inlineReplyBox.setBackground(GlassTheme.makeRoundedRect(GlassTheme.SHADE_CARD, dp(14), GlassTheme.ACCENT_SOFT_BG, dp(1)));
         LinearLayout.LayoutParams irLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         irLp.topMargin = dp(8);
@@ -2679,10 +2679,10 @@ public final class QuickShadeHelper {
                 } else {
                     TextView actChip = new TextView(activity);
                     actChip.setText(act.title);
-                    actChip.setTextColor(0xFFE5E7EB);
+                    actChip.setTextColor(onSurfaceTextColor());
                     actChip.setTextSize(12f);
                     actChip.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-                    actChip.setBackground(GlassTheme.makePill(0xFF2B2C32));
+                    actChip.setBackground(GlassTheme.makePill(GlassTheme.SHADE_TILE_OFF));
                     actChip.setPadding(dp(11), dp(5), dp(11), dp(5));
                     LinearLayout.LayoutParams acLp = new LinearLayout.LayoutParams(
                             ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -2725,7 +2725,7 @@ public final class QuickShadeHelper {
                     host.showToast(ok ? "Отложено на 1 час" : "Не удалось отложить");
                     rebuildShadeContent();
                 }));
-                ctrlRow.addView(makeSmallCardActionChip("trash", "Убрать", 0xFFFCA5A5, () -> {
+                ctrlRow.addView(makeSmallCardActionChip("trash", "Убрать", GlassTheme.ACCENT_RED, () -> {
                     DoxaizNotificationService.dismissNotification(item.key);
                     expandedNotifKeys.remove(item.key);
                     recordDismissedBanner("Уведомление смахнуто");
@@ -2913,14 +2913,14 @@ public final class QuickShadeHelper {
             ImageView art = new ImageView(activity);
             art.setImageBitmap(media.albumArt);
             art.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            art.setBackground(GlassTheme.makeRoundedRect(0xFF2C2E38, dp(12)));
+            art.setBackground(GlassTheme.makeRoundedRect(GlassTheme.SHADE_TILE_OFF, dp(12)));
             art.setClipToOutline(true);
             LinearLayout.LayoutParams aLp = new LinearLayout.LayoutParams(dp(46), dp(46));
             aLp.rightMargin = dp(11);
             topRow.addView(art, aLp);
         } else {
             FrameLayout icoBox = new FrameLayout(activity);
-            icoBox.setBackground(GlassTheme.makeRoundedRect(0xFF2C2E38, dp(12)));
+            icoBox.setBackground(GlassTheme.makeRoundedRect(GlassTheme.SHADE_TILE_OFF, dp(12)));
             LinearLayout.LayoutParams aLp = new LinearLayout.LayoutParams(dp(46), dp(46));
             aLp.rightMargin = dp(11);
             icoBox.setLayoutParams(aLp);
@@ -2965,7 +2965,7 @@ public final class QuickShadeHelper {
         LinearLayout outChip = new LinearLayout(activity);
         outChip.setOrientation(LinearLayout.HORIZONTAL);
         outChip.setGravity(Gravity.CENTER_VERTICAL);
-        outChip.setBackground(GlassTheme.makeRoundedRect(0xFF2B2F3B, dp(12)));
+        outChip.setBackground(GlassTheme.makeRoundedRect(GlassTheme.SHADE_TILE_OFF, dp(12)));
         outChip.setPadding(dp(8), dp(5), dp(9), dp(5));
         LinearLayout.LayoutParams ocLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -3105,7 +3105,7 @@ public final class QuickShadeHelper {
         lp.rightMargin = dp(6);
         b.setLayoutParams(lp);
         b.setBackground(GlassTheme.makeRoundedRect(
-                primary ? GlassTheme.TILE_ACTIVE_BLUE : 0xFF2E303A, dp(12)));
+                primary ? GlassTheme.TILE_ACTIVE_BLUE : GlassTheme.SHADE_TILE_OFF, dp(12)));
 
         ImageView iv = VectorGlyphs.makeIconView(activity, glyph, primary ? 17 : 15, onSurfaceColor());
         FrameLayout.LayoutParams iLp = new FrameLayout.LayoutParams(
@@ -3278,7 +3278,7 @@ public final class QuickShadeHelper {
         LinearLayout tabs = new LinearLayout(activity);
         tabs.setOrientation(LinearLayout.HORIZONTAL);
         tabs.setGravity(Gravity.CENTER);
-        tabs.setBackground(GlassTheme.makeRoundedRect(0xFF1A1A1E, dp(18)));
+        tabs.setBackground(GlassTheme.makeRoundedRect(GlassTheme.SHADE_FIELD, dp(18)));
         tabs.setPadding(dp(4), dp(4), dp(4), dp(4));
 
         TextView notifTab = makeSwitchTab("Уведомления", activeTab == TAB_NOTIFICATIONS);
@@ -3356,7 +3356,7 @@ public final class QuickShadeHelper {
         tv.setTypeface(Typeface.create(active ? "sans-serif-medium" : "sans-serif", Typeface.NORMAL));
         tv.setPadding(dp(16), dp(7), dp(16), dp(7));
         if (active) {
-            tv.setBackground(GlassTheme.makeRoundedRect(0xFF2E2E34, dp(14)));
+            tv.setBackground(GlassTheme.makeRoundedRect(GlassTheme.SHADE_TILE_OFF, dp(14)));
         }
         return tv;
     }
@@ -3412,7 +3412,7 @@ public final class QuickShadeHelper {
 
         LinearLayout tileCard = new LinearLayout(activity);
         tileCard.setOrientation(LinearLayout.VERTICAL);
-        tileCard.setBackground(GlassTheme.makeRoundedRect(0xFF1F1F24, dp(24)));
+        tileCard.setBackground(GlassTheme.makeRoundedRect(GlassTheme.SHADE_CARD, dp(24)));
         tileCard.setPadding(dp(12), dp(16), dp(12), dp(12));
 
         List<String> allIds = getAllEnabledTilesIncludingConn(prefs);
@@ -3604,7 +3604,7 @@ public final class QuickShadeHelper {
         boolean active = isTileActive(tileId);
         int color = active
                 ? ("mobile".equals(tileId) ? GlassTheme.TILE_ACTIVE_GREEN : GlassTheme.TILE_ACTIVE_BLUE)
-                : 0xFF2E2E34;
+                : GlassTheme.SHADE_TILE_OFF;
 
         LinearLayout wrap = new LinearLayout(activity);
         wrap.setOrientation(LinearLayout.VERTICAL);
@@ -3769,7 +3769,7 @@ public final class QuickShadeHelper {
         LinearLayout bar = new LinearLayout(activity);
         bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setGravity(Gravity.CENTER_VERTICAL);
-        bar.setBackground(GlassTheme.makeRoundedRect(0xFF1F1F24, dp(22)));
+        bar.setBackground(GlassTheme.makeRoundedRect(GlassTheme.SHADE_CARD, dp(22)));
         bar.setPadding(dp(14), dp(10), dp(12), dp(10));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -3803,7 +3803,7 @@ public final class QuickShadeHelper {
             autoBtn.setTextSize(13f);
             autoBtn.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
             autoBtn.setGravity(Gravity.CENTER);
-            autoBtn.setBackground(GlassTheme.makeCircle(autoBright ? GlassTheme.ACCENT_BLUE : 0xFF323238));
+            autoBtn.setBackground(GlassTheme.makeCircle(autoBright ? GlassTheme.ACCENT_BLUE : GlassTheme.SHADE_TILE_OFF));
             LinearLayout.LayoutParams aLp = new LinearLayout.LayoutParams(dp(30), dp(30));
             aLp.leftMargin = dp(8);
             autoBtn.setLayoutParams(aLp);
@@ -3831,7 +3831,7 @@ public final class QuickShadeHelper {
         trackChildDialog(dlg);
         Window w = dlg.getWindow();
         if (w != null) {
-            w.setBackgroundDrawable(GlassTheme.makeRoundedRect(0xFF000000, 0));
+            w.setBackgroundDrawable(GlassTheme.makeRoundedRect(GlassTheme.SHADE_BG, 0));
             if (Build.VERSION.SDK_INT >= 28) {
                 WindowManager.LayoutParams lp = w.getAttributes();
                 lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
@@ -3841,7 +3841,7 @@ public final class QuickShadeHelper {
 
         final LinearLayout root = new LinearLayout(activity);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(0xFF000000);
+        root.setBackgroundColor(GlassTheme.SHADE_BG);
         root.setPadding(dp(16), dp(24), dp(16), dp(18));
 
         LinearLayout top = new LinearLayout(activity);
@@ -5182,7 +5182,7 @@ public final class QuickShadeHelper {
     }
 
     private int resolveNetIconColor(String netType) {
-        if ("Нет сети".equals(netType)) return 0xFF52525B;
+        if ("Нет сети".equals(netType)) return GlassTheme.TEXT_MUTED;
         return GlassTheme.ACCENT_GREEN;
     }
 
@@ -5341,7 +5341,7 @@ public final class QuickShadeHelper {
     private View buildPopupGreenToggle(boolean checked, View.OnClickListener onClick) {
         FrameLayout track = new FrameLayout(activity);
         track.setBackground(GlassTheme.makeRoundedRect(
-                checked ? GlassTheme.ACCENT_GREEN : 0xFF48484E, dp(14)));
+                checked ? GlassTheme.ACCENT_GREEN : GlassTheme.SWITCH_OFF, dp(14)));
         track.setPadding(dp(3), dp(3), dp(3), dp(3));
         LinearLayout.LayoutParams tLp = new LinearLayout.LayoutParams(dp(46), dp(26));
         track.setLayoutParams(tLp);
@@ -5436,7 +5436,7 @@ public final class QuickShadeHelper {
 
                 TextView subTv = new TextView(activity);
                 subTv.setText("Активно • Аудиовыход");
-                subTv.setTextColor(0xFF9EA0A8);
+                subTv.setTextColor(GlassTheme.TEXT_MUTED);
                 subTv.setTextSize(12.5f);
                 txt.addView(subTv);
                 row.addView(txt, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
@@ -5460,7 +5460,7 @@ public final class QuickShadeHelper {
 
         TextView secTv = new TextView(activity);
         secTv.setText("Доступные устройства");
-        secTv.setTextColor(0xFF8E9098);
+        secTv.setTextColor(GlassTheme.TEXT_MUTED);
         secTv.setTextSize(12.5f);
         secTv.setPadding(dp(2), 0, dp(2), dp(8));
         card.addView(secTv);
@@ -5470,7 +5470,7 @@ public final class QuickShadeHelper {
         hintRow.setGravity(Gravity.CENTER_VERTICAL);
         hintRow.setPadding(dp(2), dp(6), dp(2), dp(6));
 
-        ImageView btIc = VectorGlyphs.makeIconView(activity, "bluetooth", 18, 0xFFB0B3BC);
+        ImageView btIc = VectorGlyphs.makeIconView(activity, "bluetooth", 18, GlassTheme.TEXT_SECONDARY);
         LinearLayout.LayoutParams bLp = new LinearLayout.LayoutParams(dp(18), dp(18));
         bLp.rightMargin = dp(12);
         hintRow.addView(btIc, bLp);
@@ -5482,7 +5482,7 @@ public final class QuickShadeHelper {
                 : (btOn
                         ? "Нажмите «Больше настроек» для поиска и подключения новых устройств"
                         : "Bluetooth выключен — откройте системные настройки, чтобы включить"));
-        hintTv.setTextColor(0xFFB8BAC2);
+        hintTv.setTextColor(GlassTheme.TEXT_SECONDARY);
         hintTv.setTextSize(13f);
         hintRow.addView(hintTv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         hintRow.setOnClickListener(openBtSettings);
@@ -5551,7 +5551,7 @@ public final class QuickShadeHelper {
             emptyBox.setMinimumHeight(dp(186));
             TextView emptyTv = new TextView(activity);
             emptyTv.setText("Не удалось найти доступные сети Wi-Fi");
-            emptyTv.setTextColor(0xFF8E9098);
+            emptyTv.setTextColor(GlassTheme.TEXT_MUTED);
             emptyTv.setTextSize(14.5f);
             emptyTv.setGravity(Gravity.CENTER);
             FrameLayout.LayoutParams eLp = new FrameLayout.LayoutParams(
@@ -5564,7 +5564,7 @@ public final class QuickShadeHelper {
         } else {
             TextView secTv = new TextView(activity);
             secTv.setText("Доступная сеть");
-            secTv.setTextColor(0xFF8E9098);
+            secTv.setTextColor(GlassTheme.TEXT_MUTED);
             secTv.setTextSize(13f);
             secTv.setPadding(dp(2), 0, dp(2), dp(10));
             card.addView(secTv);
@@ -5589,7 +5589,7 @@ public final class QuickShadeHelper {
 
             TextView stSub = new TextView(activity);
             stSub.setText("Частный DNS: " + dnsInfo + " • Авто-сеть: " + (p.isAutoNetworkEnabled() ? "Вкл" : "Выкл"));
-            stSub.setTextColor(0xFF8E9098);
+            stSub.setTextColor(GlassTheme.TEXT_MUTED);
             stSub.setTextSize(12f);
             txt.addView(stSub);
             activeRow.addView(txt, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
@@ -5603,7 +5603,7 @@ public final class QuickShadeHelper {
             pickRow.setOrientation(LinearLayout.HORIZONTAL);
             pickRow.setGravity(Gravity.CENTER_VERTICAL);
             pickRow.setPadding(dp(2), dp(10), dp(2), dp(10));
-            ImageView wIc2 = VectorGlyphs.makeIconView(activity, "wifi", 19, 0xFFB0B3BC);
+            ImageView wIc2 = VectorGlyphs.makeIconView(activity, "wifi", 19, GlassTheme.TEXT_SECONDARY);
             LinearLayout.LayoutParams w2Lp = new LinearLayout.LayoutParams(dp(19), dp(19));
             w2Lp.rightMargin = dp(14);
             pickRow.addView(wIc2, w2Lp);
@@ -5619,13 +5619,13 @@ public final class QuickShadeHelper {
             recheckRow.setOrientation(LinearLayout.HORIZONTAL);
             recheckRow.setGravity(Gravity.CENTER_VERTICAL);
             recheckRow.setPadding(dp(2), dp(10), dp(2), dp(6));
-            ImageView rIc = VectorGlyphs.makeIconView(activity, "autonet", 19, 0xFFB0B3BC);
+            ImageView rIc = VectorGlyphs.makeIconView(activity, "autonet", 19, GlassTheme.TEXT_SECONDARY);
             LinearLayout.LayoutParams rLp = new LinearLayout.LayoutParams(dp(19), dp(19));
             rLp.rightMargin = dp(14);
             recheckRow.addView(rIc, rLp);
             TextView rcTv = new TextView(activity);
             rcTv.setText("Перепроверить канал сейчас");
-            rcTv.setTextColor(0xFFD4D6DE);
+            rcTv.setTextColor(GlassTheme.TEXT_SECONDARY);
             rcTv.setTextSize(14f);
             recheckRow.addView(rcTv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
             recheckRow.setOnClickListener(v -> {
@@ -5722,7 +5722,7 @@ public final class QuickShadeHelper {
         if (backId == null && frontId == null) {
             TextView noFlash = new TextView(activity);
             noFlash.setText("На этом устройстве не обнаружена аппаратная вспышка.");
-            noFlash.setTextColor(0xFF9EA0A8);
+            noFlash.setTextColor(GlassTheme.TEXT_MUTED);
             noFlash.setTextSize(14f);
             noFlash.setPadding(0, dp(8), 0, dp(10));
             card.addView(noFlash);
@@ -5822,7 +5822,7 @@ public final class QuickShadeHelper {
 
             TextView strLbl = new TextView(activity);
             strLbl.setText("Яркость подсветки");
-            strLbl.setTextColor(0xFFB8BAC2);
+            strLbl.setTextColor(GlassTheme.TEXT_SECONDARY);
             strLbl.setTextSize(12.5f);
             strHead.addView(strLbl, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
@@ -5861,7 +5861,7 @@ public final class QuickShadeHelper {
         if (!hasFront) {
             TextView devNote = new TextView(activity);
             devNote.setText("Фронтальная вспышка не предусмотрена на этом устройстве");
-            devNote.setTextColor(0xFF8E9098);
+            devNote.setTextColor(GlassTheme.TEXT_MUTED);
             devNote.setTextSize(12f);
             devNote.setGravity(Gravity.CENTER);
             LinearLayout.LayoutParams dnLp = new LinearLayout.LayoutParams(
@@ -5898,7 +5898,7 @@ public final class QuickShadeHelper {
         if (!hasWifiHw) {
             TextView noWifi = new TextView(activity);
             noWifi.setText("Модуль Wi-Fi для точки доступа отсутствует на этом устройстве.");
-            noWifi.setTextColor(0xFF9EA0A8);
+            noWifi.setTextColor(GlassTheme.TEXT_MUTED);
             noWifi.setTextSize(14f);
             noWifi.setPadding(dp(2), dp(8), dp(2), dp(8));
             card.addView(noWifi);
@@ -5936,7 +5936,7 @@ public final class QuickShadeHelper {
 
         TextView capTv = new TextView(activity);
         capTv.setText(caption);
-        capTv.setTextColor(0xFF8E9098);
+        capTv.setTextColor(GlassTheme.TEXT_MUTED);
         capTv.setTextSize(12.5f);
         LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -6040,7 +6040,7 @@ public final class QuickShadeHelper {
         if (!hasTel || slots.isEmpty()) {
             TextView noModem = new TextView(activity);
             noModem.setText("Сотовый модем отсутствует на этом устройстве.");
-            noModem.setTextColor(0xFF9EA0A8);
+            noModem.setTextColor(GlassTheme.TEXT_MUTED);
             noModem.setTextSize(14f);
             noModem.setPadding(dp(2), dp(8), dp(2), dp(8));
             card.addView(noModem);
@@ -6068,7 +6068,7 @@ public final class QuickShadeHelper {
 
                 TextView subTv = new TextView(activity);
                 subTv.setText(s.subtitle);
-                subTv.setTextColor(0xFF8E9098);
+                subTv.setTextColor(GlassTheme.TEXT_MUTED);
                 subTv.setTextSize(12.5f);
                 txt.addView(subTv);
                 row.addView(txt, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
@@ -6146,7 +6146,7 @@ public final class QuickShadeHelper {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
             TextView unsup = new TextView(activity);
             unsup.setText("Мгновенный снимок экрана из шторки доступен на Android 9 и выше.");
-            unsup.setTextColor(0xFF9EA0A8);
+            unsup.setTextColor(GlassTheme.TEXT_MUTED);
             unsup.setTextSize(13.5f);
             unsup.setPadding(dp(2), dp(6), dp(2), dp(10));
             card.addView(unsup);
@@ -6154,7 +6154,7 @@ public final class QuickShadeHelper {
             if (!DoxaizLockService.isRunning()) {
                 TextView status = new TextView(activity);
                 status.setText("Для снимка в 1 касание включите службу Doxaiz в Спецвозможностях");
-                status.setTextColor(0xFFFBBF24);
+                status.setTextColor(GlassTheme.ACCENT_AMBER);
                 status.setTextSize(12.5f);
                 status.setPadding(dp(10), dp(8), dp(10), dp(8));
                 status.setBackground(GlassTheme.makeRoundedRect(0x26FBBF24, dp(12)));
@@ -6261,7 +6261,7 @@ public final class QuickShadeHelper {
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
             row.setPadding(dp(10), dp(11), dp(10), dp(11));
-            row.setBackground(GlassTheme.makeRoundedRect(isActive ? 0xFF282B30 : Color.TRANSPARENT, dp(14)));
+            row.setBackground(GlassTheme.makeRoundedRect(isActive ? GlassTheme.SHADE_FIELD : Color.TRANSPARENT, dp(14)));
             LinearLayout.LayoutParams rLp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             rLp.bottomMargin = dp(4);

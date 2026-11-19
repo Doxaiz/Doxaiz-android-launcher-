@@ -56,6 +56,18 @@ public final class GlassTheme {
      * Отдельное статическое поле нужно потому, что шторка и статус-бар рисуются
      * до того, как под рукой окажется экземпляр {@code GlassTheme}.
      */
+    /**
+     * Поверхность карточек, полей поиска и строк внутри шторки.
+     *
+     * Исторически эти места красились литералами 0xFF1A1A1E / 0xFF1F1F24 /
+     * 0xFF2E2E34 прямо в {@code QuickShadeHelper} — на светлой палитре это
+     * давало чёрные карточки на белом фоне. Теперь цвет берётся отсюда.
+     */
+    public static volatile int SHADE_CARD        = 0xFF1A1A1E;
+    /** Поле ввода / неактивная круглая кнопка на шторке. */
+    public static volatile int SHADE_FIELD       = 0xFF1F1F24;
+    /** Выключенная круглая плитка быстрых действий. */
+    public static volatile int SHADE_TILE_OFF    = 0xFF2E2E34;
     public static volatile int TEXT_PRIMARY      = 0xFFF7F4F8;
     public static volatile int TEXT_SECONDARY    = 0xC4DCE0F5;
     public static volatile int TEXT_MUTED        = 0x8AA9B0D0;
@@ -245,6 +257,9 @@ public final class GlassTheme {
             DRAWER_SEARCH_BG = 0xFFE6E8EC; CARD_BORDER_LIVE = 0x26313744;
             LIGHT_SURFACES = true;
             TEXT_PRIMARY = 0xFF151922; // тот же, что textPrimary светлой палитры
+            SHADE_CARD    = 0xFFEDEFF3;
+            SHADE_FIELD   = 0xFFE6E9EF;
+            SHADE_TILE_OFF = 0xFFDCE3EC;
             return new GlassTheme(
                     safeStyle, false,
                     argb(24, 0, 0, 0),
@@ -284,6 +299,9 @@ public final class GlassTheme {
             LIGHT_SURFACES    = false;
             // Кибер: светлый циан-белый на тёмных поверхностях.
             TEXT_PRIMARY      = 0xFFE9FBFF;
+            SHADE_CARD        = 0xFF121A33;
+            SHADE_FIELD       = 0xFF101A2E;
+            SHADE_TILE_OFF    = 0xFF1B2440;
             SHADE_BG          = 0xFF060814;
             POPUP_BG          = 0xFF0E1326;
             SURFACE_ELEVATED  = 0xFF131932;
@@ -352,6 +370,9 @@ public final class GlassTheme {
             LIGHT_SURFACES    = false;
             // Графит: белый текст на чёрном, как было.
             TEXT_PRIMARY      = 0xFFFFFFFF;
+            SHADE_CARD        = 0xFF1A1A1E;
+            SHADE_FIELD       = 0xFF1F1F24;
+            SHADE_TILE_OFF    = 0xFF2E2E34;
             cardA = clampLocal(216 + d, 152, 248);
             pillA = clampLocal(222 + d, 160, 250);
             overlayA = clampLocal(244 + d / 3, 212, 255);
@@ -431,6 +452,9 @@ public final class GlassTheme {
         LIGHT_SURFACES    = false;
         // Сакура: почти белый тёплый (argb(252,12,16,32) из палитры).
         TEXT_PRIMARY      = 0xFFF7F8FA;
+        SHADE_CARD        = 0xFF1A1A1E;
+        SHADE_FIELD       = 0xFF1F1F24;
+        SHADE_TILE_OFF    = 0xFF2E2E34;
         // По умолчанию (0): STYLE_SAKURA_JADE — Синтез Аниме × Дунхуа (Ночной сакура-нефрит и золотая луна)
         SHADE_BG          = 0xFF07080F;
         POPUP_BG          = 0xFF131523;

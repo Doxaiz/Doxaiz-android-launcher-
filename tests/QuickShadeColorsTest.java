@@ -44,9 +44,14 @@ public final class QuickShadeColorsTest {
                     "подложка акцента отличается от графита: " + names[i]);
 
             // Подпись акцентного действия на подложке должна читаться.
+            // Подложка полупрозрачная, поэтому смешиваем её с фоном ИМЕННО
+            // этого стиля: раньше здесь был зашит фон графита (24,24,27), и
+            // светлая плашка на нём давала 2,98:1 — это была ошибка проверки,
+            // а не палитры.
+            int[] shade = flatten(GlassTheme.SHADE_BG, 0, 0, 0);
             double onSoft = Legibility.contrastOnLayer(
                     GlassTheme.ACCENT_SOFT_BG,
-                    24, 24, 27,
+                    shade[0], shade[1], shade[2],
                     (GlassTheme.ACCENT_BLUE >> 16) & 0xFF,
                     (GlassTheme.ACCENT_BLUE >> 8) & 0xFF,
                     GlassTheme.ACCENT_BLUE & 0xFF);
@@ -68,14 +73,18 @@ public final class QuickShadeColorsTest {
                     + "), alpha=" + alpha);
         }
 
-        // Белая подпись на плашке действия: заливка полупрозрачная, но текст
-        // должен читаться. Порог обычного текста — 4,5:1.
+        // Подпись на плашке действия: заливка полупрозрачная, но текст должен
+        // читаться. Порог обычного текста — 4,5:1. Цвет подписи зависит от
+        // темы: в светлой палитре она тёмная, в тёмных — белая.
         for (int i = 0; i < styles.length; i++) {
             GlassTheme.createResolved(styles[i], 1);
-            double white = Legibility.contrastOnLayer(
-                    GlassTheme.ACCENT_SOFT_BG, 24, 24, 27, 255, 255, 255);
-            check(white >= 4.5, "белая подпись на плашке действия ("
-                    + names[i] + "): " + Math.round(white * 100) / 100.0);
+            int[] shade = flatten(GlassTheme.SHADE_BG, 0, 0, 0);
+            int label = GlassTheme.LIGHT_SURFACES ? GlassTheme.TEXT_PRIMARY : 0xFFFFFFFF;
+            double onSoft = Legibility.contrastOnLayer(
+                    GlassTheme.ACCENT_SOFT_BG, shade[0], shade[1], shade[2],
+                    (label >> 16) & 0xFF, (label >> 8) & 0xFF, label & 0xFF);
+            check(onSoft >= 4.5, "подпись на плашке действия ("
+                    + names[i] + "): " + Math.round(onSoft * 100) / 100.0);
         }
 
         System.out.println("QUICK_SHADE_COLORS_TESTS=" + n);
