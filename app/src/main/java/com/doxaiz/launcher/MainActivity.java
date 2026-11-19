@@ -1908,7 +1908,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         sbLp.bottomMargin = dp(10);
         searchBar.setLayoutParams(sbLp);
 
-        ImageView sIco = VectorGlyphs.makeIconView(this, "search", 16, 0xFF9EA0A6);
+        ImageView sIco = VectorGlyphs.makeIconView(this, "search", 16, GlassTheme.TEXT_MUTED);
         LinearLayout.LayoutParams siLp = new LinearLayout.LayoutParams(dp(16), dp(16));
         siLp.rightMargin = dp(9);
         searchBar.addView(sIco, siLp);
@@ -1936,7 +1936,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
         settingsSearchClearBtn = new FrameLayout(this);
         settingsSearchClearBtn.setVisibility(View.GONE);
-        ImageView clrIv = VectorGlyphs.makeIconView(this, "close", 15, 0xFF9EA0A6);
+        ImageView clrIv = VectorGlyphs.makeIconView(this, "close", 15, GlassTheme.TEXT_MUTED);
         FrameLayout.LayoutParams cIvLp = new FrameLayout.LayoutParams(dp(15), dp(15));
         cIvLp.gravity = Gravity.CENTER;
         settingsSearchClearBtn.addView(clrIv, cIvLp);
@@ -2051,7 +2051,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         drawerSearchPill.setBackground(GlassTheme.makeRoundedRect(GlassTheme.DRAWER_SEARCH_BG, dp(16)));
         tintIcon(drawerSearchIcon, 0xFF9EA0A8);
         drawerSearchInput.setTextColor(theme.textPrimary);
-        drawerSearchInput.setHintTextColor(0xFF8E9098);
+        drawerSearchInput.setHintTextColor(GlassTheme.TEXT_MUTED);
         tintIcon(drawerClearIcon, theme.textSecondary);
 
         drawerModeBtn.setBackground(null);
@@ -2091,9 +2091,9 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
         // Doxaiz 4.6: Безрамочный чистый блок недавних приложений
         drawerRecentCard.setBackground(null);
-        drawerRecentLabel.setTextColor(0xFF8E9098);
+        drawerRecentLabel.setTextColor(GlassTheme.TEXT_MUTED);
         if (drawerAllAppsLabel != null) {
-            drawerAllAppsLabel.setTextColor(0xFF8E9098);
+            drawerAllAppsLabel.setTextColor(GlassTheme.TEXT_MUTED);
         }
 
         settingsContainer.setBackgroundColor(theme.overlayBgColor);
@@ -4390,11 +4390,11 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         sortChip.setBackground(GlassTheme.makeGlassRect(
                 this,
                 sortHighlighted ? 0xFF1B2B45 : theme.cardBgColor,
-                sortHighlighted ? 0xFF2B8BFF : theme.cardBorderColor,
+                sortHighlighted ? GlassTheme.ACCENT_BLUE : theme.cardBorderColor,
                 14f, 1f
         ));
         ImageView sortIco = VectorGlyphs.makeIconView(this, "sort", 14,
-                sortHighlighted ? 0xFF60A5FA : theme.textSecondary);
+                sortHighlighted ? GlassTheme.ACCENT_BLUE : theme.textSecondary);
         LinearLayout.LayoutParams siLp = new LinearLayout.LayoutParams(dp(14), dp(14));
         siLp.rightMargin = dp(5);
         sortChip.addView(sortIco, siLp);
@@ -7374,7 +7374,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
         TextView countTv = new TextView(this);
         countTv.setText(desktop.pages.size() + " / " + DesktopModel.MAX_PAGES);
-        countTv.setTextColor(0xFF9EA0A6);
+        countTv.setTextColor(GlassTheme.TEXT_MUTED);
         countTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
         hdr.addView(countTv);
         box.addView(hdr);
@@ -7449,7 +7449,8 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             TextView cLbl = new TextView(this);
             final boolean isHomePage = (pageIdx == getEffectiveHomePageIndex());
             cLbl.setText(isHomePage ? ("Главный • " + itemCount + " эл.") : (itemCount == 0 ? "Пусто" : itemCount + " эл."));
-            cLbl.setTextColor(isHomePage ? 0xFF4ADE80 : (active ? 0xFF93C5FD : 0xFF8E9098));
+            cLbl.setTextColor(isHomePage ? GlassTheme.ACCENT_GREEN
+                    : (active ? GlassTheme.ACCENT_BLUE : GlassTheme.TEXT_MUTED));
             cLbl.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10.2f);
             inner.addView(cLbl);
 
@@ -7551,7 +7552,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
             TextView addLbl = new TextView(this);
             addLbl.setText("Добавить");
-            addLbl.setTextColor(0xFF9EA0A6);
+            addLbl.setTextColor(GlassTheme.TEXT_MUTED);
             addLbl.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
             LinearLayout.LayoutParams alLp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
@@ -9058,7 +9059,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         hdr.setGravity(Gravity.CENTER_VERTICAL);
 
         ImageView ico = VectorGlyphs.makeIconView(this, "check", 17,
-                readyCount == 4 ? 0xFF22C55E : 0xFF60A5FA);
+                readyCount == 4 ? GlassTheme.ACCENT_GREEN : GlassTheme.ACCENT_BLUE);
         LinearLayout.LayoutParams iLp = new LinearLayout.LayoutParams(dp(17), dp(17));
         iLp.rightMargin = dp(8);
         hdr.addView(ico, iLp);
@@ -9072,7 +9073,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
         TextView badge = new TextView(this);
         badge.setText(readyCount + " / 4 готово");
-        badge.setTextColor(readyCount == 4 ? 0xFF4ADE80 : 0xFF93C5FD);
+        badge.setTextColor(readyCount == 4 ? GlassTheme.ACCENT_GREEN : GlassTheme.ACCENT_BLUE);
         badge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f);
         badge.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         badge.setPadding(dp(9), dp(4), dp(9), dp(4));
@@ -9132,9 +9133,9 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
         FrameLayout icWrap = new FrameLayout(this);
         icWrap.setBackground(GlassTheme.makeGlassRect(
-                this, ok ? 0x2222C55E : 0xFF28282E, Color.TRANSPARENT, 10f, 0f
+                this, ok ? 0x2222C55E : GlassTheme.SHADE_TILE_OFF, Color.TRANSPARENT, 10f, 0f
         ));
-        ImageView iv = VectorGlyphs.makeIconView(this, glyph, 16, ok ? 0xFF4ADE80 : 0xFF9EA0A6);
+        ImageView iv = VectorGlyphs.makeIconView(this, glyph, 16, ok ? GlassTheme.ACCENT_GREEN : GlassTheme.TEXT_MUTED);
         FrameLayout.LayoutParams ivLp = new FrameLayout.LayoutParams(dp(16), dp(16));
         ivLp.gravity = Gravity.CENTER;
         icWrap.addView(iv, ivLp);
@@ -9594,7 +9595,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
     private void showNotifStatusSettingsModal() {
         LinearLayout box = createModalBox();
-        box.setBackground(GlassTheme.makeRoundedRect(0xFF1F1F21, dp(24)));
+        box.setBackground(GlassTheme.makeRoundedRect(GlassTheme.SHADE_FIELD, dp(24)));
 
         // Верхняя ручка bottom-sheet
         View handle = new View(this);
@@ -9606,7 +9607,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
         TextView title = new TextView(this);
         title.setText("Уведомления и строка состояния");
-        title.setTextColor(Color.WHITE);
+        title.setTextColor(GlassTheme.TEXT_PRIMARY);
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17.5f);
         title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         box.addView(title);
@@ -9736,7 +9737,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
         final TextView title = new TextView(this);
         title.setText(tabs.isEmpty() ? "Активные приложения" : ("Активные приложения • " + tabs.size()));
-        title.setTextColor(Color.WHITE);
+        title.setTextColor(GlassTheme.TEXT_PRIMARY);
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f);
         title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         hdr.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
@@ -9744,7 +9745,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         if (DoxaizLockService.isRunning()) {
             TextView sysBtn = new TextView(this);
             sysBtn.setText("Системные окна");
-            sysBtn.setTextColor(0xFF93C5FD);
+            sysBtn.setTextColor(GlassTheme.ACCENT_BLUE);
             sysBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f);
             sysBtn.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
             sysBtn.setPadding(dp(10), dp(5), dp(10), dp(5));
@@ -10074,7 +10075,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         hdr.setGravity(Gravity.CENTER_VERTICAL);
         TextView title = new TextView(this);
         title.setText("Батарея и нагрев" + (snap.levelPct >= 0 ? (" • " + snap.levelPct + "%") : ""));
-        title.setTextColor(Color.WHITE);
+        title.setTextColor(GlassTheme.TEXT_PRIMARY);
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
         title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         hdr.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
@@ -10153,7 +10154,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     private View makeBatteryStatTile(String label, String value, String sub, int valueColor) {
         LinearLayout tile = new LinearLayout(this);
         tile.setOrientation(LinearLayout.VERTICAL);
-        tile.setBackground(GlassTheme.makeRoundedRect(0xFF26272E, dp(12)));
+        tile.setBackground(GlassTheme.makeRoundedRect(GlassTheme.SHADE_CARD, dp(12)));
         tile.setPadding(dp(10), dp(7), dp(10), dp(7));
 
         TextView lTv = new TextView(this);
@@ -10267,7 +10268,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
         TextView nameTv = new TextView(this);
         nameTv.setText(tab.appLabel);
-        nameTv.setTextColor(Color.WHITE);
+        nameTv.setTextColor(GlassTheme.TEXT_PRIMARY);
         nameTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f);
         nameTv.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         nameTv.setSingleLine(true);
@@ -10388,12 +10389,12 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                 String[] pair = tab.realLines.get(i);
                 LinearLayout bubble = new LinearLayout(this);
                 bubble.setOrientation(LinearLayout.VERTICAL);
-                bubble.setBackground(GlassTheme.makeRoundedRect(0xFF242733, dp(13)));
+                bubble.setBackground(GlassTheme.makeRoundedRect(GlassTheme.SHADE_CARD, dp(13)));
                 bubble.setPadding(dp(10), dp(8), dp(10), dp(8));
                 if (pair[0] != null && !pair[0].isEmpty()) {
                     TextView bTitle = new TextView(this);
                     bTitle.setText(pair[0]);
-                    bTitle.setTextColor(0xFF93C5FD);
+                    bTitle.setTextColor(GlassTheme.ACCENT_BLUE);
                     bTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f);
                     bTitle.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
                     bTitle.setSingleLine(true);
