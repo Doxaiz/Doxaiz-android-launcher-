@@ -193,7 +193,7 @@ public final class HeadsUpBannerHelper {
 
         TextView titleTv = new TextView(activity);
         titleTv.setText(!item.title.isEmpty() ? item.title : appLabel);
-        titleTv.setTextColor(Color.WHITE);
+        titleTv.setTextColor(GlassTheme.TEXT_PRIMARY);
         titleTv.setTextSize(13.5f);
         titleTv.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         titleTv.setMaxLines(1);
@@ -215,9 +215,9 @@ public final class HeadsUpBannerHelper {
         if (!queue.isEmpty()) {
             TextView qTv = new TextView(activity);
             qTv.setText("+" + queue.size());
-            qTv.setTextColor(0xCCFFFFFF);
+            qTv.setTextColor(GlassTheme.TEXT_SECONDARY);
             qTv.setTextSize(10.5f);
-            qTv.setBackground(GlassTheme.makePill(0xFF2B2E38));
+            qTv.setBackground(GlassTheme.makePill(GlassTheme.SHADE_FIELD));
             qTv.setPadding(dp(6), dp(2), dp(6), dp(2));
             topRow.addView(qTv);
         }
@@ -267,10 +267,10 @@ public final class HeadsUpBannerHelper {
                     if (act.isReply()) continue;
                     TextView chip = new TextView(activity);
                     chip.setText(act.title);
-                    chip.setTextColor(0xFF93C5FD);
+                    chip.setTextColor(GlassTheme.ACCENT_BLUE_ON_SOFT);
                     chip.setTextSize(12f);
                     chip.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-                    chip.setBackground(GlassTheme.makePill(0xFF262A36));
+                    chip.setBackground(GlassTheme.makePill(GlassTheme.SHADE_TILE_OFF));
                     chip.setPadding(dp(11), dp(4), dp(11), dp(4));
                     LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
                             ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -401,7 +401,7 @@ public final class HeadsUpBannerHelper {
                 ImageView badge = new ImageView(activity);
                 badge.setImageDrawable(appIcon);
                 badge.setScaleType(ImageView.ScaleType.FIT_CENTER);
-                badge.setBackground(GlassTheme.makeCircle(0xFF191A1F));
+                badge.setBackground(GlassTheme.makeCircle(GlassTheme.SHADE_CARD));
                 badge.setPadding(dp(1), dp(1), dp(1), dp(1));
                 FrameLayout.LayoutParams bLp = new FrameLayout.LayoutParams(dp(15), dp(15));
                 bLp.gravity = Gravity.BOTTOM | Gravity.END;
@@ -413,7 +413,7 @@ public final class HeadsUpBannerHelper {
             if (appIcon != null) {
                 iconIv.setImageDrawable(appIcon);
             } else {
-                iconIv.setImageDrawable(VectorGlyphs.create(activity, "bell", 20, Color.WHITE));
+                iconIv.setImageDrawable(VectorGlyphs.create(activity, "bell", 20, GlassTheme.TEXT_PRIMARY));
             }
             box.addView(iconIv, new FrameLayout.LayoutParams(dp(34), dp(34)));
         }

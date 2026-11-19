@@ -55,6 +55,24 @@ public final class ShadeSelfCheck {
     public static final String EXTRA_STYLE = "doxaiz_style";
 
     /**
+     * Какой экран снимать: {@link #SCREEN_SHADE}, {@link #SCREEN_DRAWER} или
+     * {@link #SCREEN_SETTINGS}.
+     *
+     * Разные экраны проверяются разными запусками, потому что «открыть каталог»
+     * и «открыть настройки» — это разные действия пользователя, а не состояние,
+     * которое можно выставить флагом.
+     */
+    public static final String EXTRA_SCREEN = "doxaiz_screen";
+
+    /** Экран из intent или {@link #SCREEN_SHADE} по умолчанию. */
+    public static String requestedScreen(Activity activity) {
+        if (activity == null || activity.getIntent() == null) return SCREEN_SHADE;
+        String screen = activity.getIntent().getStringExtra(EXTRA_SCREEN);
+        if (SCREEN_DRAWER.equals(screen) || SCREEN_SETTINGS.equals(screen)) return screen;
+        return SCREEN_SHADE;
+    }
+
+    /**
      * Применяет тему из intent, если она там есть.
      *
      * @return запрошенный стиль или -1
@@ -80,7 +98,21 @@ public final class ShadeSelfCheck {
         }
     }
 
-    private static final String OUT_FILE = "shade_selfcheck.txt";
+    /**
+     * Файлы отчётов: по одному на экран, имя включает имя экрана.
+     *
+     * Раньше отчёт шторки писался в отдельное имя (shade_selfcheck.txt), и при
+     * переделке на несколько экранов скрипт и приложение разошлись: прогон ждал
+     * старый файл и падал с «отчёт не появился». Одно правило на все экраны.
+     */
+    private static final String OUT_FILE_PREFIX = "selfcheck_";
+
+    /** Экран, который проверяется: шторка быстрых действий. */
+    static final String SCREEN_SHADE = "shade";
+    /** Экран каталога всех приложений. */
+    static final String SCREEN_DRAWER = "drawer";
+    /** Экран настроек лаунчера. */
+    static final String SCREEN_SETTINGS = "settings";
 
     /** Доля пикселей, которые обязаны принадлежать одной из поверхностей темы. */
     private static final double MIN_SURFACE_SHARE = 0.55;
@@ -99,6 +131,21 @@ public final class ShadeSelfCheck {
 
     /** Доля чистого белого: подписи/иконки не должны остаться белыми. */
     private static final double MAX_WHITE_SHARE = 0.08;
+
+    /**
+     * То же для экранов со списком карточек: там белый — это цвет самих
+     * карточек, а не признак белых подписей.
+     */
+    private static final double MAX_WHITE_SHARE_LIST = 0.75;
+
+    /**
+     * Минимальная доля тёмного текста в кадре.
+     *
+     * Это и есть настоящая проверка «подписи не остались белыми»: в светлой теме
+     * текст обязан быть тёмным. Ноль тёмных пикселей означает, что подписи
+     * белые независимо от того, какого цвета карточки.
+     */
+    private static final double MIN_DARK_TEXT_SHARE = 0.01;
 
     private ShadeSelfCheck() {}
 
@@ -131,7 +178,7 @@ public final class ShadeSelfCheck {
                 try {
                     shade.show(QuickShadeHelper.TAB_CONTROL);
                 } catch (Throwable t) {
-                    write(activity, "СБОЙ\nне удалось открыть шторку: "
+                    writeNamed(activity, SCREEN_SHADE, "СБОЙ\nне удалось открыть шторку: "
                             + t.getClass().getSimpleName() + ": " + t.getMessage());
                     return;
                 }
@@ -146,61 +193,38 @@ public final class ShadeSelfCheck {
         }, 1200L);
     }
 
-    private static void evaluate(Activity activity, QuickShadeHelper shade, int expectedStyle) {
-        try {
-            View root = activity.getWindow() != null
-                    ? activity.getWindow().getDecorView() : null;
-            if (root == null || !shade.isShowing()) {
-                write(activity, "СБОЙ\nшторка не открылась: root=" + (root != null)
-                        + " isShowing=" + shade.isShowing());
-                return;
-            }
-            // Снимаем не рабочий стол, а именно окно шторки: у Dialog своё окно,
-            // и decorView активности его не содержит.
-            View target = findShadeRoot(activity);
-            if (target == null || target.getWidth() == 0 || target.getHeight() == 0) {
-                write(activity, "СБОЙ\nне найден корень шторки для снятия кадра");
-                return;
-            }
-
-            Bitmap bmp = Bitmap.createBitmap(target.getWidth(), target.getHeight(),
-                    Bitmap.Config.ARGB_8888);
-            target.draw(new Canvas(bmp));
-
-            Report r = analyse(bmp, expectedStyle);
-            bmp.recycle();
-
-            StringBuilder sb = new StringBuilder();
-            sb.append(r.ok ? "OK" : "СБОЙ").append('\n');
-            sb.append("стиль=").append(styleName(GlassTheme.ACTIVE_STYLE)).append('\n');
-            sb.append("кадр=").append(r.width).append('x').append(r.height).append('\n');
-            sb.append("самый_частый=#").append(String.format("%06X", r.modeColor & 0xFFFFFF))
-                    .append(" доля=").append(pct(r.modeShare)).append('\n');
-            sb.append("поверхности_темы=").append(pct(r.surfaceShare)).append('\n');
-            sb.append("средняя_яркость=").append(r.averageLuma).append('\n');
-            sb.append("чисто_белый=").append(pct(r.whiteShare)).append('\n');
-            sb.append("лучшая_строка=").append(pct(r.dominantRowShare)).append('\n');
-            sb.append("причины=").append(r.problems.length() == 0 ? "нет" : r.problems).append('\n');
-            if (!r.ok) {
-                // Подсказка для того, кто читает отчёт в CI: чаще всего причина
-                // не в палитре, а в том, что снят не тот кадр.
-                sb.append("подсказка=если кадр снят не с окна шторки, включите в эмуляторе ")
-                        .append("отладочные макеты окон (debug layout) — иначе decorView ")
-                        .append("отдаёт содержимое рабочего стола\n");
-            }
-            write(activity, sb.toString());
-        } catch (Throwable t) {
-            write(activity, "СБОЙ\nисключение при снятии кадра: "
-                    + t.getClass().getSimpleName() + ": " + t.getMessage());
-        } finally {
-            try {
-                shade.dismiss();
-            } catch (Throwable t) {
-                // Закрытие шторки после замера: сбой здесь означает, что шторка
-                // осталась на экране, то есть следующие шаги прогона увидят не то.
-                Diagnostics.record("ShadeSelfCheck.dismiss", t);
-            }
+    /**
+     * Снимает кадр с найденного окна и записывает отчёт.
+     *
+     * Общая часть для всех экранов: разница только в том, что открыть и какое
+     * имя файла использовать.
+     */
+    private static void evaluateView(Activity activity, View target, String screen,
+                                     int expectedStyle) {
+        if (target == null || target.getWidth() == 0 || target.getHeight() == 0) {
+            writeNamed(activity, screen, "СБОЙ\nне найдено окно для снятия кадра (" + screen + ")");
+            return;
         }
+        Bitmap bmp = Bitmap.createBitmap(target.getWidth(), target.getHeight(),
+                Bitmap.Config.ARGB_8888);
+        target.draw(new Canvas(bmp));
+        Report r = analyse(bmp, expectedStyle, screen);
+        bmp.recycle();
+
+        StringBuilder sb = new StringBuilder();
+        sb.append(r.ok ? "OK" : "СБОЙ").append('\n');
+        sb.append("экран=").append(screen).append('\n');
+        sb.append("стиль=").append(styleName(GlassTheme.ACTIVE_STYLE)).append('\n');
+        sb.append("кадр=").append(r.width).append('x').append(r.height).append('\n');
+        sb.append("самый_частый=#").append(String.format("%06X", r.modeColor & 0xFFFFFF))
+                .append(" доля=").append(pct(r.modeShare)).append('\n');
+        sb.append("поверхности_темы=").append(pct(r.surfaceShare)).append('\n');
+        sb.append("средняя_яркость=").append(r.averageLuma).append('\n');
+        sb.append("чисто_белый=").append(pct(r.whiteShare)).append('\n');
+        sb.append("тёмный_текст=").append(pct(r.darkTextShare)).append('\n');
+        sb.append("лучшая_строка=").append(pct(r.dominantRowShare)).append('\n');
+        sb.append("причины=").append(r.problems.length() == 0 ? "нет" : r.problems).append('\n');
+        writeNamed(activity, screen, sb.toString());
     }
 
     /**
@@ -249,6 +273,46 @@ public final class ShadeSelfCheck {
         return activity.getWindow() != null ? activity.getWindow().getDecorView() : null;
     }
 
+    /** Проверка каталога: тот же кадр, но с окна активности. */
+    static void evaluateScreen(Activity activity, String screen, int expectedStyle) {
+        if (activity == null) return;
+        try {
+            View decor = activity.getWindow() != null
+                    ? activity.getWindow().getDecorView() : null;
+            evaluateView(activity, decor, screen, expectedStyle);
+        } catch (Throwable t) {
+            writeNamed(activity, screen, "СБОЙ\nисключение при снятии кадра: "
+                    + t.getClass().getSimpleName() + ": " + t.getMessage());
+        }
+    }
+
+    private static void evaluate(Activity activity, QuickShadeHelper shade, int expectedStyle) {
+        try {
+            View root = activity.getWindow() != null
+                    ? activity.getWindow().getDecorView() : null;
+            if (root == null || !shade.isShowing()) {
+                writeNamed(activity, SCREEN_SHADE, "СБОЙ\nшторка не открылась: root=" + (root != null)
+                        + " isShowing=" + shade.isShowing());
+                return;
+            }
+            // Снимаем не рабочий стол, а именно окно шторки: у Dialog своё окно,
+            // и decorView активности его не содержит.
+            View target = findShadeRoot(activity);
+            evaluateView(activity, target, SCREEN_SHADE, expectedStyle);
+        } catch (Throwable t) {
+            writeNamed(activity, SCREEN_SHADE, "СБОЙ\nисключение при снятии кадра: "
+                    + t.getClass().getSimpleName() + ": " + t.getMessage());
+        } finally {
+            try {
+                shade.dismiss();
+            } catch (Throwable t) {
+                // Закрытие шторки после замера: сбой здесь означает, что шторка
+                // осталась на экране, то есть следующие шаги прогона увидят не то.
+                Diagnostics.record("ShadeSelfCheck.dismiss", t);
+            }
+        }
+    }
+
     private static final class Report {
         int width, height;
         int modeColor;
@@ -256,6 +320,7 @@ public final class ShadeSelfCheck {
         double surfaceShare;
         int averageLuma;
         double whiteShare;
+        double darkTextShare;
         double dominantRowShare;
         boolean ok;
         final StringBuilder problems = new StringBuilder();
@@ -268,7 +333,7 @@ public final class ShadeSelfCheck {
      * фону шторки, карточке, полю, плитке или акценту. Допуск 12 на канал —
      * это сглаживание при отрисовке текста и скруглений.
      */
-    private static Report analyse(Bitmap bmp, int expectedStyle) {
+    private static Report analyse(Bitmap bmp, int expectedStyle, String screen) {
         Report r = new Report();
         r.width = bmp.getWidth();
         r.height = bmp.getHeight();
@@ -289,6 +354,7 @@ public final class ShadeSelfCheck {
         java.util.HashMap<Integer, Integer> hist = new java.util.HashMap<>();
         long lumaSum = 0;
         int total = 0;
+        int darkText = 0;
         int onSurface = 0;
         int white = 0;
 
@@ -300,8 +366,10 @@ public final class ShadeSelfCheck {
                 int rgb = c & 0xFFFFFF;
                 total++;
                 rowTotal++;
-                lumaSum += luma(rgb);
+                int pixelLuma = luma(rgb);
+                lumaSum += pixelLuma;
                 if (isNear(rgb, Color.WHITE, 10)) white++;
+                if (pixelLuma < 90) darkText++;
                 if (matchesAny(rgb, surfaces, 12)) {
                     onSurface++;
                     rowSurface++;
@@ -335,6 +403,13 @@ public final class ShadeSelfCheck {
         r.surfaceShare = onSurface / (double) total;
         r.averageLuma = (int) (lumaSum / total);
         r.whiteShare = white / (double) total;
+        r.darkTextShare = darkText / (double) total;
+
+        // Каталог и настройки — это плотный список иконок и подписей, поэтому
+        // доля «чистых» пикселей палитры там ниже, чем у шторки с её крупными
+        // плашками. Порог снижен осознанно, а яркость и белый — нет: именно они
+        // ловят «осталось темно» и «подписи остались белыми».
+        double minSurfaceShare = SCREEN_SHADE.equals(screen) ? MIN_SURFACE_SHARE : 0.30;
 
         r.ok = true;
         // Тема должна быть именно той, которую выставил прогон: иначе можно
@@ -345,11 +420,11 @@ public final class ShadeSelfCheck {
                     .append(styleName(expectedStyle)).append(", активна ")
                     .append(styleName(GlassTheme.ACTIVE_STYLE)).append("; ");
         }
-        if (r.surfaceShare < MIN_SURFACE_SHARE) {
+        if (r.surfaceShare < minSurfaceShare) {
             r.ok = false;
             r.problems.append("поверхности темы занимают ")
                     .append(pct(r.surfaceShare)).append(" < ")
-                    .append(pct(MIN_SURFACE_SHARE)).append("; ");
+                    .append(pct(minSurfaceShare)).append("; ");
         }
         boolean light = expectedStyle != Prefs.STYLE_CLASSIC_DARK;
         if (light && r.averageLuma < MIN_AVERAGE_LUMA) {
@@ -364,17 +439,29 @@ public final class ShadeSelfCheck {
                     .append(" > ").append(MAX_AVERAGE_LUMA_DARK)
                     .append(" (тёмная тема посветлела); ");
         }
-        if (r.dominantRowShare < MIN_SURFACE_SHARE) {
+        if (r.dominantRowShare < minSurfaceShare) {
             r.ok = false;
             r.problems.append("в самой светлой строке поверхности ")
                     .append(pct(r.dominantRowShare)).append(" < ")
-                    .append(pct(MIN_SURFACE_SHARE))
+                    .append(pct(minSurfaceShare))
                     .append(" (окно не перекрыло экран); ");
         }
-        if (light && r.whiteShare > MAX_WHITE_SHARE) {
+        // На экранах со списком карточек белый — это цвет самих карточек
+        // (cardBgColor = #FFFFFF в светлой теме), поэтому порог там другой.
+        // Подписи ловит отдельная проверка тёмного текста ниже.
+        double maxWhite = SCREEN_SHADE.equals(screen) ? MAX_WHITE_SHARE : MAX_WHITE_SHARE_LIST;
+        if (light && r.whiteShare > maxWhite) {
             r.ok = false;
             r.problems.append("чистого белого ").append(pct(r.whiteShare))
-                    .append(" > ").append(pct(MAX_WHITE_SHARE))
+                    .append(" > ").append(pct(maxWhite))
+                    .append(" (подписи остались белыми); ");
+        }
+        // Настоящая проверка «подписи не остались белыми»: в светлой теме в
+        // кадре обязан быть тёмный текст. Белые карточки этому не мешают.
+        if (light && r.darkTextShare < MIN_DARK_TEXT_SHARE) {
+            r.ok = false;
+            r.problems.append("тёмного текста ").append(pct(r.darkTextShare))
+                    .append(" < ").append(pct(MIN_DARK_TEXT_SHARE))
                     .append(" (подписи остались белыми); ");
         }
         return r;
@@ -421,9 +508,14 @@ public final class ShadeSelfCheck {
         return String.format(java.util.Locale.US, "%.2f", v);
     }
 
-    private static void write(Activity activity, String text) {
+    /** Отчёт по конкретному экрану: имя файла содержит экран. */
+    private static void writeNamed(Activity activity, String screen, String text) {
+        writeTo(activity, OUT_FILE_PREFIX + screen + ".txt", text);
+    }
+
+    private static void writeTo(Activity activity, String name, String text) {
         try {
-            File f = new File(activity.getFilesDir(), OUT_FILE);
+            File f = new File(activity.getFilesDir(), name);
             FileOutputStream out = new FileOutputStream(f);
             out.write(text.getBytes(StandardCharsets.UTF_8));
             out.close();

@@ -567,51 +567,57 @@ log "Светлая тема: шторка в реальных пикселях"
 # (литерал 0xFF000000), и расчёт этого не поймал: пользователь видел чёрную
 # шторку при «завершённой» светлой теме. Здесь приложение само открывает шторку,
 # рисует её в Bitmap и сверяет пиксели с палитрой темы.
-smoke_light_shade() {
-    local theme="$1" label="$2"
+# Общая проверка экрана: один запуск приложения = один экран.
+# Параметры: $1 тема, $2 имя экрана (shade|drawer|settings), $3 метка отчёта.
+smoke_screen() {
+    local theme="$1" screen="$2" label="$3"
+    local report_file="selfcheck_$screen.txt"
     adb shell am force-stop "$PKG" >/dev/null 2>&1 || true
     sleep 1
-    adb shell "run-as $PKG rm -f files/shade_selfcheck.txt" >/dev/null 2>&1 || true
+    adb shell "run-as $PKG rm -f files/$report_file" >/dev/null 2>&1 || true
 
-    # Тема передаётся параметром intent, а не правкой shared_prefs. Правка была
-    # в первой версии этого шага и сломала разбор prefs.xml (PARSED=0, invalid
-    # character number): файл менялся в тот момент, когда его писал сам процесс.
+    # Тема и экран передаются параметрами intent, а не правкой shared_prefs:
+    # такая правка уже один раз сломала разбор XML в CI.
     adb shell am start -W -n "$PKG/.MainActivity" \
         --ez doxaiz_shade_selfcheck true --ei doxaiz_style "$theme" \
-        > "$OUT/shade-selfcheck-start-$label.txt" 2>&1 || true
-    # Открытие шторки отложено (1,2 с + 0,7 с на кадр) — ждём с запасом.
+        --es doxaiz_screen "$screen" \
+        > "$OUT/selfcheck-start-$label.txt" 2>&1 || true
     local waited=0 report=""
-    while [ "$waited" -lt 20 ]; do
-        report="$(adb shell "run-as $PKG cat files/shade_selfcheck.txt" 2>/dev/null | tr -d '\r')"
+    while [ "$waited" -lt 25 ]; do
+        report="$(adb shell "run-as $PKG cat files/$report_file" 2>/dev/null | tr -d '\r')"
         [ -n "$report" ] && break
         sleep 1
         waited=$((waited + 1))
     done
-    adb exec-out screencap -p > "$OUT/screen-shade-$label.png" 2>/dev/null || true
+    adb exec-out screencap -p > "$OUT/screen-$label.png" 2>/dev/null || true
     if [ -z "$report" ]; then
-        report_fail "Светлая тема ($label): самопроверка шторки не оставила отчёт за ${waited} с"
+        report_fail "Светлая тема ($label): самопроверка экрана $screen не оставила отчёт за ${waited} с"
         return 1
     fi
-    # Отчёт — в summary, а в аннотацию только короткая строка: аннотаций не
-    # больше 10 на прогон, и лишняя вытесняет ту, которая важнее.
-    summary "шторка-$label" "$report"
-    note "шторка-$label" "$(printf '%s' "$report" | tr '\n' ' ' | cut -c1-200)"
-    # Полный отчёт дублируется в аннотацию только при провале: тогда важна
-    # каждая цифра, а обрезанная строка не даёт разобраться.
+    summary "$label" "$report"
+    note "$label" "$(printf '%s' "$report" | tr '\n' ' ' | cut -c1-200)"
     case "$report" in
         OK*) return 0 ;;
         *)
-            printf '%s\n' "$report" > "$OUT/shade-fail-$label.txt"
+            printf '%s\n' "$report" > "$OUT/fail-$label.txt"
             report_fail "Светлая тема ($label): $(printf '%s' "$report" | tr '\n' '; ' | cut -c1-400)"
             return 1 ;;
     esac
 }
+
+# Совместимость с прежним именем шага.
+smoke_light_shade() { smoke_screen "$1" "shade" "$2"; }
 
 # Светлая и графит проверяются по одной причине: важно не только «светлая стала
 # светлой», но и «тёмная осталась тёмной». Второй случай ловит ошибку, где
 # светлый цвет применился ко всем стилям подряд.
 smoke_light_shade 3 "light" || true
 smoke_light_shade 2 "dark" || true
+# Каталог и настройки — самые «плотные» экраны: именно там литералы графита
+# пережили правку шторки (§40). Проверяется только светлая тема: в тёмной эти
+# экраны изначально были читаемы, а прогон не должен растягиваться.
+smoke_screen 3 "drawer" "каталог-светлая" || true
+smoke_screen 3 "settings" "настройки-светлая" || true
 # Возвращаем исходную тему (графит) и перезапускаем приложение, чтобы
 # остальные шаги прогона не зависели от того, что мы тут выставили.
 adb shell am force-stop "$PKG" >/dev/null 2>&1 || true
