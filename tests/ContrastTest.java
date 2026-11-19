@@ -178,6 +178,55 @@ public final class ContrastTest {
         // И что новый активный чип эту пару закрывает.
         requireAtLeast(textOn(0xFFFFFFFF, 0xFF2563EB), 4.5, "белый на #2563EB проходит");
 
+        // 7. Светлая шторка. Раньше её поверхности оставались тёмными «до аудита»,
+        // то есть светлая тема была незавершённой. Теперь палитра светлая, и это
+        // проверяется теми же порогами, что и остальные стили: значения берутся из
+        // самой палитры, а не из литералов в тесте. Если кто-то поменяет цвет на
+        // «похожий», тест это увидит.
+        GlassTheme light = GlassTheme.createResolved(Prefs.STYLE_CLASSIC_LIGHT, 1);
+        check(GlassTheme.LIGHT_SURFACES, "светлая палитра помечена как светлая");
+
+        // Поверхности светлые: это и есть суть правки.
+        requireAtLeast(Legibility.contrastRatio(0xF2, 0xF3, 0xF6, 0xFF, 0xFF, 0xFF), 1.0,
+                "фон шторки почти белый (проверка на «случайно тёмный» — ниже)");
+        requireBelow(Legibility.contrastRatio(0xF2, 0xF3, 0xF6, 0x00, 0x00, 0x00), 3.0,
+                "фон шторки светлый относительно чёрного");
+        // Подписи на поверхностях — порог обычного текста.
+        requireAtLeast(textOn(light.textPrimary, GlassTheme.TILE_INACTIVE), 4.5,
+                "подпись на неактивной плитке светлой шторки");
+        requireAtLeast(textOn(light.textPrimary, GlassTheme.TILE_SUB_BG), 4.5,
+                "подпись на подложке плитки светлой шторки");
+        requireAtLeast(textOn(light.textSecondary, GlassTheme.SHADE_BG), 4.5,
+                "второстепенный текст на фоне шторки");
+        requireAtLeast(textOn(light.textHint, GlassTheme.SHADE_BG), 4.5,
+                "подсказка на фоне шторки");
+        // Включённая плитка залита акцентом: подпись на ней белая.
+        requireAtLeast(textOn(0xFFFFFFFF, GlassTheme.TILE_ACTIVE_BLUE), 4.5,
+                "белая подпись на включённой плитке (синий акцент)");
+        requireAtLeast(textOn(0xFFFFFFFF, GlassTheme.TILE_ACTIVE_GREEN), 4.5,
+                "белая подпись на включённой плитке (зелёный акцент)");
+        // Иконка на неактивной плитке — нетекстовый элемент, порог 3:1.
+        requireAtLeast(textOn(GlassTheme.TILE_ACTIVE_BLUE, GlassTheme.TILE_INACTIVE), 3.0,
+                "иконка видна на неактивной плитке светлой шторки");
+        // Опасное и предупреждающее действия в светлой теме.
+        requireAtLeast(textOn(light.dangerColor, GlassTheme.SHADE_BG), 4.5,
+                "опасное действие на светлой шторке");
+        requireAtLeast(textOn(GlassTheme.ACCENT_AMBER, GlassTheme.SHADE_BG), 4.5,
+                "предупреждающий акцент на светлой шторке");
+
+        // Тёмные стили после правки не должны «посветлеть»: у них LIGHT_SURFACES
+        // обязан оставаться false, иначе белые иконки заменятся на тёмные.
+        int[] darkStyles = {Prefs.STYLE_CLASSIC_DARK, Prefs.STYLE_CYBER_ANIME, Prefs.STYLE_SAKURA_JADE};
+        for (int st : darkStyles) {
+            GlassTheme t = GlassTheme.createResolved(st, 1);
+            check(!GlassTheme.LIGHT_SURFACES, "стиль " + st + " остаётся тёмным");
+            requireBelow(Legibility.contrastRatio(
+                    (GlassTheme.SHADE_BG >> 16) & 0xFF, (GlassTheme.SHADE_BG >> 8) & 0xFF,
+                    GlassTheme.SHADE_BG & 0xFF, 0, 0, 0), 3.0,
+                    "фон шторки стиля " + st + " тёмный");
+            check(t.cardBgColor != 0, "палитра стиля " + st + " построилась");
+        }
+
         System.out.println("CONTRAST_TESTS=" + n);
     }
 }

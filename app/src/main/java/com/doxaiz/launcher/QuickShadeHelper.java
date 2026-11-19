@@ -113,6 +113,37 @@ public final class QuickShadeHelper {
         default boolean triggerNetworkBoostNow() { return false; }
     }
 
+    // ------------------------------------------------------------------ цвета
+    //
+    // Шторка много где исторически красила иконки и подписи белым литералом.
+    // В тёмных стилях это правильно, в светлой палитре — нет: белое на светлом
+    // даёт 1,0–1,8:1 (пороги и числа — в tests/ContrastTest.java). Поэтому вместо
+    // Color.WHITE берём цвет из темы.
+
+    /** Цвет иконки/глифа на текущей поверхности шторки. */
+    private static int onSurfaceColor() {
+        return GlassTheme.LIGHT_SURFACES ? GlassTheme.TEXT_PRIMARY : Color.WHITE;
+    }
+
+    /**
+     * Цвет подписи на плитке быстрых действий.
+     *
+     * В светлой палитре включённая плитка залита тёмным акцентом (#2169CD), и
+     * подпись на ней белая (5,29:1), а выключенная — светло-серая, и там нужна
+     * тёмная подпись (14,46:1).
+     */
+    private static int onTileColor(boolean active) {
+        if (GlassTheme.LIGHT_SURFACES) {
+            return active ? Color.WHITE : GlassTheme.TEXT_PRIMARY;
+        }
+        return active ? Color.WHITE : GlassTheme.TEXT_SECONDARY;
+    }
+
+    /** Подпись на поверхности шторки (часы, дата, заголовки). */
+    private static int onSurfaceTextColor() {
+        return onSurfaceColor();
+    }
+
     public static final class TileSpec {
         public final String id;
         public final String glyph;
@@ -904,7 +935,7 @@ public final class QuickShadeHelper {
 
         TextView clockTv = new TextView(activity);
         clockTv.setText(formatTime(now));
-        clockTv.setTextColor(Color.WHITE);
+        clockTv.setTextColor(onSurfaceTextColor());
         clockTv.setTextSize(32f);
         clockTv.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
         left.addView(clockTv);
@@ -980,7 +1011,7 @@ public final class QuickShadeHelper {
         // Doxaiz 4.6: чистые минималистичные иконки шапки без тяжёлых круглых рамок
         btn.setBackgroundColor(Color.TRANSPARENT);
 
-        ImageView iv = VectorGlyphs.makeIconView(activity, glyph, 20, Color.WHITE);
+        ImageView iv = VectorGlyphs.makeIconView(activity, glyph, 20, onSurfaceColor());
         FrameLayout.LayoutParams iLp = new FrameLayout.LayoutParams(dp(20), dp(20));
         iLp.gravity = Gravity.CENTER;
         btn.addView(iv, iLp);
@@ -1011,7 +1042,7 @@ public final class QuickShadeHelper {
         badge.setBackground(GlassTheme.makeCircle(badgeColor));
         LinearLayout.LayoutParams bLp = new LinearLayout.LayoutParams(dp(22), dp(22));
         bLp.rightMargin = dp(9);
-        liveNetIcon = VectorGlyphs.makeIconView(activity, icoName, 13, Color.WHITE);
+        liveNetIcon = VectorGlyphs.makeIconView(activity, icoName, 13, onSurfaceColor());
         FrameLayout.LayoutParams iLp = new FrameLayout.LayoutParams(dp(13), dp(13));
         iLp.gravity = Gravity.CENTER;
         badge.addView(liveNetIcon, iLp);
@@ -1122,7 +1153,7 @@ public final class QuickShadeHelper {
         card.addView(inner, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        ImageView ic = VectorGlyphs.makeIconView(activity, glyph, 22, Color.WHITE);
+        ImageView ic = VectorGlyphs.makeIconView(activity, glyph, 22, onSurfaceColor());
         LinearLayout.LayoutParams icLp = new LinearLayout.LayoutParams(dp(22), dp(22));
         icLp.rightMargin = dp(11);
         inner.addView(ic, icLp);
@@ -1132,7 +1163,7 @@ public final class QuickShadeHelper {
 
         TextView t = new TextView(activity);
         t.setText(title);
-        t.setTextColor(Color.WHITE);
+        t.setTextColor(onSurfaceTextColor());
         t.setTextSize(13.5f);
         t.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         t.setSingleLine(true);
@@ -1197,7 +1228,7 @@ public final class QuickShadeHelper {
                 final boolean autoNow = isAutoBrightnessOn();
                 TextView autoBtn = new TextView(activity);
                 autoBtn.setText("A");
-                autoBtn.setTextColor(Color.WHITE);
+                autoBtn.setTextColor(onSurfaceTextColor());
                 autoBtn.setTextSize(10.5f);
                 autoBtn.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
                 autoBtn.setGravity(Gravity.CENTER);
@@ -1241,13 +1272,18 @@ public final class QuickShadeHelper {
             fillView.setLayoutParams(lp);
             int pct = Math.round(level[0] * 100);
             pctTv.setText(isBrightness ? (pct + "%") : (pct + "% ≡"));
-            pctTv.setTextColor(level[0] > 0.85f ? 0xFF18181B : 0xCCFFFFFF);
+            // Поверх заливки ползунка: плотная заливка светлая в тёмных стилях
+            // (белая) и тёмный акцент в светлой палитре, поэтому цвет подписи
+            // зависит от уровня, а не от темы.
+            pctTv.setTextColor(level[0] > 0.85f && !GlassTheme.LIGHT_SURFACES
+                    ? 0xFF18181B : 0xFFFFFFFF);
             if (!isBrightness) {
                 iconIv.setImageDrawable(VectorGlyphs.create(
                         activity,
                         pct <= 2 ? "mute" : "volume",
                         21,
-                        level[0] < 0.24f ? Color.WHITE : 0xFF18181B
+                        (GlassTheme.LIGHT_SURFACES || level[0] < 0.24f)
+                                ? Color.WHITE : 0xFF18181B
                 ));
             }
         };
@@ -1340,7 +1376,7 @@ public final class QuickShadeHelper {
         box.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(64)));
         box.setBackground(GlassTheme.makeRoundedRect(bgColor, dp(18)));
 
-        ImageView iv = VectorGlyphs.makeIconView(activity, resolveTileGlyph(tileId, spec), 23, Color.WHITE);
+        ImageView iv = VectorGlyphs.makeIconView(activity, resolveTileGlyph(tileId, spec), 23, onSurfaceColor());
         FrameLayout.LayoutParams iLp = new FrameLayout.LayoutParams(dp(23), dp(23));
         iLp.gravity = Gravity.CENTER;
         box.addView(iv, iLp);
@@ -1412,7 +1448,7 @@ public final class QuickShadeHelper {
         dashed.setStroke(dp(1), 0x45FFFFFF);
         box.setBackground(dashed);
 
-        ImageView plus = VectorGlyphs.makeIconView(activity, "plus", 22, Color.WHITE);
+        ImageView plus = VectorGlyphs.makeIconView(activity, "plus", 22, onSurfaceColor());
         FrameLayout.LayoutParams pLp = new FrameLayout.LayoutParams(dp(22), dp(22));
         pLp.gravity = Gravity.CENTER;
         box.addView(plus, pLp);
@@ -1502,7 +1538,7 @@ public final class QuickShadeHelper {
             clp.bottomMargin = dp(8);
             clearCircle.setLayoutParams(clp);
 
-            ImageView trashIv = VectorGlyphs.makeIconView(activity, "trash", 20, Color.WHITE);
+            ImageView trashIv = VectorGlyphs.makeIconView(activity, "trash", 20, onSurfaceColor());
             FrameLayout.LayoutParams tLp = new FrameLayout.LayoutParams(dp(20), dp(20));
             tLp.gravity = Gravity.CENTER;
             clearCircle.addView(trashIv, tLp);
@@ -1616,7 +1652,7 @@ public final class QuickShadeHelper {
     private View makeNotifFilterChip(String text, boolean active, int activeColor, Runnable onClick) {
         TextView tv = new TextView(activity);
         tv.setText(text);
-        tv.setTextColor(active ? Color.WHITE : 0xCCFFFFFF);
+        tv.setTextColor(onTileColor(active));
         tv.setTextSize(12f);
         tv.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         tv.setBackground(GlassTheme.makePill(active ? activeColor : 0xFF1F1F24));
@@ -1759,7 +1795,7 @@ public final class QuickShadeHelper {
 
                 TextView gTitle = new TextView(activity);
                 gTitle.setText(loadAppLabelCached(pkg) + " • " + group.size());
-                gTitle.setTextColor(Color.WHITE);
+                gTitle.setTextColor(onSurfaceTextColor());
                 gTitle.setTextSize(13f);
                 gTitle.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
                 gHdr.addView(gTitle, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
@@ -1895,7 +1931,7 @@ public final class QuickShadeHelper {
 
         TextView titleTv = new TextView(activity);
         titleTv.setText(latest.title.isEmpty() ? appName : latest.title);
-        titleTv.setTextColor(Color.WHITE);
+        titleTv.setTextColor(onSurfaceTextColor());
         titleTv.setTextSize(14.5f);
         titleTv.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         titleTv.setSingleLine(true);
@@ -2045,7 +2081,7 @@ public final class QuickShadeHelper {
 
         FrameLayout backBtn = new FrameLayout(activity);
         backBtn.setBackground(GlassTheme.makeCircle(0xFF1A1A1E));
-        ImageView bIco = VectorGlyphs.makeIconView(activity, "close", 15, Color.WHITE);
+        ImageView bIco = VectorGlyphs.makeIconView(activity, "close", 15, onSurfaceColor());
         FrameLayout.LayoutParams biLp = new FrameLayout.LayoutParams(dp(15), dp(15));
         biLp.gravity = Gravity.CENTER;
         backBtn.addView(bIco, biLp);
@@ -2058,7 +2094,7 @@ public final class QuickShadeHelper {
         titleCol.setOrientation(LinearLayout.VERTICAL);
         TextView titleTv = new TextView(activity);
         titleTv.setText("История уведомлений");
-        titleTv.setTextColor(Color.WHITE);
+        titleTv.setTextColor(onSurfaceTextColor());
         titleTv.setTextSize(19f);
         titleTv.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         titleCol.addView(titleTv);
@@ -2110,7 +2146,7 @@ public final class QuickShadeHelper {
             searchInput.setBackground(null);
             searchInput.setHint("Поиск по истории, кодам, приложениям...");
             searchInput.setHintTextColor(0x78FFFFFF);
-            searchInput.setTextColor(Color.WHITE);
+            searchInput.setTextColor(onSurfaceTextColor());
             searchInput.setTextSize(13.5f);
             searchInput.setSingleLine(true);
             searchInput.setPadding(0, dp(6), dp(6), dp(6));
@@ -2221,7 +2257,7 @@ public final class QuickShadeHelper {
                 if (!hi.title.isEmpty()) {
                     TextView t = new TextView(activity);
                     t.setText(hi.title);
-                    t.setTextColor(Color.WHITE);
+                    t.setTextColor(onSurfaceTextColor());
                     t.setTextSize(14f);
                     t.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
                     t.setPadding(0, dp(4), 0, 0);
@@ -2331,14 +2367,14 @@ public final class QuickShadeHelper {
         chip.setBackground(GlassTheme.makePill(GlassTheme.TILE_ACTIVE_GREEN));
         chip.setPadding(dp(11), dp(5), dp(12), dp(5));
 
-        ImageView ico = VectorGlyphs.makeIconView(activity, "copy", 13, Color.WHITE);
+        ImageView ico = VectorGlyphs.makeIconView(activity, "copy", 13, onSurfaceColor());
         LinearLayout.LayoutParams iLp = new LinearLayout.LayoutParams(dp(13), dp(13));
         iLp.rightMargin = dp(5);
         chip.addView(ico, iLp);
 
         TextView tv = new TextView(activity);
         tv.setText("Копировать " + otpCode);
-        tv.setTextColor(Color.WHITE);
+        tv.setTextColor(onSurfaceTextColor());
         tv.setTextSize(12f);
         tv.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         chip.addView(tv);
@@ -2411,13 +2447,13 @@ public final class QuickShadeHelper {
         if (item.clearable) {
             dismissBackdrop.setBackground(GlassTheme.makeRoundedRect(0xFF991B1B, dp(20)));
             dismissBackdrop.setAlpha(0f);
-            ImageView leftTrash = VectorGlyphs.makeIconView(activity, "trash", 18, Color.WHITE);
+            ImageView leftTrash = VectorGlyphs.makeIconView(activity, "trash", 18, onSurfaceColor());
             FrameLayout.LayoutParams ltLp = new FrameLayout.LayoutParams(dp(18), dp(18));
             ltLp.gravity = Gravity.START | Gravity.CENTER_VERTICAL;
             ltLp.leftMargin = dp(20);
             dismissBackdrop.addView(leftTrash, ltLp);
 
-            ImageView rightTrash = VectorGlyphs.makeIconView(activity, "trash", 18, Color.WHITE);
+            ImageView rightTrash = VectorGlyphs.makeIconView(activity, "trash", 18, onSurfaceColor());
             FrameLayout.LayoutParams rtLp = new FrameLayout.LayoutParams(dp(18), dp(18));
             rtLp.gravity = Gravity.END | Gravity.CENTER_VERTICAL;
             rtLp.rightMargin = dp(20);
@@ -2462,7 +2498,7 @@ public final class QuickShadeHelper {
 
         TextView titleTv = new TextView(activity);
         titleTv.setText(item.title.isEmpty() ? appName : item.title);
-        titleTv.setTextColor(Color.WHITE);
+        titleTv.setTextColor(onSurfaceTextColor());
         titleTv.setTextSize(14.5f);
         titleTv.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         titleTv.setSingleLine(!isExpanded);
@@ -2900,7 +2936,7 @@ public final class QuickShadeHelper {
 
         TextView t = new TextView(activity);
         t.setText(media.title);
-        t.setTextColor(Color.WHITE);
+        t.setTextColor(onSurfaceTextColor());
         t.setTextSize(14f);
         t.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         t.setSingleLine(true);
@@ -2978,7 +3014,7 @@ public final class QuickShadeHelper {
                 sb.getProgressDrawable().setTint(GlassTheme.TILE_ACTIVE_BLUE);
             }
             if (sb.getThumb() != null) {
-                sb.getThumb().setTint(Color.WHITE);
+                sb.getThumb().setTint(GlassTheme.SLIDER_FILL);
             }
             final long durFinal = durationMs;
             sb.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
@@ -3071,7 +3107,7 @@ public final class QuickShadeHelper {
         b.setBackground(GlassTheme.makeRoundedRect(
                 primary ? GlassTheme.TILE_ACTIVE_BLUE : 0xFF2E303A, dp(12)));
 
-        ImageView iv = VectorGlyphs.makeIconView(activity, glyph, primary ? 17 : 15, Color.WHITE);
+        ImageView iv = VectorGlyphs.makeIconView(activity, glyph, primary ? 17 : 15, onSurfaceColor());
         FrameLayout.LayoutParams iLp = new FrameLayout.LayoutParams(
                 dp(primary ? 17 : 15), dp(primary ? 17 : 15));
         iLp.gravity = Gravity.CENTER;
@@ -3195,7 +3231,7 @@ public final class QuickShadeHelper {
 
         TextView title = new TextView(activity);
         title.setText("Включите доступ к уведомлениям");
-        title.setTextColor(Color.WHITE);
+        title.setTextColor(onSurfaceTextColor());
         title.setTextSize(15f);
         title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         card.addView(title);
@@ -3209,7 +3245,7 @@ public final class QuickShadeHelper {
 
         TextView btn = new TextView(activity);
         btn.setText("Разрешить доступ");
-        btn.setTextColor(Color.WHITE);
+        btn.setTextColor(onSurfaceTextColor());
         btn.setTextSize(13.5f);
         btn.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         btn.setGravity(Gravity.CENTER);
@@ -3315,7 +3351,7 @@ public final class QuickShadeHelper {
     private TextView makeSwitchTab(String text, boolean active) {
         TextView tv = new TextView(activity);
         tv.setText(text);
-        tv.setTextColor(active ? Color.WHITE : GlassTheme.TEXT_SECONDARY);
+        tv.setTextColor(onTileColor(active));
         tv.setTextSize(12.5f);
         tv.setTypeface(Typeface.create(active ? "sans-serif-medium" : "sans-serif", Typeface.NORMAL));
         tv.setPadding(dp(16), dp(7), dp(16), dp(7));
@@ -3341,7 +3377,7 @@ public final class QuickShadeHelper {
 
         TextView clk = new TextView(activity);
         clk.setText(formatTime(now));
-        clk.setTextColor(Color.WHITE);
+        clk.setTextColor(onSurfaceTextColor());
         clk.setTextSize(28f);
         clk.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
         left.addView(clk);
@@ -3421,7 +3457,9 @@ public final class QuickShadeHelper {
                 dLp.setMargins(dp(4), 0, dp(4), 0);
                 dot.setLayoutParams(dLp);
                 dot.setBackground(GlassTheme.makeRoundedRect(
-                        active ? Color.WHITE : 0x55FFFFFF, dp(3)));
+                        GlassTheme.LIGHT_SURFACES
+                                ? (active ? GlassTheme.TEXT_PRIMARY : 0x330B1220)
+                                : (active ? Color.WHITE : 0x55FFFFFF), dp(3)));
                 dot.setOnClickListener(v -> {
                     performHaptic(v);
                     classicPage = targetPage;
@@ -3577,7 +3615,7 @@ public final class QuickShadeHelper {
         circle.setLayoutParams(new LinearLayout.LayoutParams(dp(48), dp(48)));
         circle.setBackground(GlassTheme.makeCircle(color));
 
-        ImageView iv = VectorGlyphs.makeIconView(activity, resolveTileGlyph(tileId, spec), 21, Color.WHITE);
+        ImageView iv = VectorGlyphs.makeIconView(activity, resolveTileGlyph(tileId, spec), 21, onSurfaceColor());
         FrameLayout.LayoutParams iLp = new FrameLayout.LayoutParams(dp(21), dp(21));
         iLp.gravity = Gravity.CENTER;
         circle.addView(iv, iLp);
@@ -3667,7 +3705,7 @@ public final class QuickShadeHelper {
                 ? act.remoteInput.getLabel() : "Введите ответ...";
         input.setHint(hint);
         input.setHintTextColor(0x88FFFFFF);
-        input.setTextColor(Color.WHITE);
+        input.setTextColor(onSurfaceTextColor());
         input.setTextSize(13.5f);
         input.setSingleLine(true);
         input.setImeOptions(EditorInfo.IME_ACTION_SEND);
@@ -3705,7 +3743,7 @@ public final class QuickShadeHelper {
 
         FrameLayout sendBtn = new FrameLayout(activity);
         sendBtn.setBackground(GlassTheme.makeCircle(GlassTheme.TILE_ACTIVE_BLUE));
-        ImageView sIco = VectorGlyphs.makeIconView(activity, "send", 16, Color.WHITE);
+        ImageView sIco = VectorGlyphs.makeIconView(activity, "send", 16, onSurfaceColor());
         FrameLayout.LayoutParams sLp = new FrameLayout.LayoutParams(dp(16), dp(16));
         sLp.gravity = Gravity.CENTER;
         sendBtn.addView(sIco, sLp);
@@ -3761,7 +3799,7 @@ public final class QuickShadeHelper {
             boolean autoBright = isAutoBrightnessOn();
             TextView autoBtn = new TextView(activity);
             autoBtn.setText("A");
-            autoBtn.setTextColor(Color.WHITE);
+            autoBtn.setTextColor(onSurfaceTextColor());
             autoBtn.setTextSize(13f);
             autoBtn.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
             autoBtn.setGravity(Gravity.CENTER);
@@ -3813,7 +3851,7 @@ public final class QuickShadeHelper {
 
         TextView title = new TextView(activity);
         title.setText("Изменить");
-        title.setTextColor(Color.WHITE);
+        title.setTextColor(onSurfaceTextColor());
         title.setTextSize(22f);
         title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         top.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
@@ -3868,7 +3906,7 @@ public final class QuickShadeHelper {
 
                 TextView selTxt = new TextView(activity);
                 selTxt.setText(sp != null ? sp.label : selectedId[0]);
-                selTxt.setTextColor(Color.WHITE);
+                selTxt.setTextColor(onSurfaceTextColor());
                 selTxt.setTextSize(13f);
                 selTxt.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
                 reorderBar.addView(selTxt, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
@@ -3970,7 +4008,7 @@ public final class QuickShadeHelper {
 
         TextView resetBtn = new TextView(activity);
         resetBtn.setText("Сбросить");
-        resetBtn.setTextColor(Color.WHITE);
+        resetBtn.setTextColor(onSurfaceTextColor());
         resetBtn.setTextSize(14.5f);
         resetBtn.setGravity(Gravity.CENTER);
         resetBtn.setBackground(GlassTheme.makeRoundedRect(0xFF242427, dp(18)));
@@ -3994,7 +4032,7 @@ public final class QuickShadeHelper {
 
         TextView doneBtn = new TextView(activity);
         doneBtn.setText("Готово");
-        doneBtn.setTextColor(Color.WHITE);
+        doneBtn.setTextColor(onSurfaceTextColor());
         doneBtn.setTextSize(14.5f);
         doneBtn.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         doneBtn.setGravity(Gravity.CENTER);
@@ -4020,7 +4058,7 @@ public final class QuickShadeHelper {
     private TextView makeReorderBtn(String label, boolean enabled) {
         TextView tv = new TextView(activity);
         tv.setText(label);
-        tv.setTextColor(enabled ? Color.WHITE : 0x55FFFFFF);
+        tv.setTextColor(onTileColor(enabled));
         tv.setTextSize(12f);
         tv.setPadding(dp(10), dp(6), dp(10), dp(6));
         tv.setBackground(GlassTheme.makeRoundedRect(enabled ? GlassTheme.TILE_ACTIVE_BLUE : GlassTheme.TILE_SUB_BG, dp(10)));
@@ -4077,7 +4115,7 @@ public final class QuickShadeHelper {
                     if (isSel) sqBg.setStroke(dp(2), GlassTheme.ACCENT_BLUE);
                     squircle.setBackground(sqBg);
 
-                    ImageView ic = VectorGlyphs.makeIconView(activity, spec.glyph, 22, Color.WHITE);
+                    ImageView ic = VectorGlyphs.makeIconView(activity, spec.glyph, 22, onSurfaceColor());
                     FrameLayout.LayoutParams iLp = new FrameLayout.LayoutParams(dp(22), dp(22));
                     iLp.gravity = Gravity.CENTER;
                     squircle.addView(ic, iLp);
@@ -4089,7 +4127,7 @@ public final class QuickShadeHelper {
 
                     TextView badge = new TextView(activity);
                     badge.setText(isRemoveMode ? "−" : "+");
-                    badge.setTextColor(Color.WHITE);
+                    badge.setTextColor(onSurfaceTextColor());
                     badge.setTextSize(13f);
                     badge.setTypeface(Typeface.DEFAULT_BOLD);
                     badge.setGravity(Gravity.CENTER);
@@ -5155,7 +5193,7 @@ public final class QuickShadeHelper {
         String key = icoName + "#" + badgeColor;
         if (key.equals(lastLiveNetIconKey)) return;
         lastLiveNetIconKey = key;
-        liveNetIcon.setImageDrawable(VectorGlyphs.create(activity, icoName, 13, Color.WHITE));
+        liveNetIcon.setImageDrawable(VectorGlyphs.create(activity, icoName, 13, onSurfaceColor()));
         if (liveNetBadge != null) {
             liveNetBadge.setBackground(GlassTheme.makeCircle(badgeColor));
         }
@@ -5309,7 +5347,7 @@ public final class QuickShadeHelper {
         track.setLayoutParams(tLp);
 
         View thumb = new View(activity);
-        thumb.setBackground(GlassTheme.makeCircle(Color.WHITE));
+        thumb.setBackground(GlassTheme.makeCircle(GlassTheme.SLIDER_FILL));
         FrameLayout.LayoutParams thLp = new FrameLayout.LayoutParams(dp(20), dp(20));
         thLp.gravity = (checked ? Gravity.END : Gravity.START) | Gravity.CENTER_VERTICAL;
         track.addView(thumb, thLp);
@@ -5328,7 +5366,7 @@ public final class QuickShadeHelper {
 
         TextView titleTv = new TextView(activity);
         titleTv.setText(title);
-        titleTv.setTextColor(Color.WHITE);
+        titleTv.setTextColor(onSurfaceTextColor());
         titleTv.setTextSize(19f);
         titleTv.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         head.addView(titleTv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
@@ -5381,7 +5419,7 @@ public final class QuickShadeHelper {
                 row.setGravity(Gravity.CENTER_VERTICAL);
                 row.setPadding(dp(2), dp(8), dp(2), dp(8));
 
-                ImageView leftIc = VectorGlyphs.makeIconView(activity, "headphones", 20, Color.WHITE);
+                ImageView leftIc = VectorGlyphs.makeIconView(activity, "headphones", 20, onSurfaceColor());
                 LinearLayout.LayoutParams lLp = new LinearLayout.LayoutParams(dp(20), dp(20));
                 lLp.rightMargin = dp(14);
                 row.addView(leftIc, lLp);
@@ -5390,7 +5428,7 @@ public final class QuickShadeHelper {
                 txt.setOrientation(LinearLayout.VERTICAL);
                 TextView nameTv = new TextView(activity);
                 nameTv.setText(devName);
-                nameTv.setTextColor(Color.WHITE);
+                nameTv.setTextColor(onSurfaceTextColor());
                 nameTv.setTextSize(15f);
                 nameTv.setSingleLine(true);
                 nameTv.setEllipsize(TextUtils.TruncateAt.END);
@@ -5545,7 +5583,7 @@ public final class QuickShadeHelper {
             txt.setOrientation(LinearLayout.VERTICAL);
             TextView stTitle = new TextView(activity);
             stTitle.setText(speedInfo);
-            stTitle.setTextColor(Color.WHITE);
+            stTitle.setTextColor(onSurfaceTextColor());
             stTitle.setTextSize(15f);
             txt.addView(stTitle);
 
@@ -5571,7 +5609,7 @@ public final class QuickShadeHelper {
             pickRow.addView(wIc2, w2Lp);
             TextView pickTv = new TextView(activity);
             pickTv.setText("Выбрать другую сеть Wi-Fi");
-            pickTv.setTextColor(Color.WHITE);
+            pickTv.setTextColor(onSurfaceTextColor());
             pickTv.setTextSize(14.5f);
             pickRow.addView(pickTv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
             pickRow.setOnClickListener(openWifiPanel);
@@ -5673,7 +5711,7 @@ public final class QuickShadeHelper {
 
         TextView titleTv = new TextView(activity);
         titleTv.setText("Фонарик");
-        titleTv.setTextColor(Color.WHITE);
+        titleTv.setTextColor(onSurfaceTextColor());
         titleTv.setTextSize(19f);
         titleTv.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         LinearLayout.LayoutParams tLp = new LinearLayout.LayoutParams(
@@ -5739,7 +5777,7 @@ public final class QuickShadeHelper {
             box.setPadding(dp(6), dp(14), dp(6), dp(12));
             box.setMinimumHeight(dp(96));
 
-            ImageView iv = VectorGlyphs.makeIconView(activity, glyphs[i], 28, Color.WHITE);
+            ImageView iv = VectorGlyphs.makeIconView(activity, glyphs[i], 28, onSurfaceColor());
             LinearLayout.LayoutParams iLp = new LinearLayout.LayoutParams(dp(28), dp(28));
             iLp.bottomMargin = dp(9);
             box.addView(iv, iLp);
@@ -5890,7 +5928,7 @@ public final class QuickShadeHelper {
 
         TextView valTv = new TextView(activity);
         valTv.setText(value);
-        valTv.setTextColor(Color.WHITE);
+        valTv.setTextColor(onSurfaceTextColor());
         valTv.setTextSize(15.5f);
         valTv.setSingleLine(true);
         valTv.setEllipsize(TextUtils.TruncateAt.END);
@@ -6013,7 +6051,7 @@ public final class QuickShadeHelper {
                 row.setGravity(Gravity.CENTER_VERTICAL);
                 row.setPadding(dp(2), dp(11), dp(2), dp(11));
 
-                ImageView simIc = VectorGlyphs.makeIconView(activity, s.slotNum == 2 ? "sim2" : "sim1", 22, Color.WHITE);
+                ImageView simIc = VectorGlyphs.makeIconView(activity, s.slotNum == 2 ? "sim2" : "sim1", 22, onSurfaceColor());
                 LinearLayout.LayoutParams sLp = new LinearLayout.LayoutParams(dp(22), dp(22));
                 sLp.rightMargin = dp(14);
                 row.addView(simIc, sLp);
@@ -6022,7 +6060,7 @@ public final class QuickShadeHelper {
                 txt.setOrientation(LinearLayout.VERTICAL);
                 TextView nameTv = new TextView(activity);
                 nameTv.setText(s.carrier);
-                nameTv.setTextColor(Color.WHITE);
+                nameTv.setTextColor(onSurfaceTextColor());
                 nameTv.setTextSize(15.5f);
                 nameTv.setSingleLine(true);
                 nameTv.setEllipsize(TextUtils.TruncateAt.END);
@@ -6095,7 +6133,7 @@ public final class QuickShadeHelper {
 
         TextView titleTv = new TextView(activity);
         titleTv.setText("Снимок экрана");
-        titleTv.setTextColor(Color.WHITE);
+        titleTv.setTextColor(onSurfaceTextColor());
         titleTv.setTextSize(19f);
         titleTv.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         LinearLayout.LayoutParams tLp = new LinearLayout.LayoutParams(
@@ -6145,14 +6183,14 @@ public final class QuickShadeHelper {
                 row.setGravity(Gravity.CENTER_VERTICAL);
                 row.setPadding(dp(2), dp(12), dp(2), dp(12));
 
-                ImageView ic = VectorGlyphs.makeIconView(activity, a[0], 22, Color.WHITE);
+                ImageView ic = VectorGlyphs.makeIconView(activity, a[0], 22, onSurfaceColor());
                 LinearLayout.LayoutParams icLp = new LinearLayout.LayoutParams(dp(22), dp(22));
                 icLp.rightMargin = dp(14);
                 row.addView(ic, icLp);
 
                 TextView lbl = new TextView(activity);
                 lbl.setText(a[1]);
-                lbl.setTextColor(Color.WHITE);
+                lbl.setTextColor(onSurfaceTextColor());
                 lbl.setTextSize(15f);
                 row.addView(lbl, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
@@ -6230,14 +6268,14 @@ public final class QuickShadeHelper {
             row.setLayoutParams(rLp);
 
             ImageView ic = VectorGlyphs.makeIconView(activity, m[0], 19,
-                    isActive ? GlassTheme.ACCENT_GREEN : Color.WHITE);
+                    isActive ? GlassTheme.ACCENT_GREEN : onSurfaceColor());
             LinearLayout.LayoutParams icLp = new LinearLayout.LayoutParams(dp(19), dp(19));
             icLp.rightMargin = dp(12);
             row.addView(ic, icLp);
 
             TextView tv = new TextView(activity);
             tv.setText(m[1]);
-            tv.setTextColor(Color.WHITE);
+            tv.setTextColor(onSurfaceTextColor());
             tv.setTextSize(14.5f);
             row.addView(tv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
