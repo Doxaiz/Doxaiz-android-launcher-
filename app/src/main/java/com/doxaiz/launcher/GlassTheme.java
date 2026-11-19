@@ -49,6 +49,14 @@ public final class GlassTheme {
      */
     public static volatile boolean LIGHT_SURFACES  = false;
 
+    /**
+     * Основной цвет текста/иконок на поверхностях шторки.
+     *
+     * В тёмных стилях текст светлый, в светлой палитре — тёмный (#151922).
+     * Отдельное статическое поле нужно потому, что шторка и статус-бар рисуются
+     * до того, как под рукой окажется экземпляр {@code GlassTheme}.
+     */
+    public static volatile int TEXT_PRIMARY      = 0xFFF7F4F8;
     public static volatile int TEXT_SECONDARY    = 0xC4DCE0F5;
     public static volatile int TEXT_MUTED        = 0x8AA9B0D0;
     public static volatile int DIVIDER           = 0x24F5C451;
@@ -236,6 +244,7 @@ public final class GlassTheme {
             GOLD_ACCENT = 0xFF8A5A00; FOLDER_SCRIM = 0xDC050608;
             DRAWER_SEARCH_BG = 0xFFE6E8EC; CARD_BORDER_LIVE = 0x26313744;
             LIGHT_SURFACES = true;
+            TEXT_PRIMARY = 0xFF151922; // тот же, что textPrimary светлой палитры
             return new GlassTheme(
                     safeStyle, false,
                     argb(24, 0, 0, 0),
@@ -273,6 +282,8 @@ public final class GlassTheme {
 
         if (safeStyle == 1) { // STYLE_CYBER_ANIME
             LIGHT_SURFACES    = false;
+            // Кибер: светлый циан-белый на тёмных поверхностях.
+            TEXT_PRIMARY      = 0xFFE9FBFF;
             SHADE_BG          = 0xFF060814;
             POPUP_BG          = 0xFF0E1326;
             SURFACE_ELEVATED  = 0xFF131932;
@@ -338,6 +349,9 @@ public final class GlassTheme {
         }
 
         if (safeStyle == 2) { // STYLE_CLASSIC_DARK
+            LIGHT_SURFACES    = false;
+            // Графит: белый текст на чёрном, как было.
+            TEXT_PRIMARY      = 0xFFFFFFFF;
             cardA = clampLocal(216 + d, 152, 248);
             pillA = clampLocal(222 + d, 160, 250);
             overlayA = clampLocal(244 + d / 3, 212, 255);
@@ -415,6 +429,8 @@ public final class GlassTheme {
         }
 
         LIGHT_SURFACES    = false;
+        // Сакура: почти белый тёплый (argb(252,12,16,32) из палитры).
+        TEXT_PRIMARY      = 0xFFF7F8FA;
         // По умолчанию (0): STYLE_SAKURA_JADE — Синтез Аниме × Дунхуа (Ночной сакура-нефрит и золотая луна)
         SHADE_BG          = 0xFF07080F;
         POPUP_BG          = 0xFF131523;

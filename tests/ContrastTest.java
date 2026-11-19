@@ -192,9 +192,9 @@ public final class ContrastTest {
         requireBelow(Legibility.contrastRatio(0xF2, 0xF3, 0xF6, 0x00, 0x00, 0x00), 3.0,
                 "фон шторки светлый относительно чёрного");
         // Подписи на поверхностях — порог обычного текста.
-        requireAtLeast(textOn(light.textPrimary, GlassTheme.TILE_INACTIVE), 4.5,
+        requireAtLeast(textOn(GlassTheme.TEXT_PRIMARY, GlassTheme.TILE_INACTIVE), 4.5,
                 "подпись на неактивной плитке светлой шторки");
-        requireAtLeast(textOn(light.textPrimary, GlassTheme.TILE_SUB_BG), 4.5,
+        requireAtLeast(textOn(GlassTheme.TEXT_PRIMARY, GlassTheme.TILE_SUB_BG), 4.5,
                 "подпись на подложке плитки светлой шторки");
         requireAtLeast(textOn(light.textSecondary, GlassTheme.SHADE_BG), 4.5,
                 "второстепенный текст на фоне шторки");
