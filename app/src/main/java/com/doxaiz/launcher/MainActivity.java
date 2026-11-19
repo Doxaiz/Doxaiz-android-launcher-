@@ -367,6 +367,10 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         super.onCreate(savedInstanceState);
 
         prefs = new Prefs(this);
+        // Тема из intent — только в debug и только для самопроверки шторки.
+        // Нужна, чтобы прогон в CI мог проверить конкретную палитру, не правя
+        // shared_prefs снаружи (такая правка уже ломала разбор XML в CI).
+        int requestedStyle = ShadeSelfCheck.applyRequestedStyle(this, prefs);
         // Журнал сбоев поднимается ДО загрузки раскладки: иначе ошибки чтения
         // desktop_layout_json (битый JSON, сбой миграции) некуда записать (F-07).
         Diagnostics.init(prefs.getSharedPreferences());
@@ -502,6 +506,15 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         // сохраняется — следующий запуск должен знать о повторяющейся проблеме.
         // Отложено на кадр: успешным считается показ, а не начало onCreate.
         final boolean keepStreak = startupCrashStreak > 0;
+        // Самопроверка светлой шторки (debug-сборка, отдельный флаг в intent).
+        // Нужна потому, что тест контраста проверяет числа палитры, но не их
+        // применение: в §37 палитра была светлой, а корни диалогов — чёрными,
+        // и расчёт этого не увидел. Здесь шторка открывается по-настоящему и
+        // измеряются её пиксели.
+        if (BuildConfig.DEBUG && getIntent() != null
+                && getIntent().getBooleanExtra(ShadeSelfCheck.EXTRA_RUN, false)) {
+            ShadeSelfCheck.schedule(this, quickShadeHelper, requestedStyle);
+        }
         rootContainer.post(() -> {
             if (isFinishing() || isDestroyed()) return;
             CrashGuard.onStartupComplete(prefs, keepStreak);

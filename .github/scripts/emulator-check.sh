@@ -425,7 +425,13 @@ if [ "$scenario_ok" = "1" ]; then
     fi
 
     # --- восстановление: чистим состояние и возвращаем лаунчер в работу -------
-    adb shell "run-as $PKG rm -f $CRASH_DIR/$CRASH_FILE" >/dev/null 2>&1 || true
+    # Пометка сбоя должна исчезнуть, но файл настроек сносить нельзя: в нём
+    # живёт вся раскладка, и шаг проверки состава ниже читает именно его.
+    # Раньше здесь стоял rm -f всего shared_prefs/doxaiz_prefs.xml — после этого
+    # разбор давал PARSED=0 «invalid character number», и проверка раскладки
+    # тихо пропускалась, хотя выглядела как выполненная.
+    adb shell "run-as $PKG sed -i '/crash_guard_streak/d;/crash_guard_pending/d' \
+        $CRASH_DIR/$CRASH_FILE" >/dev/null 2>&1 || true
     adb shell am force-stop "$PKG" >/dev/null 2>&1 || true
     sleep 1
     # После force-stop штатный лаунчер может вернуть себе передний план (он
@@ -486,27 +492,31 @@ LAYOUT_RAW="$(adb shell "run-as $PKG cat shared_prefs/doxaiz_prefs.xml" 2>/dev/n
 printf '%s' "$LAYOUT_RAW" > "$OUT/prefs.xml"
 layout_report() {
     python3 - "$OUT/prefs.xml" <<'PYEOF'
-import re, sys, xml.etree.ElementTree as ET
+import re, sys, html, xml.etree.ElementTree as ET
 
-def unescape(v):
-    # SharedPreferences хранит строку прямо в тексте элемента и экранирует
-    # кавычки; JSON-разбор здесь избыточен — нам нужны только счётчики.
-    return v
-
+# shared_prefs — не обязательно корректный XML. Android пишет в него строки
+# как есть, и JSON раскладки может содержать управляющие символы, на которых
+# строгий XML-парсер падает: «reference to invalid character number». Раньше
+# проверка состава в этом случае молча давала PARSED=0, то есть выглядела
+# выполненной, не проверив ничего. Поэтому сначала пробуем строгий разбор, а
+# при неудаче — достаём значение регулярным выражением и раскодируем сущности.
+layout = None
 try:
     root = ET.parse(sys.argv[1]).getroot()
-except Exception as exc:
-    print("PARSED=0")
-    print("причина: не удалось разобрать prefs.xml (%s)" % exc)
-    raise SystemExit(0)
-
-layout = None
-for node in root.iter():
-    if node.tag == "string" and node.get("name") == "desktop_layout_json":
-        layout = node.text or ""
-        break
+    for node in root.iter():
+        if node.tag == "string" and node.get("name") == "desktop_layout_json":
+            layout = node.text or ""
+            break
+except Exception:
+    layout = None
 
 if layout is None:
+    raw = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+    m = re.search(r'<string name="desktop_layout_json">(.*?)</string>', raw, re.S)
+    if m:
+        layout = html.unescape(m.group(1))
+
+if not layout:
     print("PARSED=0")
     print("раскладка не сохранена")
     raise SystemExit(0)
@@ -546,6 +556,67 @@ dump_ui home "ui-home"
 if grep -q "нет ни одной подписи" "$OUT/ui-home.txt" 2>/dev/null; then
     note "ui-home" "подписей приложений нет — на чистой установке это ожидаемо"
 fi
+endlog
+
+log "Светлая тема: шторка в реальных пикселях"
+
+# Зачем отдельный шаг, если контраст уже посчитан в JVM-тесте.
+#
+# tests/ContrastTest.java проверяет числа палитры — и не видит, применены ли они.
+# В §37 палитра была светлой, а корни диалогов шторки оставались чёрными
+# (литерал 0xFF000000), и расчёт этого не поймал: пользователь видел чёрную
+# шторку при «завершённой» светлой теме. Здесь приложение само открывает шторку,
+# рисует её в Bitmap и сверяет пиксели с палитрой темы.
+smoke_light_shade() {
+    local theme="$1" label="$2"
+    adb shell am force-stop "$PKG" >/dev/null 2>&1 || true
+    sleep 1
+    adb shell "run-as $PKG rm -f files/shade_selfcheck.txt" >/dev/null 2>&1 || true
+
+    # Тема передаётся параметром intent, а не правкой shared_prefs. Правка была
+    # в первой версии этого шага и сломала разбор prefs.xml (PARSED=0, invalid
+    # character number): файл менялся в тот момент, когда его писал сам процесс.
+    adb shell am start -W -n "$PKG/.MainActivity" \
+        --ez doxaiz_shade_selfcheck true --ei doxaiz_style "$theme" \
+        > "$OUT/shade-selfcheck-start-$label.txt" 2>&1 || true
+    # Открытие шторки отложено (1,2 с + 0,7 с на кадр) — ждём с запасом.
+    local waited=0 report=""
+    while [ "$waited" -lt 20 ]; do
+        report="$(adb shell "run-as $PKG cat files/shade_selfcheck.txt" 2>/dev/null | tr -d '\r')"
+        [ -n "$report" ] && break
+        sleep 1
+        waited=$((waited + 1))
+    done
+    adb exec-out screencap -p > "$OUT/screen-shade-$label.png" 2>/dev/null || true
+    if [ -z "$report" ]; then
+        report_fail "Светлая тема ($label): самопроверка шторки не оставила отчёт за ${waited} с"
+        return 1
+    fi
+    # Отчёт — в summary, а в аннотацию только короткая строка: аннотаций не
+    # больше 10 на прогон, и лишняя вытесняет ту, которая важнее.
+    summary "шторка-$label" "$report"
+    note "шторка-$label" "$(printf '%s' "$report" | tr '\n' ' ' | cut -c1-200)"
+    # Полный отчёт дублируется в аннотацию только при провале: тогда важна
+    # каждая цифра, а обрезанная строка не даёт разобраться.
+    case "$report" in
+        OK*) return 0 ;;
+        *)
+            printf '%s\n' "$report" > "$OUT/shade-fail-$label.txt"
+            report_fail "Светлая тема ($label): $(printf '%s' "$report" | tr '\n' '; ' | cut -c1-400)"
+            return 1 ;;
+    esac
+}
+
+# Светлая и графит проверяются по одной причине: важно не только «светлая стала
+# светлой», но и «тёмная осталась тёмной». Второй случай ловит ошибку, где
+# светлый цвет применился ко всем стилям подряд.
+smoke_light_shade 3 "light" || true
+smoke_light_shade 2 "dark" || true
+# Возвращаем исходную тему (графит) и перезапускаем приложение, чтобы
+# остальные шаги прогона не зависели от того, что мы тут выставили.
+adb shell am force-stop "$PKG" >/dev/null 2>&1 || true
+adb shell am start -W -n "$PKG/.MainActivity" --ei doxaiz_style 2 >/dev/null 2>&1 || true
+sleep 2
 endlog
 
 log "Каталог приложений"

@@ -137,7 +137,11 @@ public final class CrashGuard {
         if (fallbackPkg != null && prefs != null) {
             try {
                 prefs.setCrashGuardFallback(fallbackPkg, System.currentTimeMillis());
-            } catch (Throwable ignored) {
+            } catch (Throwable t) {
+                // Запомнить замену не удалось: на возврат это не влияет (пакет
+                // уже найден в этом же вызове), но при следующем падении поиск
+                // начнётся заново — и по журналу будет видно почему.
+                Diagnostics.record("CrashGuard.rememberFallback", t);
             }
         }
 
@@ -225,7 +229,8 @@ public final class CrashGuard {
         if (prefs != null) {
             try {
                 remembered = prefs.getCrashGuardFallback();
-            } catch (Throwable ignored) {
+            } catch (Throwable t) {
+                Diagnostics.record("CrashGuard.readFallback", t);
             }
         }
         if (remembered != null && !remembered.isEmpty() && !remembered.equals(self)

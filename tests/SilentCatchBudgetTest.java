@@ -60,7 +60,6 @@ public final class SilentCatchBudgetTest {
             {"AnimeParticlesView.java", 2},
             {"BackupHelper.java", 2},
             {"BatteryInfoHelper.java", 2},
-            {"CrashGuard.java", 2},
             {"DesktopModel.java", 2},
             {"SafeModeActivity.java", 2},
             {"ShizukuProvider.java", 2},
@@ -71,7 +70,7 @@ public final class SilentCatchBudgetTest {
     };
 
     /** Общий потолок: сегодня 270, расти не должен. */
-    private static final int TOTAL_BUDGET = 270;
+    private static final int TOTAL_BUDGET = 268;
 
     private static int n;
 
