@@ -511,13 +511,35 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         // применение: в §37 палитра была светлой, а корни диалогов — чёрными,
         // и расчёт этого не увидел. Здесь шторка открывается по-настоящему и
         // измеряются её пиксели.
-        if (BuildConfig.DEBUG && getIntent() != null
-                && getIntent().getBooleanExtra(ShadeSelfCheck.EXTRA_RUN, false)) {
+        final boolean selfCheck = BuildConfig.DEBUG && getIntent() != null
+                && getIntent().getBooleanExtra(ShadeSelfCheck.EXTRA_RUN, false);
+        if (selfCheck && ShadeSelfCheck.SCREEN_SHADE.equals(
+                ShadeSelfCheck.requestedScreen(this))) {
             ShadeSelfCheck.schedule(this, quickShadeHelper, requestedStyle);
         }
         rootContainer.post(() -> {
             if (isFinishing() || isDestroyed()) return;
             CrashGuard.onStartupComplete(prefs, keepStreak);
+            // Каталог и настройки снимаются после того, как рабочий стол показан
+            // и экран успел отрисоваться: до этого кадр пустой.
+            if (selfCheck) {
+                String screen = ShadeSelfCheck.requestedScreen(this);
+                if (ShadeSelfCheck.SCREEN_DRAWER.equals(screen)) {
+                    rootContainer.postDelayed(() -> {
+                        showScreen(SCREEN_DRAWER);
+                        rootContainer.postDelayed(
+                                () -> ShadeSelfCheck.evaluateScreen(this,
+                                        ShadeSelfCheck.SCREEN_DRAWER, requestedStyle), 900L);
+                    }, 900L);
+                } else if (ShadeSelfCheck.SCREEN_SETTINGS.equals(screen)) {
+                    rootContainer.postDelayed(() -> {
+                        showScreen(SCREEN_SETTINGS);
+                        rootContainer.postDelayed(
+                                () -> ShadeSelfCheck.evaluateScreen(this,
+                                        ShadeSelfCheck.SCREEN_SETTINGS, requestedStyle), 900L);
+                    }, 900L);
+                }
+            }
             // Стол всё-таки показался: защита от цикла аварийного экрана больше
             // не нужна и не должна мешать показать его при новом сбое.
             startedInSafeMode = false;
@@ -4528,7 +4550,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         );
         acLp.leftMargin = dp(6);
         addChip.setLayoutParams(acLp);
-        ImageView pIco = VectorGlyphs.makeIconView(this, "plus", 13, 0xFF60A5FA);
+        ImageView pIco = VectorGlyphs.makeIconView(this, "plus", 13, GlassTheme.ACCENT_BLUE);
         LinearLayout.LayoutParams piLp = new LinearLayout.LayoutParams(dp(13), dp(13));
         piLp.rightMargin = dp(4);
         addChip.addView(pIco, piLp);
@@ -4536,7 +4558,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         pTv.setText("Раздел");
         pTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
         pTv.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        pTv.setTextColor(theme.styleMode == Prefs.STYLE_CLASSIC_LIGHT ? 0xFF174E9A : 0xFF93C5FD);
+        pTv.setTextColor(theme.styleMode == Prefs.STYLE_CLASSIC_LIGHT ? GlassTheme.ACCENT_BLUE : 0xFF93C5FD);
         addChip.addView(pTv);
         addChip.setOnClickListener(v -> {
             if (prefs.isHapticFeedbackEnabled()) {
@@ -6966,7 +6988,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                 editBtn.setBackground(GlassTheme.makeRoundedRect(0x22FFFFFF, dp(9)));
                 editBtn.setPadding(dp(7), dp(6), dp(7), dp(6));
                 editBtn.addView(VectorGlyphs.makeIconView(this, "edit", 14,
-                        theme.styleMode == Prefs.STYLE_CLASSIC_LIGHT ? 0xFF174E9A : 0xFF93C5FD),
+                        theme.styleMode == Prefs.STYLE_CLASSIC_LIGHT ? GlassTheme.ACCENT_BLUE : 0xFF93C5FD),
                         new FrameLayout.LayoutParams(dp(14), dp(14), Gravity.CENTER));
                 LinearLayout.LayoutParams ebLp = new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -7001,7 +7023,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         // Кнопка «+ Создать раздел»
         TextView addBtn = new TextView(this);
         addBtn.setText("+ Создать свой раздел");
-        addBtn.setTextColor(theme.styleMode == Prefs.STYLE_CLASSIC_LIGHT ? 0xFF174E9A : 0xFF93C5FD);
+        addBtn.setTextColor(theme.styleMode == Prefs.STYLE_CLASSIC_LIGHT ? GlassTheme.ACCENT_BLUE : 0xFF93C5FD);
         addBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f);
         addBtn.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         addBtn.setGravity(Gravity.CENTER);
@@ -7423,7 +7445,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                     boolean on = dotIdx < filledDots;
                     dot.setBackground(GlassTheme.makeGlassRect(
                             this,
-                            on ? (active ? 0xFF60A5FA : 0xFFD0D4DC) : 0xFF34343A,
+                            on ? (active ? GlassTheme.ACCENT_BLUE : GlassTheme.TEXT_MUTED) : 0xFF34343A,
                             Color.TRANSPARENT, 4f, 0f
                     ));
                     LinearLayout.LayoutParams dLp = new LinearLayout.LayoutParams(dp(12), dp(12));
@@ -10103,7 +10125,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                 ? BatteryInfoHelper.formatWatts(snap.powerWatts)
                 : (snap.isCharging ? "Зарядка" : "От АКБ");
         View t2 = makeBatteryStatTile("Питание", pwrVal, snap.plugLabel,
-                snap.isCharging ? 0xFF60A5FA : Color.WHITE);
+                snap.isCharging ? GlassTheme.ACCENT_BLUE : GlassTheme.TEXT_PRIMARY);
         row1.addView(t2, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         card.addView(row1, r1Lp);
 

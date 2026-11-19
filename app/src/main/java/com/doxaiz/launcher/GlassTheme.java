@@ -68,6 +68,13 @@ public final class GlassTheme {
     public static volatile int SHADE_FIELD       = 0xFF1F1F24;
     /** Выключенная круглая плитка быстрых действий. */
     public static volatile int SHADE_TILE_OFF    = 0xFF2E2E34;
+    /**
+     * Синий для подписей на светлых плашках (#DCE3EC).
+     *
+     * Основной {@link #ACCENT_BLUE} на такой плашке даёт 4,09:1 — ниже порога
+     * обычного текста 4,5:1. Здесь 6,26:1, тон тот же.
+     */
+    public static volatile int ACCENT_BLUE_ON_SOFT = 0xFF2169CD;
     public static volatile int TEXT_PRIMARY      = 0xFFF7F4F8;
     public static volatile int TEXT_SECONDARY    = 0xC4DCE0F5;
     public static volatile int TEXT_MUTED        = 0x8AA9B0D0;
@@ -260,6 +267,7 @@ public final class GlassTheme {
             SHADE_CARD    = 0xFFEDEFF3;
             SHADE_FIELD   = 0xFFE6E9EF;
             SHADE_TILE_OFF = 0xFFDCE3EC;
+            ACCENT_BLUE_ON_SOFT = 0xFF174E9A;
             return new GlassTheme(
                     safeStyle, false,
                     argb(24, 0, 0, 0),
@@ -302,6 +310,7 @@ public final class GlassTheme {
             SHADE_CARD        = 0xFF121A33;
             SHADE_FIELD       = 0xFF101A2E;
             SHADE_TILE_OFF    = 0xFF1B2440;
+            ACCENT_BLUE_ON_SOFT = 0xFF00D4FF;
             SHADE_BG          = 0xFF060814;
             POPUP_BG          = 0xFF0E1326;
             SURFACE_ELEVATED  = 0xFF131932;
@@ -373,6 +382,8 @@ public final class GlassTheme {
             SHADE_CARD        = 0xFF1A1A1E;
             SHADE_FIELD       = 0xFF1F1F24;
             SHADE_TILE_OFF    = 0xFF2E2E34;
+            // На тёмной плашке светлый синий читается лучше акцента.
+            ACCENT_BLUE_ON_SOFT = 0xFF93C5FD;
             cardA = clampLocal(216 + d, 152, 248);
             pillA = clampLocal(222 + d, 160, 250);
             overlayA = clampLocal(244 + d / 3, 212, 255);

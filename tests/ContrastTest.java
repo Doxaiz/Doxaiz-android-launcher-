@@ -273,6 +273,22 @@ public final class ContrastTest {
         requireBelow(textOn(0xFF9EA0A6, GlassTheme.SHADE_BG), 4.5,
                 "прежний литерал #9EA0A6 в светлой теме был нечитаем");
 
+        // Плашка уведомления (heads-up) строится на POPUP_BG темы, то есть в
+        // светлой теме она белая. Заголовок и кнопки действий в ней были
+        // белыми литералами на тёмной плашке — на светлой это 1,0:1.
+        requireAtLeast(textOn(GlassTheme.TEXT_PRIMARY, GlassTheme.POPUP_BG), 4.5,
+                "заголовок плашки уведомления (светлая тема)");
+        requireAtLeast(textOn(GlassTheme.TEXT_SECONDARY, GlassTheme.POPUP_BG), 4.5,
+                "второстепенная подпись плашки уведомления");
+        requireAtLeast(textOn(GlassTheme.ACCENT_BLUE_ON_SOFT, GlassTheme.SHADE_TILE_OFF), 4.5,
+                "кнопка действия на плашке уведомления");
+        // И обратная проверка: основной акцент на светлой подложке не проходит —
+        // именно поэтому для подписей на мягкой подложке заведён отдельный цвет.
+        requireBelow(textOn(GlassTheme.ACCENT_BLUE, GlassTheme.SHADE_TILE_OFF), 4.5,
+                "основной акцент на мягкой подложке был нечитаем (4,09:1)");
+        requireBelow(textOn(0xFFFFFFFF, GlassTheme.POPUP_BG), 4.5,
+                "прежний белый заголовок плашки уведомления был нечитаем");
+
         // Опасное действие: белый текст на красном темы.
         requireAtLeast(textOn(0xFFFFFFFF, GlassTheme.ACCENT_RED), 4.5,
                 "белая подпись на красной плашке светлой шторки");
