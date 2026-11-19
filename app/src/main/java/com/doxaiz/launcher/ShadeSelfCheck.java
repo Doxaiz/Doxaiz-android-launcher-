@@ -88,6 +88,15 @@ public final class ShadeSelfCheck {
     /** Средняя яркость кадра 0..255: светлая шторка не может быть тёмной. */
     private static final int MIN_AVERAGE_LUMA = 150;
 
+    /**
+     * Потолок яркости для тёмной темы: шторка обязана остаться тёмной.
+     *
+     * Оба порога нужны вместе. Если проверять только светлую, ошибка «светлые
+     * цвета применились ко всем стилям подряд» останется незамеченной — а это
+     * ровно та ошибка, которую ловит обратная проверка в ContrastTest.
+     */
+    private static final int MAX_AVERAGE_LUMA_DARK = 90;
+
     /** Доля чистого белого: подписи/иконки не должны остаться белыми. */
     private static final double MAX_WHITE_SHARE = 0.08;
 
@@ -342,11 +351,18 @@ public final class ShadeSelfCheck {
                     .append(pct(r.surfaceShare)).append(" < ")
                     .append(pct(MIN_SURFACE_SHARE)).append("; ");
         }
-        if (r.averageLuma < MIN_AVERAGE_LUMA) {
+        boolean light = expectedStyle != Prefs.STYLE_CLASSIC_DARK;
+        if (light && r.averageLuma < MIN_AVERAGE_LUMA) {
             r.ok = false;
             r.problems.append("средняя яркость ").append(r.averageLuma)
                     .append(" < ").append(MIN_AVERAGE_LUMA)
                     .append(" (шторка осталась тёмной); ");
+        }
+        if (!light && r.averageLuma > MAX_AVERAGE_LUMA_DARK) {
+            r.ok = false;
+            r.problems.append("средняя яркость ").append(r.averageLuma)
+                    .append(" > ").append(MAX_AVERAGE_LUMA_DARK)
+                    .append(" (тёмная тема посветлела); ");
         }
         if (r.dominantRowShare < MIN_SURFACE_SHARE) {
             r.ok = false;
@@ -355,7 +371,7 @@ public final class ShadeSelfCheck {
                     .append(pct(MIN_SURFACE_SHARE))
                     .append(" (окно не перекрыло экран); ");
         }
-        if (r.whiteShare > MAX_WHITE_SHARE) {
+        if (light && r.whiteShare > MAX_WHITE_SHARE) {
             r.ok = false;
             r.problems.append("чистого белого ").append(pct(r.whiteShare))
                     .append(" > ").append(pct(MAX_WHITE_SHARE))

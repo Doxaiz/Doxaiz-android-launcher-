@@ -425,7 +425,13 @@ if [ "$scenario_ok" = "1" ]; then
     fi
 
     # --- восстановление: чистим состояние и возвращаем лаунчер в работу -------
-    adb shell "run-as $PKG rm -f $CRASH_DIR/$CRASH_FILE" >/dev/null 2>&1 || true
+    # Пометка сбоя должна исчезнуть, но файл настроек сносить нельзя: в нём
+    # живёт вся раскладка, и шаг проверки состава ниже читает именно его.
+    # Раньше здесь стоял rm -f всего shared_prefs/doxaiz_prefs.xml — после этого
+    # разбор давал PARSED=0 «invalid character number», и проверка раскладки
+    # тихо пропускалась, хотя выглядела как выполненная.
+    adb shell "run-as $PKG sed -i '/crash_guard_streak/d;/crash_guard_pending/d' \
+        $CRASH_DIR/$CRASH_FILE" >/dev/null 2>&1 || true
     adb shell am force-stop "$PKG" >/dev/null 2>&1 || true
     sleep 1
     # После force-stop штатный лаунчер может вернуть себе передний план (он
@@ -548,66 +554,6 @@ if grep -q "нет ни одной подписи" "$OUT/ui-home.txt" 2>/dev/nul
 fi
 endlog
 
-log "Каталог приложений"
-# Жест — тот же, что у пользователя: свайп вверх по рабочему столу.
-# Важно: перед свайпом нельзя перезапускать активность — на эмуляторе жест
-# приходит во время старта и теряется (проверено в CI). Поэтому здесь только
-# свайп, ожидание и дамп; повторы нужны из-за нестабильности эмулятора.
-DRAWER_NODES=0
-for attempt in 1 2 3 4; do
-    # Сначала кнопка «Все приложения» в доке (детерминированно), затем свайп.
-    if ! tap_by_desc "Все приложения"; then
-        adb shell input swipe 540 1700 540 600 250
-    fi
-    sleep 4
-    dump_ui drawer "ui-drawer"
-    DRAWER_NODES="$(sed -n 's/^узлов=//p' "$OUT/ui-drawer.txt" 2>/dev/null | head -1)"
-    echo "attempt $attempt: узлов ${DRAWER_NODES:-0}" >> "$OUT/drawer-attempts.txt"
-    if [ "${DRAWER_NODES:-0}" -ge 40 ]; then
-        break
-    fi
-    adb shell input keyevent KEYCODE_BACK
-    sleep 2
-done
-note "drawer" "узлов в каталоге=${DRAWER_NODES:-0}"
-summary "попытки-каталога" "$(cat "$OUT/drawer-attempts.txt" 2>/dev/null)"
-# Открытие каталога свайпом на эмуляторе нестабильно: в прогонах, где жест
-# срабатывает, дерево каталога содержит 117 узлов (поиск, чипы категорий,
-# алфавитная полоса, сетка иконок), и это уже зафиксировано. Но загруженный
-# эмулятор теряет часть вводов, поэтому неудачный жест — предупреждение, а не
-# провал: иначе CI краснеет от нестабильности эмулятора, а не от кода.
-if [ "${DRAWER_NODES:-0}" -lt 40 ]; then
-    if grep -qE "isn't responding|не отвечает" "$OUT/ui-drawer.xml" 2>/dev/null; then
-        note "drawer" "экран перекрыт системным диалогом — результат недостоверен"
-    else
-        note "drawer" "жест не сработал за 4 попытки (известная нестабильность эмулятора)"
-    fi
-    echo "::warning title=каталог::каталог не открылся за 4 попытки (узлов=${DRAWER_NODES:-0}); это нестабильность эмулятора, не провал сборки"
-fi
-check_crash "каталог" || true
-endlog
-
-log "Прокрутка каталога и метрики кадров"
-# Эмулятор рисует программно: числа показывают, что кадры вообще идут и
-# насколько тяжёлые шаги, но не FPS на телефоне.
-adb shell dumpsys gfxinfo "$PKG" reset >/dev/null 2>&1 || true
-for _ in 1 2 3; do
-    adb shell input swipe 540 1700 540 700 150
-    sleep 1
-    adb shell input swipe 540 700 540 1700 150
-    sleep 1
-done
-adb shell dumpsys gfxinfo "$PKG" > "$OUT/gfxinfo-drawer.txt" 2>/dev/null || true
-grep -E "Total frames rendered|Janky frames:|50th percentile|90th percentile|95th percentile|Number Missed Vsync|Number Slow UI thread|Number Slow bitmap uploads" \
-    "$OUT/gfxinfo-drawer.txt" | tee "$OUT/gfxinfo-summary.txt"
-note "gfxinfo-прокрутка" "$(tr '\n' ' ' < "$OUT/gfxinfo-summary.txt" | cut -c1-240)"
-summary "gfxinfo-прокрутка" "$(cat "$OUT/gfxinfo-summary.txt")"
-# swiftshader: числа сравнимы только между прогонами — пишем в summary, не в аннотацию:
-# каждая лишняя аннотация вытесняет заметку, которая важнее (см. note()).
-adb exec-out screencap -p > "$OUT/screen-drawer.png" 2>/dev/null || true
-check_crash "прокрутка" || true
-endlog
-
 log "Светлая тема: шторка в реальных пикселях"
 
 # Зачем отдельный шаг, если контраст уже посчитан в JVM-тесте.
@@ -667,6 +613,66 @@ smoke_light_shade 2 "dark" || true
 adb shell am force-stop "$PKG" >/dev/null 2>&1 || true
 adb shell am start -W -n "$PKG/.MainActivity" --ei doxaiz_style 2 >/dev/null 2>&1 || true
 sleep 2
+endlog
+
+log "Каталог приложений"
+# Жест — тот же, что у пользователя: свайп вверх по рабочему столу.
+# Важно: перед свайпом нельзя перезапускать активность — на эмуляторе жест
+# приходит во время старта и теряется (проверено в CI). Поэтому здесь только
+# свайп, ожидание и дамп; повторы нужны из-за нестабильности эмулятора.
+DRAWER_NODES=0
+for attempt in 1 2 3 4; do
+    # Сначала кнопка «Все приложения» в доке (детерминированно), затем свайп.
+    if ! tap_by_desc "Все приложения"; then
+        adb shell input swipe 540 1700 540 600 250
+    fi
+    sleep 4
+    dump_ui drawer "ui-drawer"
+    DRAWER_NODES="$(sed -n 's/^узлов=//p' "$OUT/ui-drawer.txt" 2>/dev/null | head -1)"
+    echo "attempt $attempt: узлов ${DRAWER_NODES:-0}" >> "$OUT/drawer-attempts.txt"
+    if [ "${DRAWER_NODES:-0}" -ge 40 ]; then
+        break
+    fi
+    adb shell input keyevent KEYCODE_BACK
+    sleep 2
+done
+note "drawer" "узлов в каталоге=${DRAWER_NODES:-0}"
+summary "попытки-каталога" "$(cat "$OUT/drawer-attempts.txt" 2>/dev/null)"
+# Открытие каталога свайпом на эмуляторе нестабильно: в прогонах, где жест
+# срабатывает, дерево каталога содержит 117 узлов (поиск, чипы категорий,
+# алфавитная полоса, сетка иконок), и это уже зафиксировано. Но загруженный
+# эмулятор теряет часть вводов, поэтому неудачный жест — предупреждение, а не
+# провал: иначе CI краснеет от нестабильности эмулятора, а не от кода.
+if [ "${DRAWER_NODES:-0}" -lt 40 ]; then
+    if grep -qE "isn't responding|не отвечает" "$OUT/ui-drawer.xml" 2>/dev/null; then
+        note "drawer" "экран перекрыт системным диалогом — результат недостоверен"
+    else
+        note "drawer" "жест не сработал за 4 попытки (известная нестабильность эмулятора)"
+    fi
+    echo "::warning title=каталог::каталог не открылся за 4 попытки (узлов=${DRAWER_NODES:-0}); это нестабильность эмулятора, не провал сборки"
+fi
+check_crash "каталог" || true
+endlog
+
+log "Прокрутка каталога и метрики кадров"
+# Эмулятор рисует программно: числа показывают, что кадры вообще идут и
+# насколько тяжёлые шаги, но не FPS на телефоне.
+adb shell dumpsys gfxinfo "$PKG" reset >/dev/null 2>&1 || true
+for _ in 1 2 3; do
+    adb shell input swipe 540 1700 540 700 150
+    sleep 1
+    adb shell input swipe 540 700 540 1700 150
+    sleep 1
+done
+adb shell dumpsys gfxinfo "$PKG" > "$OUT/gfxinfo-drawer.txt" 2>/dev/null || true
+grep -E "Total frames rendered|Janky frames:|50th percentile|90th percentile|95th percentile|Number Missed Vsync|Number Slow UI thread|Number Slow bitmap uploads" \
+    "$OUT/gfxinfo-drawer.txt" | tee "$OUT/gfxinfo-summary.txt"
+note "gfxinfo-прокрутка" "$(tr '\n' ' ' < "$OUT/gfxinfo-summary.txt" | cut -c1-240)"
+summary "gfxinfo-прокрутка" "$(cat "$OUT/gfxinfo-summary.txt")"
+# swiftshader: числа сравнимы только между прогонами — пишем в summary, не в аннотацию:
+# каждая лишняя аннотация вытесняет заметку, которая важнее (см. note()).
+adb exec-out screencap -p > "$OUT/screen-drawer.png" 2>/dev/null || true
+check_crash "прокрутка" || true
 endlog
 
 log "Отзывчивость: набор текста в поиске каталога"
