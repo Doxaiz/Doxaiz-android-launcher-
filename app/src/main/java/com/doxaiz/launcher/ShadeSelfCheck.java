@@ -135,7 +135,7 @@ public final class ShadeSelfCheck {
             sb.append("средняя_яркость=").append(r.averageLuma).append('\n');
             sb.append("чисто_белый=").append(pct(r.whiteShare)).append('\n');
             sb.append("лучшая_строка=").append(pct(r.dominantRowShare)).append('\n');
-            sb.append("причины=").append(r.problems.isEmpty() ? "нет" : r.problems).append('\n');
+            sb.append("причины=").append(r.problems.length() == 0 ? "нет" : r.problems).append('\n');
             if (!r.ok) {
                 // Подсказка для того, кто читает отчёт в CI: чаще всего причина
                 // не в палитре, а в том, что снят не тот кадр.
