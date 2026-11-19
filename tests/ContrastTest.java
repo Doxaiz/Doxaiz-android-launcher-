@@ -200,6 +200,19 @@ public final class ContrastTest {
                 "второстепенный текст на фоне шторки");
         requireAtLeast(textOn(light.textHint, GlassTheme.SHADE_BG), 4.5,
                 "подсказка на фоне шторки");
+        // Диалоги лаунчера строятся через createModalBox(), то есть поверхность
+        // берётся из палитры (dialogBgColor), а подписи в них оставались белыми
+        // литералами. На светлой палитре это 1,0:1 — заголовок просто исчезал.
+        requireAtLeast(textOn(GlassTheme.TEXT_PRIMARY, light.dialogBgColor), 4.5,
+                "заголовок диалога на его поверхности (светлая тема)");
+        requireAtLeast(textOn(GlassTheme.TEXT_MUTED, light.dialogBgColor), 4.5,
+                "подпись в диалоге на его поверхности (светлая тема)");
+        requireAtLeast(textOn(GlassTheme.ACCENT_BLUE, light.dialogBgColor), 4.5,
+                "акцент в диалоге на его поверхности (светлая тема)");
+        // Обратная проверка: белый литерал на поверхности диалога не проходит.
+        requireBelow(textOn(0xFFFFFFFF, light.dialogBgColor), 4.5,
+                "прежний белый заголовок в светлом диалоге был нечитаем");
+
         // Включённая плитка залита акцентом: подпись на ней белая.
         requireAtLeast(textOn(0xFFFFFFFF, GlassTheme.TILE_ACTIVE_BLUE), 4.5,
                 "белая подпись на включённой плитке (синий акцент)");
@@ -235,6 +248,31 @@ public final class ContrastTest {
                 "карточка шторки не чёрная");
         requireAtLeast(textOn(GlassTheme.SHADE_FIELD, 0xFF000000), 3.0,
                 "поле ввода шторки не чёрное");
+        // Каталог и диалог страниц. Это та же ошибка, что была в шторке (§37):
+        // подписи и иконки каталога были залиты литералами графита
+        // (#9EA0A6, #8E9098, #93C5FD, #60A5FA). На светлой палитре они давали
+        // 1,63–2,87:1 — то есть в светлой теме каталог был нечитаем, при том что
+        // контраст шторки к этому моменту уже был посчитан.
+        requireAtLeast(textOn(GlassTheme.TEXT_MUTED, GlassTheme.SHADE_BG), 4.5,
+                "подсказка каталога на фоне светлой темы");
+        requireAtLeast(textOn(GlassTheme.TEXT_MUTED, GlassTheme.POPUP_BG), 4.5,
+                "подпись в диалоге страниц (фон — карточка темы)");
+        requireAtLeast(textOn(GlassTheme.ACCENT_BLUE, GlassTheme.POPUP_BG), 4.5,
+                "акцентная подпись в диалоге страниц");
+        requireAtLeast(textOn(GlassTheme.ACCENT_GREEN, GlassTheme.POPUP_BG), 4.5,
+                "метка «Главный» в диалоге страниц");
+        // Обратная проверка: прежние литералы действительно не проходили порог.
+        // Если кто-то вернёт их обратно, это должно быть видно здесь, а не на
+        // экране телефона.
+        requireBelow(textOn(0xFF93C5FD, GlassTheme.SHADE_BG), 4.5,
+                "прежний литерал #93C5FD в светлой теме был нечитаем");
+        requireBelow(textOn(0xFF8E9098, GlassTheme.SHADE_BG), 4.5,
+                "прежний литерал #8E9098 в светлой теме был нечитаем");
+        requireBelow(textOn(0xFF60A5FA, GlassTheme.SHADE_BG), 4.5,
+                "прежний литерал #60A5FA в светлой теме был нечитаем");
+        requireBelow(textOn(0xFF9EA0A6, GlassTheme.SHADE_BG), 4.5,
+                "прежний литерал #9EA0A6 в светлой теме был нечитаем");
+
         // Опасное действие: белый текст на красном темы.
         requireAtLeast(textOn(0xFFFFFFFF, GlassTheme.ACCENT_RED), 4.5,
                 "белая подпись на красной плашке светлой шторки");
