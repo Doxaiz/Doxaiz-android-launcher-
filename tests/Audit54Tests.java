@@ -56,7 +56,13 @@ public final class Audit54Tests {
         check(!DoxaizLockService.hasExplicitRecentsClass(null), "null root is not proof");
         check(Prefs.sanitizeVisualStyle(Prefs.STYLE_CLASSIC_LIGHT)==Prefs.STYLE_CLASSIC_LIGHT, "light theme");
         check(Prefs.sanitizeVisualStyle(Prefs.STYLE_CLASSIC_DARK)==Prefs.STYLE_CLASSIC_DARK, "dark theme");
-        check(Prefs.sanitizeVisualStyle(Prefs.STYLE_SAKURA_JADE)==Prefs.STYLE_CLASSIC_DARK, "no sakura theme");
+        // Ожидание «сакура схлопывается в графит» устарело ещё в §27: с тех пор
+        // все четыре стиля доступны и сохраняются как есть. Проверяем фактическое
+        // поведение: известные стили проходят, неизвестный — падает в тёмный.
+        check(Prefs.sanitizeVisualStyle(Prefs.STYLE_SAKURA_JADE)==Prefs.STYLE_SAKURA_JADE, "sakura theme kept");
+        check(Prefs.sanitizeVisualStyle(Prefs.STYLE_CYBER_ANIME)==Prefs.STYLE_CYBER_ANIME, "cyber theme kept");
+        check(Prefs.sanitizeVisualStyle(99)==Prefs.STYLE_CLASSIC_DARK, "unknown theme falls back");
+        check(Prefs.sanitizeVisualStyle(-1)==Prefs.STYLE_CLASSIC_DARK, "negative theme falls back");
         check(Prefs.sanitizeWallpaperMode(0)==Prefs.WALLPAPER_KURUMI_XIAOBAI, "bundled wallpaper");
         check(Prefs.sanitizeWallpaperMode(1)==Prefs.WALLPAPER_SYSTEM, "system wallpaper");
         check(AnimeBackdropView.computeSampleSize(2000,4000,500,1000)==4, "sample size");
