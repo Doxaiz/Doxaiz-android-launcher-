@@ -19,6 +19,14 @@ public class LauncherChecksTest {
     }
 
     @Test
+    public void audit54BackupAndIcons() {
+        // F-18: набор был исключён из сборки, потому что требовал настоящий
+        // org.json. Теперь он в тестовом classpath, и проверки импорта бэкапа
+        // (валидация раскладки, лимиты, приватность) снова выполняются.
+        run("Audit54Tests", () -> Audit54Tests.main(new String[0]));
+    }
+
+    @Test
     public void audit55Calculations() {
         run("Audit55Tests", () -> Audit55Tests.main(new String[0]));
     }
@@ -86,6 +94,13 @@ public class LauncherChecksTest {
     @Test
     public void restrictedSettingsFix() {
         run("ShizukuFixTests", () -> ShizukuFixTests.main(new String[0]));
+    }
+
+    @Test
+    public void silentCatchBudget() {
+        // F-07: храповик на число «немых» catch. Тест читает исходники, поэтому
+        // его задача — не пустить рост, а не доказать, что catch нет.
+        run("SilentCatchBudgetTest", () -> SilentCatchBudgetTest.main(new String[0]));
     }
 
     @Test

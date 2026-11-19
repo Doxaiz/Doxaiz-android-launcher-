@@ -41,10 +41,10 @@ android {
     sourceSets {
         // F-18: наборы проверок из ../tests раньше не запускались ничем.
         test.java.srcDirs += '../tests'
-        // Audit54Tests требует настоящий org.json, а в unit-тестах доступна
-        // только заглушка из android.jar — его подключаем отдельно, когда появится
-        // реализация org.json в тестовом classpath.
-        test.java.exclude 'Audit54Tests.java'
+        // Audit54Tests раньше исключался целиком: ему нужен настоящий org.json,
+        // а в android.jar лежит заглушка, которая кидает RuntimeException в
+        // конструкторе. Настоящая реализация подключена ниже, поэтому набор
+        // больше не исключается — см. dependencies.testImplementation.
     }
 
     testOptions {
@@ -55,6 +55,12 @@ android {
 dependencies {
     // Без сторонних зависимостей в рантайме — минимальный размер APK и мгновенный отклик.
     testImplementation 'junit:junit:4.13.2'
+    // F-18: настоящий org.json для JVM-тестов. В APK он не попадает — это
+    // testImplementation, а на устройстве работает системная реализация.
+    // Без него Audit54Tests (BackupHelper.validateDesktopJson и проверки
+    // импорта) приходилось исключать из сборки, то есть самая рискованная
+    // часть бэкапа оставалась без регрессии.
+    testImplementation 'org.json:json:20240303'
 }
 
 tasks.withType(Test).configureEach {
