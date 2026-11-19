@@ -608,6 +608,65 @@ adb exec-out screencap -p > "$OUT/screen-drawer.png" 2>/dev/null || true
 check_crash "прокрутка" || true
 endlog
 
+log "Светлая тема: шторка в реальных пикселях"
+
+# Зачем отдельный шаг, если контраст уже посчитан в JVM-тесте.
+#
+# tests/ContrastTest.java проверяет числа палитры — и не видит, применены ли они.
+# В §37 палитра была светлой, а корни диалогов шторки оставались чёрными
+# (литерал 0xFF000000), и расчёт этого не поймал: пользователь видел чёрную
+# шторку при «завершённой» светлой теме. Здесь приложение само открывает шторку,
+# рисует её в Bitmap и сверяет пиксели с палитрой темы.
+smoke_light_shade() {
+    local theme="$1" label="$2"
+    # Тему выставляем через файл настроек: приложение читает его при старте.
+    # run-as доступен на debug-сборке, поэтому правим XML напрямую.
+    adb shell am force-stop "$PKG" >/dev/null 2>&1 || true
+    sleep 1
+    adb shell run-as "$PKG" sed -i \
+        "s|<int name=\"simple_visual_style\" value=\"[0-9]*\" />|<int name=\"simple_visual_style\" value=\"$theme\" />|" \
+        shared_prefs/doxaiz_prefs.xml >/dev/null 2>&1 || true
+    # Ключа могло не быть вовсе (значение по умолчанию) — тогда добавляем.
+    if ! adb shell "run-as $PKG cat shared_prefs/doxaiz_prefs.xml" 2>/dev/null \
+            | grep -q "simple_visual_style"; then
+        adb shell "run-as $PKG sed -i 's|</map>|<int name=\"simple_visual_style\" value=\"$theme\" /></map>|' \
+            shared_prefs/doxaiz_prefs.xml" >/dev/null 2>&1 || true
+    fi
+    adb shell rm -f "files/shade_selfcheck.txt" >/dev/null 2>&1 || true
+    adb shell "run-as $PKG rm -f files/shade_selfcheck.txt" >/dev/null 2>&1 || true
+
+    adb shell am start -W -n "$PKG/.MainActivity" --ez doxaiz_shade_selfcheck true \
+        > "$OUT/shade-selfcheck-start-$label.txt" 2>&1 || true
+    # Открытие шторки отложено (1,2 с + 0,7 с на кадр) — ждём с запасом.
+    local waited=0 report=""
+    while [ "$waited" -lt 20 ]; do
+        report="$(adb shell "run-as $PKG cat files/shade_selfcheck.txt" 2>/dev/null | tr -d '\r')"
+        [ -n "$report" ] && break
+        sleep 1
+        waited=$((waited + 1))
+    done
+    adb exec-out screencap -p > "$OUT/screen-shade-$label.png" 2>/dev/null || true
+    if [ -z "$report" ]; then
+        report_fail "Светлая тема ($label): самопроверка шторки не оставила отчёт за ${waited} с"
+        return 1
+    fi
+    summary "шторка-$label" "$report"
+    note "шторка-$label" "$(printf '%s' "$report" | tr '\n' ' ' | cut -c1-220)"
+    case "$report" in
+        OK*) return 0 ;;
+        *) report_fail "Светлая тема ($label): $(printf '%s' "$report" | tr '\n' ' ' | cut -c1-200)"; return 1 ;;
+    esac
+}
+
+# Светлая и графит проверяются по одной причине: важно не только «светлая стала
+# светлой», но и «тёмная осталась тёмной». Второй случай ловит ошибку, где
+# светлый цвет применился ко всем стилям подряд.
+smoke_light_shade 3 "light" || true
+smoke_light_shade 2 "dark" || true
+# Возвращаем светлую тему: остальные шаги должны видеть то же, что и раньше.
+adb shell am force-stop "$PKG" >/dev/null 2>&1 || true
+endlog
+
 log "Отзывчивость: набор текста в поиске каталога"
 
 # Один замер на эмуляторе недостоверен: в соседних прогонах при одном и том же

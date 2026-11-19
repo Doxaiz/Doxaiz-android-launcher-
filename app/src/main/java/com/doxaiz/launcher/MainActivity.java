@@ -502,6 +502,15 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         // сохраняется — следующий запуск должен знать о повторяющейся проблеме.
         // Отложено на кадр: успешным считается показ, а не начало onCreate.
         final boolean keepStreak = startupCrashStreak > 0;
+        // Самопроверка светлой шторки (debug-сборка, отдельный флаг в intent).
+        // Нужна потому, что тест контраста проверяет числа палитры, но не их
+        // применение: в §37 палитра была светлой, а корни диалогов — чёрными,
+        // и расчёт этого не увидел. Здесь шторка открывается по-настоящему и
+        // измеряются её пиксели.
+        if (BuildConfig.DEBUG && getIntent() != null
+                && getIntent().getBooleanExtra(ShadeSelfCheck.EXTRA_RUN, false)) {
+            ShadeSelfCheck.schedule(this, quickShadeHelper);
+        }
         rootContainer.post(() -> {
             if (isFinishing() || isDestroyed()) return;
             CrashGuard.onStartupComplete(prefs, keepStreak);
