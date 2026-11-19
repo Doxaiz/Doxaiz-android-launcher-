@@ -206,6 +206,52 @@ public final class ShadeSelfCheck {
         writeNamed(activity, screen, sb.toString());
     }
 
+    /**
+     * Ищет корень шторки среди окон процесса.
+     *
+     * Диалог шторки живёт в отдельном окне, поэтому {@code decorView} активности
+     * для кадра не подходит: на нём рабочего стола уже нет — сверху окно шторки.
+     * {@code WindowManagerGlobal} не входит в публичный SDK, но список окон там
+     * единственный способ получить без рефлексии по иерархии. Поэтому обход
+     * идёт по нему, а при недоступности — запасной путь через decorView
+     * активности (проверка тогда честно провалится, а не соврёт «OK»).
+     */
+    private static View findShadeRoot(Activity activity) {
+        View best = null;
+        int bestArea = 0;
+        try {
+            Class<?> wmg = Class.forName("android.view.WindowManagerGlobal");
+            Object instance = wmg.getMethod("getInstance").invoke(null);
+            java.lang.reflect.Field f = wmg.getDeclaredField("mViews");
+            f.setAccessible(true);
+            Object views = f.get(instance);
+            if (views instanceof java.util.List) {
+                for (Object o : (java.util.List<?>) views) {
+                    if (!(o instanceof View)) continue;
+                    View v = (View) o;
+                    if (!v.isShown() || v.getWidth() == 0 || v.getHeight() == 0) continue;
+                    // Окно шторки — полноэкранное и не является окном активности,
+                    // то есть его корень не совпадает с decorView активности.
+                    View activityDecor = activity.getWindow() != null
+                            ? activity.getWindow().getDecorView() : null;
+                    if (v == activityDecor) continue;
+                    int area = v.getWidth() * v.getHeight();
+                    if (area > bestArea) {
+                        bestArea = area;
+                        best = v;
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            // Штатный путь на обычных сборках: WindowManagerGlobal не входит в
+            // публичный SDK. Запись в журнал нужна на случай, если поиск сломался
+            // не из-за этого, а по другой причине.
+            Diagnostics.record("ShadeSelfCheck.windows", t);
+        }
+        if (best != null) return best;
+        return activity.getWindow() != null ? activity.getWindow().getDecorView() : null;
+    }
+
     /** Проверка каталога: тот же кадр, но с окна активности. */
     static void evaluateScreen(Activity activity, String screen, int expectedStyle) {
         if (activity == null) return;
