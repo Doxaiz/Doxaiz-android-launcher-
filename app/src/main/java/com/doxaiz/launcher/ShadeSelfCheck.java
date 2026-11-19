@@ -127,6 +127,21 @@ public final class ShadeSelfCheck {
     /** Доля чистого белого: подписи/иконки не должны остаться белыми. */
     private static final double MAX_WHITE_SHARE = 0.08;
 
+    /**
+     * То же для экранов со списком карточек: там белый — это цвет самих
+     * карточек, а не признак белых подписей.
+     */
+    private static final double MAX_WHITE_SHARE_LIST = 0.75;
+
+    /**
+     * Минимальная доля тёмного текста в кадре.
+     *
+     * Это и есть настоящая проверка «подписи не остались белыми»: в светлой теме
+     * текст обязан быть тёмным. Ноль тёмных пикселей означает, что подписи
+     * белые независимо от того, какого цвета карточки.
+     */
+    private static final double MIN_DARK_TEXT_SHARE = 0.01;
+
     private ShadeSelfCheck() {}
 
     /**
@@ -201,6 +216,7 @@ public final class ShadeSelfCheck {
         sb.append("поверхности_темы=").append(pct(r.surfaceShare)).append('\n');
         sb.append("средняя_яркость=").append(r.averageLuma).append('\n');
         sb.append("чисто_белый=").append(pct(r.whiteShare)).append('\n');
+        sb.append("тёмный_текст=").append(pct(r.darkTextShare)).append('\n');
         sb.append("лучшая_строка=").append(pct(r.dominantRowShare)).append('\n');
         sb.append("причины=").append(r.problems.length() == 0 ? "нет" : r.problems).append('\n');
         writeNamed(activity, screen, sb.toString());
@@ -299,6 +315,7 @@ public final class ShadeSelfCheck {
         double surfaceShare;
         int averageLuma;
         double whiteShare;
+        double darkTextShare;
         double dominantRowShare;
         boolean ok;
         final StringBuilder problems = new StringBuilder();
@@ -332,6 +349,7 @@ public final class ShadeSelfCheck {
         java.util.HashMap<Integer, Integer> hist = new java.util.HashMap<>();
         long lumaSum = 0;
         int total = 0;
+        int darkText = 0;
         int onSurface = 0;
         int white = 0;
 
@@ -343,8 +361,10 @@ public final class ShadeSelfCheck {
                 int rgb = c & 0xFFFFFF;
                 total++;
                 rowTotal++;
-                lumaSum += luma(rgb);
+                lumaSum += y;
                 if (isNear(rgb, Color.WHITE, 10)) white++;
+                int y = luma(rgb);
+                if (y < 90) darkText++;
                 if (matchesAny(rgb, surfaces, 12)) {
                     onSurface++;
                     rowSurface++;
@@ -378,6 +398,7 @@ public final class ShadeSelfCheck {
         r.surfaceShare = onSurface / (double) total;
         r.averageLuma = (int) (lumaSum / total);
         r.whiteShare = white / (double) total;
+        r.darkTextShare = darkText / (double) total;
 
         // Каталог и настройки — это плотный список иконок и подписей, поэтому
         // доля «чистых» пикселей палитры там ниже, чем у шторки с её крупными
@@ -420,10 +441,22 @@ public final class ShadeSelfCheck {
                     .append(pct(minSurfaceShare))
                     .append(" (окно не перекрыло экран); ");
         }
-        if (light && r.whiteShare > MAX_WHITE_SHARE) {
+        // На экранах со списком карточек белый — это цвет самих карточек
+        // (cardBgColor = #FFFFFF в светлой теме), поэтому порог там другой.
+        // Подписи ловит отдельная проверка тёмного текста ниже.
+        double maxWhite = SCREEN_SHADE.equals(screen) ? MAX_WHITE_SHARE : MAX_WHITE_SHARE_LIST;
+        if (light && r.whiteShare > maxWhite) {
             r.ok = false;
             r.problems.append("чистого белого ").append(pct(r.whiteShare))
-                    .append(" > ").append(pct(MAX_WHITE_SHARE))
+                    .append(" > ").append(pct(maxWhite))
+                    .append(" (подписи остались белыми); ");
+        }
+        // Настоящая проверка «подписи не остались белыми»: в светлой теме в
+        // кадре обязан быть тёмный текст. Белые карточки этому не мешают.
+        if (light && r.darkTextShare < MIN_DARK_TEXT_SHARE) {
+            r.ok = false;
+            r.problems.append("тёмного текста ").append(pct(r.darkTextShare))
+                    .append(" < ").append(pct(MIN_DARK_TEXT_SHARE))
                     .append(" (подписи остались белыми); ");
         }
         return r;

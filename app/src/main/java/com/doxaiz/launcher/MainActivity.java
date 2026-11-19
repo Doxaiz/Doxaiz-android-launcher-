@@ -9185,7 +9185,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
         TextView btn = new TextView(this);
         btn.setText(ok ? "Готово" : "Включить");
-        btn.setTextColor(ok ? 0xFF4ADE80 : Color.WHITE);
+        btn.setTextColor(ok ? GlassTheme.ACCENT_GREEN : GlassTheme.TEXT_PRIMARY);
         btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f);
         btn.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         btn.setPadding(dp(10), dp(6), dp(10), dp(6));
@@ -9452,7 +9452,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         View thumb = new View(this);
         thumb.setBackground(GlassTheme.makeGlassRect(
                 this,
-                checked ? theme.switchThumb : Color.WHITE,
+                checked ? theme.switchThumb : GlassTheme.SWITCH_OFF,
                 Color.TRANSPARENT, 10f, 0f
         ));
         FrameLayout.LayoutParams thLp = new FrameLayout.LayoutParams(dp(20), dp(20));
@@ -9658,7 +9658,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
             TextView lbl = new TextView(this);
             lbl.setText(modes[i]);
-            lbl.setTextColor(Color.WHITE);
+            lbl.setTextColor(GlassTheme.TEXT_PRIMARY);
             lbl.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f);
             row.addView(lbl, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
@@ -9908,7 +9908,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         final FrameLayout trashBtn = new FrameLayout(this);
         trashBtn.setContentDescription("Закрыть все приложения и очистить ОЗУ");
         trashBtn.setBackground(GlassTheme.makeGlassRect(
-                this, 0xFF242731, 0x4AFFFFFF, 29f, 1f
+                this, GlassTheme.SHADE_TILE_OFF, 0x4AFFFFFF, 29f, 1f
         ));
         final ImageView trashIv = VectorGlyphs.makeIconView(this, "trash", 24, Color.WHITE);
         FrameLayout.LayoutParams tiLp = new FrameLayout.LayoutParams(dp(24), dp(24));
@@ -10136,7 +10136,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         r2Lp.topMargin = dp(6);
         View t3 = makeBatteryStatTile("Напряжение",
                 BatteryInfoHelper.formatVoltage(snap.voltageMv),
-                snap.technology, Color.WHITE);
+                snap.technology, GlassTheme.TEXT_PRIMARY);
         LinearLayout.LayoutParams t3Lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         t3Lp.rightMargin = dp(6);
         row2.addView(t3, t3Lp);
@@ -10389,7 +10389,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             }
             TextView trackTv = new TextView(this);
             trackTv.setText(activeMedia.title.isEmpty() ? tab.appLabel : activeMedia.title);
-            trackTv.setTextColor(Color.WHITE);
+            trackTv.setTextColor(GlassTheme.TEXT_PRIMARY);
             trackTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f);
             trackTv.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
             trackTv.setMaxLines(2);

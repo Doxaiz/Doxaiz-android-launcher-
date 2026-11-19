@@ -273,6 +273,16 @@ public final class ContrastTest {
         requireBelow(textOn(0xFF9EA0A6, GlassTheme.SHADE_BG), 4.5,
                 "прежний литерал #9EA0A6 в светлой теме был нечитаем");
 
+        // Экраны настроек: карточки — светлые (cardBgColor = #FFFFFF), и
+        // подписи в них были белыми литералами. 1,0:1 на белом — текст исчезал.
+        requireAtLeast(textOn(GlassTheme.TEXT_PRIMARY, light.cardBgColor), 4.5,
+                "подпись в карточке настроек (светлая тема)");
+        requireBelow(textOn(0xFFFFFFFF, light.cardBgColor), 4.5,
+                "прежняя белая подпись в карточке настроек была нечитаема");
+        // И ползунок выключенного переключателя: белый thumb на светлой дорожке.
+        requireAtLeast(textOn(GlassTheme.SWITCH_OFF, light.cardBgColor), 1.4,
+                "выключенный переключатель различим на карточке");
+
         // Плашка уведомления (heads-up) строится на POPUP_BG темы, то есть в
         // светлой теме она белая. Заголовок и кнопки действий в ней были
         // белыми литералами на тёмной плашке — на светлой это 1,0:1.
