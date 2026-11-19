@@ -492,27 +492,31 @@ LAYOUT_RAW="$(adb shell "run-as $PKG cat shared_prefs/doxaiz_prefs.xml" 2>/dev/n
 printf '%s' "$LAYOUT_RAW" > "$OUT/prefs.xml"
 layout_report() {
     python3 - "$OUT/prefs.xml" <<'PYEOF'
-import re, sys, xml.etree.ElementTree as ET
+import re, sys, html, xml.etree.ElementTree as ET
 
-def unescape(v):
-    # SharedPreferences хранит строку прямо в тексте элемента и экранирует
-    # кавычки; JSON-разбор здесь избыточен — нам нужны только счётчики.
-    return v
-
+# shared_prefs — не обязательно корректный XML. Android пишет в него строки
+# как есть, и JSON раскладки может содержать управляющие символы, на которых
+# строгий XML-парсер падает: «reference to invalid character number». Раньше
+# проверка состава в этом случае молча давала PARSED=0, то есть выглядела
+# выполненной, не проверив ничего. Поэтому сначала пробуем строгий разбор, а
+# при неудаче — достаём значение регулярным выражением и раскодируем сущности.
+layout = None
 try:
     root = ET.parse(sys.argv[1]).getroot()
-except Exception as exc:
-    print("PARSED=0")
-    print("причина: не удалось разобрать prefs.xml (%s)" % exc)
-    raise SystemExit(0)
-
-layout = None
-for node in root.iter():
-    if node.tag == "string" and node.get("name") == "desktop_layout_json":
-        layout = node.text or ""
-        break
+    for node in root.iter():
+        if node.tag == "string" and node.get("name") == "desktop_layout_json":
+            layout = node.text or ""
+            break
+except Exception:
+    layout = None
 
 if layout is None:
+    raw = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+    m = re.search(r'<string name="desktop_layout_json">(.*?)</string>', raw, re.S)
+    if m:
+        layout = html.unescape(m.group(1))
+
+if not layout:
     print("PARSED=0")
     print("раскладка не сохранена")
     raise SystemExit(0)
