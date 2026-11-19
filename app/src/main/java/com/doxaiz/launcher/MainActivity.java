@@ -546,17 +546,27 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     private void updateSystemBarIconColors() {
         Window w = getWindow();
         if (w == null) return;
+        // Светлая тема — светлые поверхности, значит часы и значки в статус-баре
+        // должны быть тёмными. Раньше флаг всегда снимался: в светлой теме белые
+        // значки шли по светлому фону (1,0–1,4:1 — фактически невидимы).
+        boolean lightIcons = GlassTheme.LIGHT_SURFACES;
         if (Build.VERSION.SDK_INT >= 30) {
             WindowInsetsController ctrl = w.getInsetsController();
             if (ctrl != null) {
                 int mask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
                         | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
-                ctrl.setSystemBarsAppearance(0, mask);
+                ctrl.setSystemBarsAppearance(lightIcons ? mask : 0, mask);
             }
         } else {
             View decor = w.getDecorView();
             int flags = decor.getSystemUiVisibility();
-            flags &= ~(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+            if (lightIcons) {
+                flags |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+                        | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+            } else {
+                flags &= ~(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+                        | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+            }
             decor.setSystemUiVisibility(flags);
         }
     }

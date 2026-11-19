@@ -40,6 +40,35 @@ public final class GlassTheme {
     public static volatile int ACCENT_SOFT_BG    = 0x262B8BFF;
     public static volatile int SWITCH_ON         = 0xFF14B8A6;
     public static volatile int SWITCH_OFF        = 0xFF33374E;
+    /**
+     * Поверхности шторки светлые (тема «Классическая светлая»).
+     *
+     * Нужен для тех мест, где текст и иконки historically красились белым
+     * литералом: на светлой палитре белое на белом не читается. Читается здесь,
+     * а не в QuickShadeHelper, чтобы все проверки брали одно значение.
+     */
+    public static volatile boolean LIGHT_SURFACES  = false;
+
+    /**
+     * Основной цвет текста/иконок на поверхностях шторки.
+     *
+     * В тёмных стилях текст светлый, в светлой палитре — тёмный (#151922).
+     * Отдельное статическое поле нужно потому, что шторка и статус-бар рисуются
+     * до того, как под рукой окажется экземпляр {@code GlassTheme}.
+     */
+    /**
+     * Поверхность карточек, полей поиска и строк внутри шторки.
+     *
+     * Исторически эти места красились литералами 0xFF1A1A1E / 0xFF1F1F24 /
+     * 0xFF2E2E34 прямо в {@code QuickShadeHelper} — на светлой палитре это
+     * давало чёрные карточки на белом фоне. Теперь цвет берётся отсюда.
+     */
+    public static volatile int SHADE_CARD        = 0xFF1A1A1E;
+    /** Поле ввода / неактивная круглая кнопка на шторке. */
+    public static volatile int SHADE_FIELD       = 0xFF1F1F24;
+    /** Выключенная круглая плитка быстрых действий. */
+    public static volatile int SHADE_TILE_OFF    = 0xFF2E2E34;
+    public static volatile int TEXT_PRIMARY      = 0xFFF7F4F8;
     public static volatile int TEXT_SECONDARY    = 0xC4DCE0F5;
     public static volatile int TEXT_MUTED        = 0x8AA9B0D0;
     public static volatile int DIVIDER           = 0x24F5C451;
@@ -201,23 +230,36 @@ public final class GlassTheme {
         // Числа стилей намеренно захардкожены (Prefs.STYLE_* = 3/0/1/2):
         // так расчёт не зависит от Prefs и работает в unit-тестах.
         if (safeStyle == 3) { // STYLE_CLASSIC_LIGHT
-            // Keep notification shade's legacy dark surfaces until each hardware popup
-            // has an individually audited contrast-safe light palette.
-            SHADE_BG = 0xFF000000; POPUP_BG = 0xFF1C1C1E;
-            SURFACE_ELEVATED = 0xFF1A1A1E; TILE_ACTIVE_BLUE = 0xFF2B8BFF;
-            TILE_ACTIVE_GREEN = 0xFF22C55E; TILE_INACTIVE = 0xFF242427;
-            TILE_SUB_BG = 0xFF38383C; NOTIF_CARD = 0xFF2A2A2D;
-            SLIDER_TRACK = 0xFF2C2C2E; SLIDER_FILL = 0xFFFFFFFF;
-            ACCENT_BLUE = 0xFF2B8BFF; ACCENT_GREEN = 0xFF22C55E;
-            ACCENT_RED = 0xFFEF4444; ACCENT_AMBER = 0xFFF59E0B;
-            ACCENT_SOFT_BG = 0x222B8BFF;
-            SWITCH_ON = 0xFF22C55E; SWITCH_OFF = 0xFF3E3E44;
-            TEXT_SECONDARY = 0xB3FFFFFF;
-            // 0x80FFFFFF давало 4,25:1 на TILE_SUB_BG #38383C — 0xA8FFFFFF даёт 6,09:1.
-            TEXT_MUTED = 0xA8FFFFFF;
-            DIVIDER = 0x1AFFFFFF; ORNAMENT_COLOR = 0; ORNAMENT_ACCENT = 0;
-            GOLD_ACCENT = 0xFFFBBF24; FOLDER_SCRIM = 0xDC050608;
+            // Светлая шторка: поверхности светлые, значит и подписи на них должны
+            // быть тёмными. Раньше здесь оставались тёмные поверхности «до аудита
+            // контраста», из-за чего светлая тема выглядела незавершённой (шторка
+            // была чёрной). Пороги посчитаны в tests/ContrastTest.java:
+            //   белый текст на ACCENT_BLUE #2169CD — 5,29:1,
+            //   на ACCENT_GREEN #167746 — 5,58:1,
+            //   TEXT_PRIMARY #151922 на TILE_INACTIVE #E6E9EF — 14,46:1,
+            //   TEXT_MUTED #5A6675 на SHADE_BG #F2F3F6 — 5,27:1,
+            //   TEXT_SECONDARY #4F5968 на SHADE_BG — 6,39:1.
+            SHADE_BG = 0xFFF2F3F6; POPUP_BG = 0xFFFFFFFF;
+            SURFACE_ELEVATED = 0xFFE8EAF0; TILE_ACTIVE_BLUE = 0xFF2169CD;
+            TILE_ACTIVE_GREEN = 0xFF167746; TILE_INACTIVE = 0xFFE6E9EF;
+            TILE_SUB_BG = 0xFFDCE3EC; NOTIF_CARD = 0xF2FFFFFF;
+            SLIDER_TRACK = 0xFFCAD0D8; SLIDER_FILL = 0xFF2169CD;
+            ACCENT_BLUE = 0xFF2169CD; ACCENT_GREEN = 0xFF167746;
+            ACCENT_RED = 0xFFBD2737; ACCENT_AMBER = 0xFF8A5A00;
+            ACCENT_SOFT_BG = 0x222169CD;
+            SWITCH_ON = 0xFF167746; SWITCH_OFF = 0xFFCAD0D8;
+            // Подписи: непрозрачные, а не полупрозрачные белые — на светлом фоне
+            // 0xB3FFFFFF давал 1,8:1.
+            TEXT_SECONDARY = 0xFF4F5968;
+            TEXT_MUTED = 0xFF5A6675;
+            DIVIDER = 0x1F0B1220; ORNAMENT_COLOR = 0; ORNAMENT_ACCENT = 0;
+            GOLD_ACCENT = 0xFF8A5A00; FOLDER_SCRIM = 0xDC050608;
             DRAWER_SEARCH_BG = 0xFFE6E8EC; CARD_BORDER_LIVE = 0x26313744;
+            LIGHT_SURFACES = true;
+            TEXT_PRIMARY = 0xFF151922; // тот же, что textPrimary светлой палитры
+            SHADE_CARD    = 0xFFEDEFF3;
+            SHADE_FIELD   = 0xFFE6E9EF;
+            SHADE_TILE_OFF = 0xFFDCE3EC;
             return new GlassTheme(
                     safeStyle, false,
                     argb(24, 0, 0, 0),
@@ -254,6 +296,12 @@ public final class GlassTheme {
         }
 
         if (safeStyle == 1) { // STYLE_CYBER_ANIME
+            LIGHT_SURFACES    = false;
+            // Кибер: светлый циан-белый на тёмных поверхностях.
+            TEXT_PRIMARY      = 0xFFE9FBFF;
+            SHADE_CARD        = 0xFF121A33;
+            SHADE_FIELD       = 0xFF101A2E;
+            SHADE_TILE_OFF    = 0xFF1B2440;
             SHADE_BG          = 0xFF060814;
             POPUP_BG          = 0xFF0E1326;
             SURFACE_ELEVATED  = 0xFF131932;
@@ -319,6 +367,12 @@ public final class GlassTheme {
         }
 
         if (safeStyle == 2) { // STYLE_CLASSIC_DARK
+            LIGHT_SURFACES    = false;
+            // Графит: белый текст на чёрном, как было.
+            TEXT_PRIMARY      = 0xFFFFFFFF;
+            SHADE_CARD        = 0xFF1A1A1E;
+            SHADE_FIELD       = 0xFF1F1F24;
+            SHADE_TILE_OFF    = 0xFF2E2E34;
             cardA = clampLocal(216 + d, 152, 248);
             pillA = clampLocal(222 + d, 160, 250);
             overlayA = clampLocal(244 + d / 3, 212, 255);
@@ -395,6 +449,12 @@ public final class GlassTheme {
             );
         }
 
+        LIGHT_SURFACES    = false;
+        // Сакура: почти белый тёплый (argb(252,12,16,32) из палитры).
+        TEXT_PRIMARY      = 0xFFF7F8FA;
+        SHADE_CARD        = 0xFF1A1A1E;
+        SHADE_FIELD       = 0xFF1F1F24;
+        SHADE_TILE_OFF    = 0xFF2E2E34;
         // По умолчанию (0): STYLE_SAKURA_JADE — Синтез Аниме × Дунхуа (Ночной сакура-нефрит и золотая луна)
         SHADE_BG          = 0xFF07080F;
         POPUP_BG          = 0xFF131523;
