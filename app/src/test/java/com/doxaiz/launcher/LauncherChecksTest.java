@@ -69,6 +69,11 @@ public class LauncherChecksTest {
     }
 
     @Test
+    public void desktopTileRefresh() {
+        run("DesktopTileRefreshTests", () -> DesktopTileRefreshTests.main(new String[0]));
+    }
+
+    @Test
     public void customLabelsStorage() {
         run("CustomLabelsTests", () -> CustomLabelsTests.main(new String[0]));
     }

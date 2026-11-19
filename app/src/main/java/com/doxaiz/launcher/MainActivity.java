@@ -739,6 +739,10 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             int h = DoxaizNotificationService.getBadgeStateHash();
             if (h != lastUnreadHash) {
                 lastUnreadHash = h;
+                // F-05: refreshBadgesInPlace() при пустом реестре бейджей раньше
+                // вызывал полную пересборку — то есть возврат в лаунчер с новым
+                // уведомлением пересоздавал все страницы. Бейджи — это отдельные
+                // View поверх плиток, их достаточно обновить на месте.
                 refreshBadgesInPlace();
             }
         }
@@ -2670,11 +2674,22 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     }
 
     private final List<BadgeSlot> desktopBadgeSlots = new ArrayList<>();
+    /**
+     * Реестр «ключ приложения → его плитки на рабочем столе».
+     *
+     * Заполняется при построении страниц и нужен для точечного обновления: раньше
+     * любое изменение одной иконки (метка «новое» после первого запуска, бейдж
+     * уведомлений, переименование) вызывало {@code rebuildDesktop()} — пересоздание
+     * всех страниц, то есть ~240 View на 8 страницах. При возврате из приложения
+     * это и был тот самый провал кадра (F-05).
+     */
+    private final Map<String, List<AppTileRef>> appTiles = new HashMap<>();
     private final List<BadgeSlot> dockBadgeSlots = new ArrayList<>();
 
     private void rebuildDesktop() {
         cancelDragCleanup();
         desktopBadgeSlots.clear();
+        appTiles.clear();
         int cols = prefs.getColumns();
         desktop.normalizeAllPages(cols, prefs.isHomeBottomAligned());
         if (currentPage >= desktop.pages.size()) {
@@ -2697,7 +2712,10 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     private void refreshBadgesInPlace() {
         if (multiSelectMode) return;
         if (desktopBadgeSlots.isEmpty() && dockBadgeSlots.isEmpty()) {
-            rebuildDesktop();
+            // Реестр пуст, когда страницы ещё не построены (первый кадр после
+            // старта) или их пересборка уже идёт. Раньше здесь вызывалась полная
+            // пересборка — дорого и без пользы: бейджи появятся при построении
+            // страниц, где registerBadgeSlot() посчитает их сразу.
             return;
         }
         int mode = prefs.getNotifBadgeMode();
@@ -2879,10 +2897,14 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         }
         cell.addView(iconWrap);
 
+        TextView label = null;
         if (showLabel) {
-            TextView label = makeDesktopLabel(formatAppLabel(entry));
+            label = makeDesktopLabel(formatAppLabel(entry));
             cell.addView(label);
         }
+        // Запоминаем плитку, чтобы потом менять подпись и метку «новое» без
+        // пересборки страницы (F-05).
+        registerAppTile(entry.key, cell, label);
 
         cell.setOnTouchListener((v, event) -> {
             if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
@@ -2940,6 +2962,63 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             return true;
         });
         return cell;
+    }
+
+    /**
+     * Одна плитка приложения на рабочем столе: контейнер и его подпись.
+     *
+     * Хранится только то, что действительно меняется на месте: текст подписи и её
+     * оформление (точка «новое», цвет). Позиция и иконка без структурных изменений
+     * не меняются, поэтому пересоздавать их незачем.
+     */
+    private static final class AppTileRef {
+        final View container;
+        final TextView label;
+
+        AppTileRef(View container, TextView label) {
+            this.container = container;
+            this.label = label;
+        }
+    }
+
+    private void registerAppTile(String appKey, View container, TextView label) {
+        if (appKey == null || container == null) return;
+        List<AppTileRef> list = appTiles.get(appKey);
+        if (list == null) {
+            list = new ArrayList<>(1);
+            appTiles.put(appKey, list);
+        }
+        list.add(new AppTileRef(container, label));
+    }
+
+    /**
+     * Точечное обновление подписи и метки «новое» для одного приложения.
+     *
+     * @return false, если плитка не найдена и без пересборки не обойтись
+     */
+    private boolean refreshAppTileInPlace(String appKey) {
+        if (appKey == null || appTiles.isEmpty() || multiSelectMode) return false;
+        List<AppTileRef> refs = appTiles.get(appKey);
+        if (refs == null || refs.isEmpty()) return false;
+        AppEntry entry = appsByKey.get(appKey);
+        // Если приложения больше нет в списке — подпись трогать нельзя,
+        // честнее пересобрать страницу.
+        if (entry == null) return false;
+        CharSequence text = formatAppLabel(entry);
+        for (AppTileRef ref : refs) {
+            if (ref == null || ref.container == null) continue;
+            // contentDescription клетки — это тот же текст: TalkBack и поиск по
+            // интерфейсу должны видеть то же, что на экране.
+            if (!TileLabels.sameText(ref.container.getContentDescription(), text)) {
+                ref.container.setContentDescription(text);
+            }
+            if (ref.label != null && !TileLabels.sameText(ref.label.getText(), text)) {
+                ref.label.setText(text);
+            }
+        }
+        // Плитка найдена: даже если текст не изменился, пересобирать страницу
+        // незачем — вызывающий код именно это и спрашивает.
+        return true;
     }
 
     private void applyMultiSelectTileVisual(FrameLayout iconWrap, FrameLayout checkBadge,
@@ -4891,7 +4970,15 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         invalidateDrawerSort();
         if (wasNew) {
             lastDrawerRecentSig = "";
-            rebuildDesktop();
+            // F-05: первый запуск приложения меняет только его подпись (метка
+            // «новое» гаснет). Состав и порядок рабочего стола те же, поэтому
+            // пересоздавать все страницы (~240 View) при каждом возврате домой
+            // незачем — обновляем конкретную плитку. Пересборка остаётся
+            // запасным путём: если плитки нет в реестре (мультивыбор, страница
+            // ещё не построена), раньше выглядело как «ничего не произошло».
+            if (!refreshAppTileInPlace(entry.key)) {
+                rebuildDesktop();
+            }
             if (drawerAdapter != null) drawerAdapter.notifyDataSetChanged();
         }
         if (currentScreen != SCREEN_HOME) showScreen(SCREEN_HOME);
