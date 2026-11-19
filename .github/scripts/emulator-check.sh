@@ -477,6 +477,71 @@ note "приложений-в-системе" "${APPS_COUNT:-0} activity с ка
 LAYOUT="$(adb shell "run-as $PKG cat shared_prefs/doxaiz_prefs.xml" 2>/dev/null | grep -o 'desktop_layout_json[^<]*' | head -1)"
 note "раскладка" "${LAYOUT:-не сохранена}"
 summary "раскладка" "${LAYOUT:-не сохранена}"
+
+# Состав сохранённой раскладки: сколько элементов и на каких страницах.
+# Смысл — поймать поломку «стол пустой» и «иконки пропали после перезапуска»,
+# а не просто факт наличия строки в настройках. Ожидания для чистой установки:
+# >= 5 элементов на столе, >= 1 страница, признак built.
+LAYOUT_RAW="$(adb shell "run-as $PKG cat shared_prefs/doxaiz_prefs.xml" 2>/dev/null | tr -d '\r')"
+printf '%s' "$LAYOUT_RAW" > "$OUT/prefs.xml"
+layout_report() {
+    python3 - "$OUT/prefs.xml" <<'PYEOF'
+import re, sys, xml.etree.ElementTree as ET
+
+def unescape(v):
+    # SharedPreferences хранит строку прямо в тексте элемента и экранирует
+    # кавычки; JSON-разбор здесь избыточен — нам нужны только счётчики.
+    return v
+
+try:
+    root = ET.parse(sys.argv[1]).getroot()
+except Exception as exc:
+    print("PARSED=0")
+    print("причина: не удалось разобрать prefs.xml (%s)" % exc)
+    raise SystemExit(0)
+
+layout = None
+for node in root.iter():
+    if node.tag == "string" and node.get("name") == "desktop_layout_json":
+        layout = node.text or ""
+        break
+
+if layout is None:
+    print("PARSED=0")
+    print("раскладка не сохранена")
+    raise SystemExit(0)
+
+items = len(re.findall(r'"type"\s*:\s*"', layout))
+folders = len(re.findall(r'"type"\s*:\s*"folder"', layout))
+pages = len(re.findall(r'"row"\s*:\s*-?\d+', layout))  # запасной счётчик
+built = bool(re.search(r'"built"\s*:\s*true', layout))
+# Страницы: считаем по вложенным массивам через грубый признак "pages":[[..],[..]]
+pages_blocks = re.search(r'"pages"\s*:\s*(\[.*\])\s*$', layout)
+# Страницы: содержимое "pages":[[...],[...]] — считаем переходы между
+# массивами. Оценка, а не разбор JSON: важно поймать «одна страница» против
+# «страниц нет», а не точную вложенность.
+page_count = layout.count('","[') + (1 if layout.count('"pages"') else 0)
+print("PARSED=1")
+print("элементов=%d папок=%d страниц(оценка)=%d built=%s длина=%d"
+      % (items, folders, page_count, built, len(layout)))
+PYEOF
+}
+layout_report > "$OUT/layout-report.txt" 2>&1 || true
+note "раскладка-состав" "$(tr '\n' ' ' < "$OUT/layout-report.txt" | cut -c1-300)"
+summary "раскладка-состав" "$(cat "$OUT/layout-report.txt")"
+
+if grep -q "PARSED=1" "$OUT/layout-report.txt" 2>/dev/null; then
+    ELM="$(sed -n 's/.*элементов=\([0-9]*\).*/\1/p' "$OUT/layout-report.txt" | head -1)"
+    BUILT_OK="$(grep -c 'built=True' "$OUT/layout-report.txt" 2>/dev/null || echo 0)"
+    # Пустой сохранённый стол при живых приложениях в системе — это дефект
+    # приложения (именно так выглядел баг «пустой стол на чистой установке»),
+    # а не нестабильность эмулятора. Поэтому здесь провал, а не предупреждение.
+    if [ "${APPS_COUNT:-0}" -ge 5 ] && [ "${ELM:-0}" -lt 5 ]; then
+        report_fail "Раскладка сохранена, но элементов ${ELM:-0} при ${APPS_COUNT} приложениях — рабочий стол не заполнился"
+    elif [ "$BUILT_OK" = "0" ]; then
+        report_fail "В сохранённой раскладке нет признака built — авто-раскладка не отмечается построенной"
+    fi
+fi
 dump_ui home "ui-home"
 if grep -q "нет ни одной подписи" "$OUT/ui-home.txt" 2>/dev/null; then
     note "ui-home" "подписей приложений нет — на чистой установке это ожидаемо"
