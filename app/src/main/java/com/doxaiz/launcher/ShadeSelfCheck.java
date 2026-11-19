@@ -98,8 +98,13 @@ public final class ShadeSelfCheck {
         }
     }
 
-    /** Файлы отчётов: по одному на экран, имя включает имя экрана. */
-    private static final String OUT_FILE = "shade_selfcheck.txt";
+    /**
+     * Файлы отчётов: по одному на экран, имя включает имя экрана.
+     *
+     * Раньше отчёт шторки писался в отдельное имя (shade_selfcheck.txt), и при
+     * переделке на несколько экранов скрипт и приложение разошлись: прогон ждал
+     * старый файл и падал с «отчёт не появился». Одно правило на все экраны.
+     */
     private static final String OUT_FILE_PREFIX = "selfcheck_";
 
     /** Экран, который проверяется: шторка быстрых действий. */
@@ -173,7 +178,7 @@ public final class ShadeSelfCheck {
                 try {
                     shade.show(QuickShadeHelper.TAB_CONTROL);
                 } catch (Throwable t) {
-                    write(activity, "СБОЙ\nне удалось открыть шторку: "
+                    writeNamed(activity, SCREEN_SHADE, "СБОЙ\nне удалось открыть шторку: "
                             + t.getClass().getSimpleName() + ": " + t.getMessage());
                     return;
                 }
@@ -286,7 +291,7 @@ public final class ShadeSelfCheck {
             View root = activity.getWindow() != null
                     ? activity.getWindow().getDecorView() : null;
             if (root == null || !shade.isShowing()) {
-                write(activity, "СБОЙ\nшторка не открылась: root=" + (root != null)
+                writeNamed(activity, SCREEN_SHADE, "СБОЙ\nшторка не открылась: root=" + (root != null)
                         + " isShowing=" + shade.isShowing());
                 return;
             }
@@ -295,7 +300,7 @@ public final class ShadeSelfCheck {
             View target = findShadeRoot(activity);
             evaluateView(activity, target, SCREEN_SHADE, expectedStyle);
         } catch (Throwable t) {
-            write(activity, "СБОЙ\nисключение при снятии кадра: "
+            writeNamed(activity, SCREEN_SHADE, "СБОЙ\nисключение при снятии кадра: "
                     + t.getClass().getSimpleName() + ": " + t.getMessage());
         } finally {
             try {
@@ -506,10 +511,6 @@ public final class ShadeSelfCheck {
     /** Отчёт по конкретному экрану: имя файла содержит экран. */
     private static void writeNamed(Activity activity, String screen, String text) {
         writeTo(activity, OUT_FILE_PREFIX + screen + ".txt", text);
-    }
-
-    private static void write(Activity activity, String text) {
-        writeTo(activity, OUT_FILE, text);
     }
 
     private static void writeTo(Activity activity, String name, String text) {

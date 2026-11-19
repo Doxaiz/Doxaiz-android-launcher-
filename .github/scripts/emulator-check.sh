@@ -572,7 +572,6 @@ log "Светлая тема: шторка в реальных пикселях"
 smoke_screen() {
     local theme="$1" screen="$2" label="$3"
     local report_file="selfcheck_$screen.txt"
-    [ "$screen" = "shade" ] && report_file="shade_selfcheck.txt"
     adb shell am force-stop "$PKG" >/dev/null 2>&1 || true
     sleep 1
     adb shell "run-as $PKG rm -f files/$report_file" >/dev/null 2>&1 || true
