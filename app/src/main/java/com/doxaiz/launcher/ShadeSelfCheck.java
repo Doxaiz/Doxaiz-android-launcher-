@@ -361,10 +361,10 @@ public final class ShadeSelfCheck {
                 int rgb = c & 0xFFFFFF;
                 total++;
                 rowTotal++;
-                lumaSum += y;
+                int pixelLuma = luma(rgb);
+                lumaSum += pixelLuma;
                 if (isNear(rgb, Color.WHITE, 10)) white++;
-                int y = luma(rgb);
-                if (y < 90) darkText++;
+                if (pixelLuma < 90) darkText++;
                 if (matchesAny(rgb, surfaces, 12)) {
                     onSurface++;
                     rowSurface++;
