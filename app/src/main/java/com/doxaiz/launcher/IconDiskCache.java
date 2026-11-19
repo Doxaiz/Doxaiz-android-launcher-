@@ -78,7 +78,8 @@ public final class IconDiskCache {
                         recountFiles();
                     }
                 }
-            } catch (Throwable ignored) {
+            } catch (Throwable t) {
+                Diagnostics.record("IconDiskCache.init", t);
             }
         }
         // Doxaiz 4.2: автоматически чистим старый кэш v1, чтобы все иконки сразу обновились на ровный Squircle
@@ -94,7 +95,8 @@ public final class IconDiskCache {
                 }
                 //noinspection ResultOfMethodCallIgnored
                 legacyDir.delete();
-            } catch (Throwable ignored) {
+            } catch (Throwable t) {
+                Diagnostics.record("IconDiskCache.legacyCleanup", t);
             }
         }
     }
@@ -130,7 +132,10 @@ public final class IconDiskCache {
             }
             // Удаляем повреждённый файл
             removeCacheFile(f);
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            // Повреждённая или недоступная иконка: раньше это было неотличимо от
+            // «иконки нет», и пользователь видел пустые плитки без объяснения.
+            Diagnostics.record("IconDiskCache.load", t);
         }
         return null;
     }
@@ -281,7 +286,8 @@ public final class IconDiskCache {
             File[] files = cacheDir.listFiles();
             if (files == null) return;
             for (File f : files) removeCacheFile(f);
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            Diagnostics.record("IconDiskCache.clearAll", t);
         } finally {
             // Даже если что-то удалить не удалось, показанное число должно
             // пересчитаться — иначе «0 файлов» останется от кэша.

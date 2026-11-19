@@ -155,8 +155,12 @@ public final class LayoutImporter {
                 if (cursor == null || cursor.getCount() == 0) continue;
                 Snapshot snap = readFavoritesCursor(cursor, provider[1], byComponent, byPackage, fallbackCols);
                 if (snap != null && snap.hasContent()) return snap;
-            } catch (Throwable ignored) {
-                // Android 14+ ограничивает доступ к БД OEM-лаунчера — идём дальше.
+            } catch (Throwable t) {
+                // Android 14+ ограничивает доступ к БД OEM-лаунчера — идём дальше,
+                // но оставляем след: раньше «импорт ничего не нашёл» было
+                // неотличимо от «доступ запрещён», и это выяснялось только
+                // догадками на телефоне.
+                Diagnostics.record("LayoutImporter.readProvider", t);
             } finally {
                 if (cursor != null) {
                     try { cursor.close(); } catch (Throwable ignored) { }
@@ -240,7 +244,8 @@ public final class LayoutImporter {
                                 }
                             }
                         }
-                    } catch (Throwable ignored) {
+                    } catch (Throwable t) {
+                        Diagnostics.record("LayoutImporter.providers", t);
                     }
 
                     // Запасной стандартный суффикс .settings
@@ -532,7 +537,8 @@ public final class LayoutImporter {
             if (pkg != null) {
                 return byPackage.get(pkg);
             }
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            Diagnostics.record("LayoutImporter.matchIntent", t);
         }
         return null;
     }
