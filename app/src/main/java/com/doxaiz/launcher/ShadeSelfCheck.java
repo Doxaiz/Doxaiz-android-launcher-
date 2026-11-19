@@ -150,7 +150,10 @@ public final class ShadeSelfCheck {
         } finally {
             try {
                 shade.dismiss();
-            } catch (Throwable ignored) {
+            } catch (Throwable t) {
+                // Закрытие шторки после замера: сбой здесь означает, что шторка
+                // осталась на экране, то есть следующие шаги прогона увидят не то.
+                Diagnostics.record("ShadeSelfCheck.dismiss", t);
             }
         }
     }
@@ -191,8 +194,11 @@ public final class ShadeSelfCheck {
                     }
                 }
             }
-        } catch (Throwable ignored) {
-            // Ниже — запасной путь.
+        } catch (Throwable t) {
+            // Штатный путь на обычных сборках: WindowManagerGlobal не входит в
+            // публичный SDK. Запись в журнал нужна на случай, если поиск сломался
+            // не из-за этого, а по другой причине.
+            Diagnostics.record("ShadeSelfCheck.windows", t);
         }
         if (best != null) return best;
         return activity.getWindow() != null ? activity.getWindow().getDecorView() : null;
@@ -369,8 +375,11 @@ public final class ShadeSelfCheck {
             FileOutputStream out = new FileOutputStream(f);
             out.write(text.getBytes(StandardCharsets.UTF_8));
             out.close();
-        } catch (Throwable ignored) {
-            // Самопроверка не имеет права повлиять на работу лаунчера.
+        } catch (Throwable t) {
+            // Самопроверка не имеет права повлиять на работу лаунчера, но
+            // «отчёт не записался» — это причина падения шага в CI, и она
+            // должна быть видна в журнале, а не только отсутствием файла.
+            Diagnostics.record("ShadeSelfCheck.write", t);
         }
     }
 }
