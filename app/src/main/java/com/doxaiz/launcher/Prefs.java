@@ -1484,7 +1484,22 @@ public final class Prefs {
         return copy;
     }
 
-    /** Возвращает настройки к снимку: одна атомарная запись + сброс кэшей чтения. */
+    /**
+     * Возвращает настройки к снимку: одна атомарная запись + сброс кэшей чтения.
+     *
+     * <h3>Почему apply(), а не commit() (F-21)</h3>
+     * Метод вызывается из {@code BackupHelper.importBackupJson}, а тот — из
+     * {@code runOnUiThread} в {@code MainActivity}. То есть {@code commit()} писал
+     * preferences <b>на главном потоке</b>, а не в фоновом, как записано в аудите
+     * §14.4. На неудачном импорте это лишняя синхронная запись ровно в тот
+     * момент, когда пользователь ждёт ответа, причём снимок содержит все ключи.
+     * {@code apply()} обновляет значения в памяти синхронно и пишет на диск в
+     * фоне, поэтому сразу после вызова все чтения видят откаченное состояние.
+     *
+     * <h3>Почему исход проверяется, а не забывается</h3>
+     * Раньше сбой записи уходил в {@code catch (Throwable ignored)}: настройки
+     * оставались наполовину импортированными, и в журнале не было ни строки.
+     */
     @SuppressWarnings("unchecked")
     boolean restoreFromRollback(Map<String, Object> snapshot) {
         if (snapshot == null) return false;
@@ -1501,10 +1516,11 @@ public final class Prefs {
                 else if (v instanceof Boolean) ed.putBoolean(e.getKey(), (Boolean) v);
                 else if (v instanceof Float) ed.putFloat(e.getKey(), (Float) v);
             }
-            boolean ok = ed.commit();
+            ed.apply();
             invalidateCachesAfterImport();
-            return ok;
-        } catch (Throwable ignored) {
+            return true;
+        } catch (Throwable t) {
+            Diagnostics.record("Prefs.restoreFromRollback", t);
             return false;
         }
     }

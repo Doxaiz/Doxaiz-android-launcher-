@@ -234,7 +234,35 @@ public final class BackupHelper {
     }
 
     public static boolean importBackupJson(String raw, Prefs prefs, DesktopModel desktop) {
-        return importBackupJson(raw, prefs, desktop, false);
+        return importBackupJsonDetailed(raw, prefs, desktop, false).imported();
+    }
+
+    /** Исход импорта. «Файл не подошёл» и «откат не удался» — разные вещи. */
+    public enum ImportOutcome {
+        /** Настройки и раскладка применены. */
+        IMPORTED,
+        /** Файл не является корректной копией Doxaiz; ничего не менялось. */
+        REJECTED,
+        /**
+         * Разбор упал, и вернуть настройки к снимку не удалось: состояние может
+         * быть частично применённым, и молчать об этом нельзя.
+         */
+        ROLLBACK_FAILED
+    }
+
+    /** Результат импорта: исход и причина, если она была. */
+    public static final class ImportResult {
+        public final ImportOutcome outcome;
+        public final Throwable cause;
+
+        ImportResult(ImportOutcome outcome, Throwable cause) {
+            this.outcome = outcome;
+            this.cause = cause;
+        }
+
+        public boolean imported() {
+            return outcome == ImportOutcome.IMPORTED;
+        }
     }
 
     /**
@@ -247,7 +275,24 @@ public final class BackupHelper {
      * возвращает настройки одной атомарной записью и перечитывает раскладку с диска.
      */
     public static boolean importBackupJson(String raw, Prefs prefs, DesktopModel desktop, boolean privacyAuthVerified) {
-        if (raw == null || raw.trim().isEmpty() || raw.length() > MAX_BACKUP_BYTES) return false;
+        return importBackupJsonDetailed(raw, prefs, desktop, privacyAuthVerified).imported();
+    }
+
+    /**
+     * То же, что {@link #importBackupJson(String, Prefs, DesktopModel, boolean)},
+     * но с различимыми исходами.
+     *
+     * Раньше «файл не подошёл» и «файл подошёл, но применить его не удалось и
+     * откат сорвался» возвращали одно и то же {@code false}. Пользователь в
+     * обоих случаях видел «Файл не является резервной копией Doxaiz»: при сбое
+     * на его же правильном файле ему предлагали искать другую копию, хотя дело
+     * было в приложении, а настройки могли остаться наполовину применёнными.
+     */
+    public static ImportResult importBackupJsonDetailed(String raw, Prefs prefs, DesktopModel desktop,
+                                                        boolean privacyAuthVerified) {
+        if (raw == null || raw.trim().isEmpty() || raw.length() > MAX_BACKUP_BYTES) {
+            return new ImportResult(ImportOutcome.REJECTED, null);
+        }
         final Map<String, Object> rollback = (prefs != null) ? prefs.snapshotForRollback() : null;
         try {
             JSONObject root = new JSONObject(raw);
@@ -256,7 +301,7 @@ public final class BackupHelper {
                 desk = root;
             }
             if (!validateDesktopJson(desk)) {
-                return false;
+                return new ImportResult(ImportOutcome.REJECTED, null);
             }
 
             final boolean wasProtected = prefs.isProtectHiddenApps();
@@ -416,13 +461,14 @@ public final class BackupHelper {
             desktop.load();
             desktop.save(); // Queue a fresh recovery copy instead of retaining an older layout.
             prefs.invalidateCachesAfterImport();
-            return true;
+            return new ImportResult(ImportOutcome.IMPORTED, null);
         } catch (Throwable t) {
             // Импорт откатился — раньше пользователь видел только «не удалось»,
             // без понимания, на каком шаге и почему (F-07).
             Diagnostics.record("BackupHelper.import", t);
-            rollbackImportedState(prefs, desktop, rollback);
-            return false;
+            boolean restored = rollbackImportedState(prefs, desktop, rollback);
+            return new ImportResult(
+                    restored ? ImportOutcome.REJECTED : ImportOutcome.ROLLBACK_FAILED, t);
         }
     }
 
@@ -453,13 +499,31 @@ public final class BackupHelper {
         }
     }
 
-    /** Откат неудачного импорта: настройки — из снимка, раскладка — с диска. */
-    private static void rollbackImportedState(Prefs prefs, DesktopModel desktop, Map<String, Object> snapshot) {
-        if (prefs != null && snapshot != null) prefs.restoreFromRollback(snapshot);
+    /**
+     * Откат неудачного импорта: настройки — из снимка, раскладка — с диска.
+     *
+     * Возвращает, удалось ли вернуть настройки. Раньше результат не проверялся
+     * ни здесь, ни выше, поэтому неудачный откат (а он оставляет настройки
+     * наполовину импортированными) выглядел для пользователя и для журнала как
+     * обычный ответ «файл не подошёл».
+     */
+    static boolean rollbackImportedState(Prefs prefs, DesktopModel desktop,
+                                         Map<String, Object> snapshot) {
+        boolean prefsRestored = true;
+        if (prefs != null && snapshot != null) {
+            prefsRestored = prefs.restoreFromRollback(snapshot);
+            if (!prefsRestored) {
+                Diagnostics.record("BackupHelper.rollback",
+                        new IllegalStateException("настройки не удалось вернуть к снимку из "
+                                + snapshot.size() + " ключей"));
+            }
+        }
         try {
             if (desktop != null) desktop.load();
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            Diagnostics.record("BackupHelper.rollbackLayout", t);
         }
+        return prefsRestored;
     }
 
     private static int clamp(int v, int min, int max) {

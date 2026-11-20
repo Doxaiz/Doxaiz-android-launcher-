@@ -109,6 +109,15 @@ public class LauncherChecksTest {
     }
 
     @Test
+    public void backupRollbackIsHonest() {
+        // F-21: откат неудачного импорта больше не пишет preferences через
+        // commit() на главном потоке и не прячет сбой в пустом catch. Тест
+        // проверяет три исхода импорта и то, что откат действительно возвращает
+        // настройки к снимку.
+        run("BackupRollbackTest", () -> BackupRollbackTest.main(new String[0]));
+    }
+
+    @Test
     public void themeLiteralsStayInPalette() {
         // §43: храповик на тёмные заливки литералом. Пиксельная самопроверка
         // видит три экрана; этот тест видит и панель звука, и плашку
