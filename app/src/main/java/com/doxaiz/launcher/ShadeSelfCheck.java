@@ -201,6 +201,17 @@ public final class ShadeSelfCheck {
      */
     private static void evaluateView(Activity activity, View target, String screen,
                                      int expectedStyle) {
+        evaluateView(activity, target, screen, expectedStyle, true);
+    }
+
+    /**
+     * @param rootFound снят ли кадр именно с проверяемого корня. false означает,
+     *                  что корень не нашёлся и кадр снят с другого окна: такой
+     *                  замер не доказывает ничего и не должен выглядеть как
+     *                  дефект темы.
+     */
+    private static void evaluateView(Activity activity, View target, String screen,
+                                     int expectedStyle, boolean rootFound) {
         if (target == null || target.getWidth() == 0 || target.getHeight() == 0) {
             writeNamed(activity, screen, "СБОЙ\nне найдено окно для снятия кадра (" + screen + ")");
             return;
@@ -212,7 +223,12 @@ public final class ShadeSelfCheck {
         bmp.recycle();
 
         StringBuilder sb = new StringBuilder();
-        sb.append(r.ok ? "OK" : "СБОЙ").append('\n');
+        // Запасной путь снимает не то окно, о котором спрашивают: даже при
+        // подходящих пикселях это не доказательство темы шторки.
+        sb.append(r.ok && rootFound ? "OK" : "СБОЙ").append('\n');
+        if (!rootFound) {
+            sb.append("причины=корень шторки не найден, кадр снят с другого окна процесса; ");
+        }
         sb.append("экран=").append(screen).append('\n');
         sb.append("стиль=").append(styleName(GlassTheme.ACTIVE_STYLE)).append('\n');
         sb.append("кадр=").append(r.width).append('x').append(r.height).append('\n');
@@ -223,7 +239,9 @@ public final class ShadeSelfCheck {
         sb.append("чисто_белый=").append(pct(r.whiteShare)).append('\n');
         sb.append("тёмный_текст=").append(pct(r.darkTextShare)).append('\n');
         sb.append("лучшая_строка=").append(pct(r.dominantRowShare)).append('\n');
-        sb.append("причины=").append(r.problems.length() == 0 ? "нет" : r.problems).append('\n');
+        if (rootFound) {
+            sb.append("причины=").append(r.problems.length() == 0 ? "нет" : r.problems).append('\n');
+        }
         writeNamed(activity, screen, sb.toString());
     }
 
@@ -287,6 +305,19 @@ public final class ShadeSelfCheck {
     }
 
     private static void evaluate(Activity activity, QuickShadeHelper shade, int expectedStyle) {
+        evaluate(activity, shade, expectedStyle, 0);
+    }
+
+    /**
+     * @param attempt номер попытки. Корень шторки может быть ещё не разложен
+     *                (ширина 0) — тогда кадр снимать не с чего, и это не дефект
+     *                темы. Повтор ограничен: три попытки, дальше честный СБОЙ.
+     */
+    private static void evaluate(final Activity activity, final QuickShadeHelper shade,
+                                 final int expectedStyle, final int attempt) {
+        // Закрывать шторку можно только когда замер закончен: при повторе она
+        // должна остаться открытой, иначе повтор снимает пустой экран.
+        boolean retryScheduled = false;
         try {
             View root = activity.getWindow() != null
                     ? activity.getWindow().getDecorView() : null;
@@ -295,20 +326,45 @@ public final class ShadeSelfCheck {
                         + " isShowing=" + shade.isShowing());
                 return;
             }
-            // Снимаем не рабочий стол, а именно окно шторки: у Dialog своё окно,
-            // и decorView активности его не содержит.
-            View target = findShadeRoot(activity);
-            evaluateView(activity, target, SCREEN_SHADE, expectedStyle);
+            // Снимаем корень содержимого шторки напрямую. Раньше здесь искалось
+            // «самое большое окно, не являющееся окном активности», и когда в
+            // процессе висело другое полноэкранное окно (аварийный экран,
+            // SafeModeActivity с фоном #0E1116), кадр снимался с него: отчёт
+            // «поверхности темы 0.01, средняя яркость 6» читался как «светлая
+            // тема не применилась», хотя шторка под ним была светлой. Кадр
+            // должен сниматься с проверяемого окна, а не с самого большого.
+            View target = shade.getShadeContentView();
+            if (target != null && target.getWidth() > 0 && target.getHeight() > 0) {
+                evaluateView(activity, target, SCREEN_SHADE, expectedStyle, true);
+                return;
+            }
+            if (target != null && attempt < 3) {
+                // Шторка открыта, но ещё не разложена: ждём кадр и повторяем.
+                retryScheduled = true;
+                target.postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        evaluate(activity, shade, expectedStyle, attempt + 1);
+                    }
+                }, 300L);
+                return;
+            }
+            // Шторка открыта, но её корень недоступен — таких случаев быть не
+            // должно. Оставляем прежний поиск, но помечаем отчёт: иначе снова
+            // получится «дефект темы» вместо «дефекта замера».
+            evaluateView(activity, findShadeRoot(activity), SCREEN_SHADE, expectedStyle, false);
         } catch (Throwable t) {
             writeNamed(activity, SCREEN_SHADE, "СБОЙ\nисключение при снятии кадра: "
                     + t.getClass().getSimpleName() + ": " + t.getMessage());
         } finally {
-            try {
-                shade.dismiss();
-            } catch (Throwable t) {
-                // Закрытие шторки после замера: сбой здесь означает, что шторка
-                // осталась на экране, то есть следующие шаги прогона увидят не то.
-                Diagnostics.record("ShadeSelfCheck.dismiss", t);
+            if (!retryScheduled) {
+                try {
+                    shade.dismiss();
+                } catch (Throwable t) {
+                    // Закрытие шторки после замера: сбой здесь означает, что шторка
+                    // осталась на экране, то есть следующие шаги прогона увидят не то.
+                    Diagnostics.record("ShadeSelfCheck.dismiss", t);
+                }
             }
         }
     }
