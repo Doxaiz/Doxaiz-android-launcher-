@@ -32,3 +32,6 @@ captures/
 # Отчёты и артефакты проверок
 emulator-report/
 apk-sha256.txt
+
+# Временные файлы сообщений коммитов
+.git-msg-*.txt
