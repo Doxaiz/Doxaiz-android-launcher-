@@ -569,29 +569,46 @@ log "Светлая тема: шторка в реальных пикселях"
 # рисует её в Bitmap и сверяет пиксели с палитрой темы.
 # Общая проверка экрана: один запуск приложения = один экран.
 # Параметры: $1 тема, $2 имя экрана (shade|drawer|settings), $3 метка отчёта.
+#
+# Повтор: если отчёт не появился вовсе, экран запускается ещё раз. Это не
+# маскировка дефекта, а лечение известной нестабильности первого запуска —
+# в прогоне 44695355809 шторка в светлой теме не успела отчитаться за 25 с,
+# тогда как в том же запуске графит, каталог и настройки дали OK. Пороговый
+# провал (отчёт есть, но с «СБОЙ») НЕ повторяется: такой отчёт — это найденный
+# дефект темы, и второй попыткой его нельзя размывать.
 smoke_screen() {
     local theme="$1" screen="$2" label="$3"
     local report_file="selfcheck_$screen.txt"
-    adb shell am force-stop "$PKG" >/dev/null 2>&1 || true
-    sleep 1
-    adb shell "run-as $PKG rm -f files/$report_file" >/dev/null 2>&1 || true
+    local report="" waited=0 attempt=1
 
-    # Тема и экран передаются параметрами intent, а не правкой shared_prefs:
-    # такая правка уже один раз сломала разбор XML в CI.
-    adb shell am start -W -n "$PKG/.MainActivity" \
-        --ez doxaiz_shade_selfcheck true --ei doxaiz_style "$theme" \
-        --es doxaiz_screen "$screen" \
-        > "$OUT/selfcheck-start-$label.txt" 2>&1 || true
-    local waited=0 report=""
-    while [ "$waited" -lt 25 ]; do
-        report="$(adb shell "run-as $PKG cat files/$report_file" 2>/dev/null | tr -d '\r')"
-        [ -n "$report" ] && break
+    while [ "$attempt" -le 2 ]; do
+        adb shell am force-stop "$PKG" >/dev/null 2>&1 || true
         sleep 1
-        waited=$((waited + 1))
+        adb shell "run-as $PKG rm -f files/$report_file" >/dev/null 2>&1 || true
+
+        # Тема и экран передаются параметрами intent, а не правкой shared_prefs:
+        # такая правка уже один раз сломала разбор XML в CI.
+        adb shell am start -W -n "$PKG/.MainActivity" \
+            --ez doxaiz_shade_selfcheck true --ei doxaiz_style "$theme" \
+            --es doxaiz_screen "$screen" \
+            > "$OUT/selfcheck-start-$label.txt" 2>&1 || true
+        waited=0 report=""
+        while [ "$waited" -lt 40 ]; do
+            report="$(adb shell "run-as $PKG cat files/$report_file" 2>/dev/null | tr -d '\r')"
+            [ -n "$report" ] && break
+            sleep 1
+            waited=$((waited + 1))
+        done
+        [ -n "$report" ] && break
+        if [ "$attempt" -lt 2 ]; then
+            note "$label" "отчёта нет за ${waited} с — повторный запуск экрана $screen"
+        fi
+        attempt=$((attempt + 1))
     done
+
     adb exec-out screencap -p > "$OUT/screen-$label.png" 2>/dev/null || true
     if [ -z "$report" ]; then
-        report_fail "Светлая тема ($label): самопроверка экрана $screen не оставила отчёт за ${waited} с"
+        report_fail "Светлая тема ($label): самопроверка экрана $screen не оставила отчёт за ${waited} с (две попытки)"
         return 1
     fi
     summary "$label" "$report"
