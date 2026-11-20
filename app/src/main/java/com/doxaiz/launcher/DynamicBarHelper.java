@@ -159,11 +159,15 @@ public final class DynamicBarHelper {
         inner.setOrientation(LinearLayout.VERTICAL);
         inner.setGravity(Gravity.CENTER_HORIZONTAL);
 
+        // Капсула лежит поверх любого приложения, поэтому её фон должен быть
+        // непрозрачным: SHADE_TILE_OFF в светлой теме — #DCE3EC, и под ним не
+        // просвечивал бы чужой интерфейс. Самодостаточность капсулы важнее
+        // совпадения с палитрой карточек, поэтому берём плотную поверхность.
         GradientDrawable pillBg = new GradientDrawable();
         pillBg.setShape(GradientDrawable.RECTANGLE);
         pillBg.setCornerRadius(dp(22));
-        pillBg.setColor(0xFF000000);
-        pillBg.setStroke(dp(1), 0x38FFFFFF);
+        pillBg.setColor(GlassTheme.SURFACE_ELEVATED);
+        pillBg.setStroke(dp(1), surfaceBorder());
         inner.setBackground(pillBg);
         inner.setPadding(dp(14), dp(6), dp(14), dp(6));
 
@@ -174,7 +178,7 @@ public final class DynamicBarHelper {
 
         compactAlbumThumb = new ImageView(activity);
         compactAlbumThumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        compactAlbumThumb.setBackground(GlassTheme.makeRoundedRect(0xFF242427, dp(6)));
+        compactAlbumThumb.setBackground(GlassTheme.makeRoundedRect(GlassTheme.SHADE_TILE_OFF, dp(6)));
         compactAlbumThumb.setClipToOutline(true);
         compactAlbumThumb.setVisibility(View.GONE);
         LinearLayout.LayoutParams thLp = new LinearLayout.LayoutParams(dp(18), dp(18));
@@ -201,7 +205,7 @@ public final class DynamicBarHelper {
         compactRow.addView(cameraGapView);
 
         compactTitle = new TextView(activity);
-        compactTitle.setTextColor(Color.WHITE);
+        compactTitle.setTextColor(GlassTheme.TEXT_PRIMARY);
         compactTitle.setTextSize(12f);
         compactTitle.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         compactTitle.setSingleLine(true);
@@ -825,9 +829,9 @@ public final class DynamicBarHelper {
                 break;
 
             case 7:
-                compactLeftIcon.setImageDrawable(VectorGlyphs.create(activity, "timer", 16, 0xFFF59E0B));
+                compactLeftIcon.setImageDrawable(VectorGlyphs.create(activity, "timer", 16, GlassTheme.ACCENT_AMBER));
                 compactLeftValue.setText("Таймер");
-                compactLeftValue.setTextColor(0xFFF59E0B);
+                compactLeftValue.setTextColor(GlassTheme.ACCENT_AMBER);
                 compactLeftValue.setVisibility(View.VISIBLE);
                 compactTitle.setText(timerLbl);
                 compactTitle.setPadding(useCameraGap ? 0 : dp(8), 0, 0, 0);
@@ -895,7 +899,7 @@ public final class DynamicBarHelper {
     private void addExpandedHint(String title, String sub) {
         TextView t = new TextView(activity);
         t.setText(title);
-        t.setTextColor(Color.WHITE);
+        t.setTextColor(GlassTheme.TEXT_PRIMARY);
         t.setTextSize(13f);
         t.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         expandedCard.addView(t);
@@ -914,14 +918,14 @@ public final class DynamicBarHelper {
         info.setText(batteryFull
                 ? "Батарея полностью заряжена (100%)"
                 : ("Быстрая зарядка • " + pct + "%"));
-        info.setTextColor(0xE0FFFFFF);
+        info.setTextColor(GlassTheme.TEXT_SECONDARY);
         info.setTextSize(12f);
         info.setPadding(0, 0, 0, dp(6));
         expandedCard.addView(info);
 
         FrameLayout bar = new FrameLayout(activity);
         bar.setLayoutParams(new LinearLayout.LayoutParams(dp(220), dp(6)));
-        bar.setBackground(GlassTheme.makeRoundedRect(0xFF2C2C2E, dp(3)));
+        bar.setBackground(GlassTheme.makeRoundedRect(GlassTheme.SHADE_TILE_OFF, dp(3)));
 
         View fill = new View(activity);
         int w = Math.max(dp(12), Math.round(dp(220) * (pct / 100f)));
@@ -941,7 +945,7 @@ public final class DynamicBarHelper {
             ImageView artView = new ImageView(activity);
             artView.setImageBitmap(media.albumArt);
             artView.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            artView.setBackground(GlassTheme.makeRoundedRect(0xFF242427, dp(10)));
+            artView.setBackground(GlassTheme.makeRoundedRect(GlassTheme.SHADE_TILE_OFF, dp(10)));
             artView.setClipToOutline(true);
             LinearLayout.LayoutParams aLp = new LinearLayout.LayoutParams(dp(40), dp(40));
             aLp.rightMargin = dp(10);
@@ -953,7 +957,7 @@ public final class DynamicBarHelper {
 
         TextView tr = new TextView(activity);
         tr.setText(media.title);
-        tr.setTextColor(Color.WHITE);
+        tr.setTextColor(GlassTheme.TEXT_PRIMARY);
         tr.setTextSize(13f);
         tr.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         tr.setSingleLine(true);
@@ -993,9 +997,9 @@ public final class DynamicBarHelper {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(46), dp(34));
         lp.setMargins(dp(6), 0, dp(6), 0);
         box.setLayoutParams(lp);
-        box.setBackground(GlassTheme.makeRoundedRect(0xFF242427, dp(12)));
+        box.setBackground(GlassTheme.makeRoundedRect(GlassTheme.SHADE_TILE_OFF, dp(12)));
 
-        ImageView iv = VectorGlyphs.makeIconView(activity, glyph, 17, Color.WHITE);
+        ImageView iv = VectorGlyphs.makeIconView(activity, glyph, 17, GlassTheme.TEXT_PRIMARY);
         FrameLayout.LayoutParams iLp = new FrameLayout.LayoutParams(dp(17), dp(17));
         iLp.gravity = Gravity.CENTER;
         box.addView(iv, iLp);
@@ -1035,7 +1039,7 @@ public final class DynamicBarHelper {
         });
         Window w = dialog.getWindow();
         if (w != null) {
-            w.setBackgroundDrawable(GlassTheme.makeRoundedRect(0xFF000000, 0));
+            w.setBackgroundDrawable(GlassTheme.makeRoundedRect(GlassTheme.SHADE_BG, 0));
             if (Build.VERSION.SDK_INT >= 28) {
                 WindowManager.LayoutParams lp = w.getAttributes();
                 lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
@@ -1045,7 +1049,7 @@ public final class DynamicBarHelper {
 
         LinearLayout root = new LinearLayout(activity);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(0xFF000000);
+        root.setBackgroundColor(GlassTheme.SHADE_BG);
         int topPad = Math.max(dp(26), cachedStatusBarHeight + dp(10));
         root.setPadding(dp(18), topPad, dp(18), dp(22));
 
@@ -1056,7 +1060,7 @@ public final class DynamicBarHelper {
 
         TextView backBtn = new TextView(activity);
         backBtn.setText("‹");
-        backBtn.setTextColor(Color.WHITE);
+        backBtn.setTextColor(GlassTheme.TEXT_PRIMARY);
         backBtn.setTextSize(28f);
         backBtn.setPadding(0, 0, dp(14), 0);
         backBtn.setOnClickListener(v -> dialog.dismiss());
@@ -1064,7 +1068,7 @@ public final class DynamicBarHelper {
 
         TextView title = new TextView(activity);
         title.setText("Dynamic Bar");
-        title.setTextColor(Color.WHITE);
+        title.setTextColor(GlassTheme.TEXT_PRIMARY);
         title.setTextSize(21f);
         title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         header.addView(title);
@@ -1078,13 +1082,13 @@ public final class DynamicBarHelper {
         LinearLayout previewCard = new LinearLayout(activity);
         previewCard.setOrientation(LinearLayout.VERTICAL);
         previewCard.setGravity(Gravity.CENTER_HORIZONTAL);
-        previewCard.setBackground(GlassTheme.makeRoundedRect(0xFF1A1A1E, dp(22)));
+        previewCard.setBackground(GlassTheme.makeRoundedRect(GlassTheme.SHADE_CARD, dp(22)));
         previewCard.setPadding(dp(16), dp(20), dp(16), dp(18));
 
         LinearLayout phoneTop = new LinearLayout(activity);
         phoneTop.setOrientation(LinearLayout.VERTICAL);
         phoneTop.setGravity(Gravity.CENTER_HORIZONTAL);
-        phoneTop.setBackground(GlassTheme.makeRoundedRect(0xFF28282E, dp(20)));
+        phoneTop.setBackground(GlassTheme.makeRoundedRect(GlassTheme.SURFACE_ELEVATED, dp(20)));
         phoneTop.setPadding(dp(14), dp(12), dp(14), dp(14));
         phoneTop.setLayoutParams(new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -1095,8 +1099,8 @@ public final class DynamicBarHelper {
         GradientDrawable pBg = new GradientDrawable();
         pBg.setShape(GradientDrawable.RECTANGLE);
         pBg.setCornerRadius(dp(18));
-        pBg.setColor(0xFF000000);
-        pBg.setStroke(dp(1), 0x38FFFFFF);
+        pBg.setColor(GlassTheme.SURFACE_ELEVATED);
+        pBg.setStroke(dp(1), surfaceBorder());
         previewPill.setBackground(pBg);
         previewPill.setPadding(dp(14), dp(7), dp(14), dp(7));
 
@@ -1116,8 +1120,10 @@ public final class DynamicBarHelper {
         View camDot = new View(activity);
         GradientDrawable camBg = new GradientDrawable();
         camBg.setShape(GradientDrawable.OVAL);
-        camBg.setColor(0xFF141418);
-        camBg.setStroke(dp(1), 0x44FFFFFF);
+        // Вырез камеры — «дырка» в корпусе телефона, а не элемент темы:
+        // затемнять здесь нечего, поэтому цвет зависит только от светлоты фона.
+        camBg.setColor(GlassTheme.LIGHT_SURFACES ? 0xFFC7CDD6 : 0xFF141418);
+        camBg.setStroke(dp(1), surfaceBorder());
         camDot.setBackground(camBg);
         LinearLayout.LayoutParams camLp = new LinearLayout.LayoutParams(dp(14), dp(14));
         camLp.setMargins(dp(12), 0, dp(12), 0);
@@ -1125,7 +1131,7 @@ public final class DynamicBarHelper {
 
         final TextView pText = new TextView(activity);
         pText.setText("Зарядка • 5с");
-        pText.setTextColor(Color.WHITE);
+        pText.setTextColor(GlassTheme.TEXT_PRIMARY);
         pText.setTextSize(12.5f);
         pText.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         previewPill.addView(pText);
@@ -1165,7 +1171,7 @@ public final class DynamicBarHelper {
 
         LinearLayout masterCard = new LinearLayout(activity);
         masterCard.setOrientation(LinearLayout.VERTICAL);
-        masterCard.setBackground(GlassTheme.makeRoundedRect(0xFF1A1A1E, dp(20)));
+        masterCard.setBackground(GlassTheme.makeRoundedRect(GlassTheme.SHADE_CARD, dp(20)));
         masterCard.setPadding(dp(16), dp(6), dp(16), dp(6));
         LinearLayout.LayoutParams mcLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -1174,7 +1180,7 @@ public final class DynamicBarHelper {
 
         final LinearLayout optionsCard = new LinearLayout(activity);
         optionsCard.setOrientation(LinearLayout.VERTICAL);
-        optionsCard.setBackground(GlassTheme.makeRoundedRect(0xFF1A1A1E, dp(20)));
+        optionsCard.setBackground(GlassTheme.makeRoundedRect(GlassTheme.SHADE_CARD, dp(20)));
         optionsCard.setPadding(dp(16), dp(6), dp(16), dp(6));
         LinearLayout.LayoutParams ocLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -1252,7 +1258,7 @@ public final class DynamicBarHelper {
         // Положение капсулы (учёт выреза камеры и строки состояния)
         LinearLayout posCard = new LinearLayout(activity);
         posCard.setOrientation(LinearLayout.VERTICAL);
-        posCard.setBackground(GlassTheme.makeRoundedRect(0xFF1A1A1E, dp(20)));
+        posCard.setBackground(GlassTheme.makeRoundedRect(GlassTheme.SHADE_CARD, dp(20)));
         posCard.setPadding(dp(16), dp(14), dp(16), dp(14));
         LinearLayout.LayoutParams posLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -1261,7 +1267,7 @@ public final class DynamicBarHelper {
 
         TextView posTitle = new TextView(activity);
         posTitle.setText("Положение капсулы сверху");
-        posTitle.setTextColor(Color.WHITE);
+        posTitle.setTextColor(GlassTheme.TEXT_PRIMARY);
         posTitle.setTextSize(14.5f);
         posTitle.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         posCard.addView(posTitle);
@@ -1294,9 +1300,12 @@ public final class DynamicBarHelper {
             int cur = prefs.getDynamicBarPosition();
             for (int i = 0; i < 3; i++) {
                 boolean sel = (i == cur);
-                posBtns[i].setTextColor(sel ? Color.WHITE : GlassTheme.TEXT_SECONDARY);
+                // Выбранная кнопка залита акцентом (белая подпись читается), а
+                // невыбранная — мягкой подложкой темы: на светлой палитре
+                // тёмный литерал 0xFF28282E выглядел провалом в интерфейсе.
+                posBtns[i].setTextColor(sel ? Color.WHITE : GlassTheme.TEXT_PRIMARY);
                 posBtns[i].setBackground(GlassTheme.makeRoundedRect(
-                        sel ? GlassTheme.ACCENT_BLUE : 0xFF28282E, dp(12)));
+                        sel ? GlassTheme.ACCENT_BLUE : GlassTheme.SHADE_TILE_OFF, dp(12)));
             }
         };
         paintPos.run();
@@ -1344,7 +1353,7 @@ public final class DynamicBarHelper {
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(0, dp(12), 0, dp(12));
 
-        ImageView icon = VectorGlyphs.makeIconView(activity, glyph, 20, 0xCCFFFFFF);
+        ImageView icon = VectorGlyphs.makeIconView(activity, glyph, 20, GlassTheme.TEXT_SECONDARY);
         LinearLayout.LayoutParams iLp = new LinearLayout.LayoutParams(dp(20), dp(20));
         iLp.rightMargin = dp(12);
         row.addView(icon, iLp);
@@ -1354,7 +1363,7 @@ public final class DynamicBarHelper {
 
         TextView t = new TextView(activity);
         t.setText(title);
-        t.setTextColor(Color.WHITE);
+        t.setTextColor(GlassTheme.TEXT_PRIMARY);
         t.setTextSize(15f);
         texts.addView(t);
 
@@ -1376,7 +1385,7 @@ public final class DynamicBarHelper {
         FrameLayout.LayoutParams thLp = new FrameLayout.LayoutParams(dp(20), dp(20));
         thLp.gravity = Gravity.CENTER_VERTICAL | Gravity.START;
         thumb.setLayoutParams(thLp);
-        thumb.setBackground(GlassTheme.makeCircle(Color.WHITE));
+        thumb.setBackground(GlassTheme.makeCircle(GlassTheme.SWITCH_THUMB));
         track.addView(thumb);
 
         final Runnable applyVisual = () -> {
@@ -1407,6 +1416,19 @@ public final class DynamicBarHelper {
         v.setBackgroundColor(GlassTheme.DIVIDER);
         v.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1));
         return v;
+    }
+
+    /**
+     * Цвет обводки поверхностей, которые лежат поверх чужих приложений.
+     *
+     * DIVIDER в светлой теме — тёмный полупрозрачный (0x1F0B1220), на светлой
+     * поверхности он даёт 1,18:1 и обводки просто не видно. На тёмных стилях
+     * DIVIDER, наоборот, единственный подходящий. Поэтому здесь две ветки, а не
+     * одно поле: назначение — «граница видна», а не «цвет из таблицы».
+     */
+    private int surfaceBorder() {
+        if (!GlassTheme.LIGHT_SURFACES) return GlassTheme.DIVIDER;
+        return GlassTheme.borderOnElevatedSurface();
     }
 
     private int dp(int v) {

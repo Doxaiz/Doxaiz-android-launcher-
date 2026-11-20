@@ -283,6 +283,20 @@ public final class ContrastTest {
         requireAtLeast(textOn(GlassTheme.SWITCH_OFF, light.cardBgColor), 1.4,
                 "выключенный переключатель различим на карточке");
 
+        // Модальные экраны из настроек: диалог папки и диалог страниц. Оба
+        // строятся через createModalBox() (поверхность из темы), но заголовок
+        // папки, метки приложений и подписи превью были белыми литералами.
+        requireAtLeast(textOn(GlassTheme.TEXT_PRIMARY, light.dialogBgColor), 4.5,
+                "заголовок папки на поверхности диалога");
+        requireAtLeast(textOn(GlassTheme.TEXT_PRIMARY, GlassTheme.SURFACE_ELEVATED), 4.5,
+                "метка приложения в карточке превью папки");
+        requireAtLeast(textOn(GlassTheme.ACCENT_BLUE_ON_SOFT, GlassTheme.SURFACE_ELEVATED), 4.5,
+                "подпись «Экран N» на подсвеченной карточке");
+        requireBelow(textOn(GlassTheme.ACCENT_BLUE, GlassTheme.SURFACE_ELEVATED), 4.5,
+                "основной акцент на подсвеченной карточке не проходит (4,40:1)");
+        requireAtLeast(textOn(GlassTheme.TEXT_MUTED, GlassTheme.SHADE_CARD), 4.5,
+                "подпись неактивной карточки превью");
+
         // Плашка уведомления (heads-up) строится на POPUP_BG темы, то есть в
         // светлой теме она белая. Заголовок и кнопки действий в ней были
         // белыми литералами на тёмной плашке — на светлой это 1,0:1.
@@ -302,6 +316,39 @@ public final class ContrastTest {
         // Опасное действие: белый текст на красном темы.
         requireAtLeast(textOn(0xFFFFFFFF, GlassTheme.ACCENT_RED), 4.5,
                 "белая подпись на красной плашке светлой шторки");
+        // То же для остальных акцентов, на которых код держит белые подписи:
+        // активный чип (ACCENT_BLUE), «Готово» (ACCENT_GREEN), таймер (AMBER).
+        requireAtLeast(textOn(0xFFFFFFFF, GlassTheme.ACCENT_BLUE), 4.5,
+                "белая подпись на синем акценте (активный чип)");
+        requireAtLeast(textOn(0xFFFFFFFF, GlassTheme.ACCENT_GREEN), 4.5,
+                "белая подпись на зелёном акценте");
+        requireAtLeast(textOn(0xFFFFFFFF, GlassTheme.ACCENT_AMBER), 4.5,
+                "белая подпись на янтарном акценте");
+
+        // §43: подпись на мягкой подложке чипа (шторка, плашка уведомления).
+        // Цвет акцента на ней — 4,09–4,63:1, поэтому подпись берёт TEXT_PRIMARY.
+        requireAtLeast(textOn(GlassTheme.TEXT_PRIMARY, GlassTheme.SHADE_TILE_OFF), 4.5,
+                "подпись на мягкой подложке чипа");
+        requireBelow(textOn(GlassTheme.ACCENT_BLUE, GlassTheme.SHADE_TILE_OFF), 4.5,
+                "акцент как подпись на мягкой подложке не проходит (4,09:1)");
+        // Значок выбора на рабочем столе и в каталоге: невыбранный — не белый.
+        requireAtLeast(textOn(GlassTheme.TEXT_PRIMARY, GlassTheme.TILE_INACTIVE), 4.5,
+                "галочка на невыбранном значке выбора");
+        // Карточка батареи на экране блокировки: подпись на SHADE_CARD.
+        requireAtLeast(textOn(GlassTheme.TEXT_PRIMARY, GlassTheme.SHADE_CARD), 4.5,
+                "заголовок карточки батареи");
+        requireAtLeast(textOn(GlassTheme.TEXT_SECONDARY, GlassTheme.SURFACE_ELEVATED), 4.5,
+                "подпись плитки батареи на SURFACE_ELEVATED");
+        // Плавающая капсула: она лежит поверх любого приложения, поэтому её фон —
+        // плотный SURFACE_ELEVATED, а не полупрозрачная карточка.
+        requireAtLeast(textOn(GlassTheme.TEXT_PRIMARY, GlassTheme.SURFACE_ELEVATED), 4.5,
+                "подпись плавающей капсулы на SURFACE_ELEVATED");
+        // Кружок выключенного переключателя: раньше был белым литералом и на
+        // светлой дорожке #CAD0D8 давал 1,5:1 — переключатель выглядел пустым.
+        requireAtLeast(textOn(GlassTheme.SWITCH_THUMB, GlassTheme.SWITCH_OFF), 2.5,
+                "кружок выключенного переключателя различим на дорожке");
+        requireBelow(textOn(0xFFFFFFFF, GlassTheme.SWITCH_OFF), 2.5,
+                "прежний белый кружок на светлой дорожке был неразличим");
 
         // Тёмные стили после правки не должны «посветлеть»: у них LIGHT_SURFACES
         // обязан оставаться false, иначе белые иконки заменятся на тёмные.

@@ -140,6 +140,33 @@ public final class QuickShadeHelper {
     }
 
     /** Подпись на поверхности шторки (часы, дата, заголовки). */
+    /**
+     * Цвет подписи/иконки на мягкой подложке чипа.
+     *
+     * Вызывающий код передаёт акцент (ACCENT_BLUE/GREEN/RED/AMBER), а на светлой
+     * палитре акценты рассчитаны на белый текст поверх себя же, не на текст по
+     * мягкой подложке: ACCENT_BLUE на SHADE_TILE_OFF — 4,09:1, ACCENT_GREEN —
+     * 4,32:1 (порог для мелкого текста 4,5:1). Тёмный TEXT_PRIMARY на той же
+     * подложке даёт 13,6:1. Различие «опасное действие / обычное» при этом не
+     * теряется: его несёт иконка, для графики порог 3:1, и ACCENT_RED на
+     * SHADE_TILE_OFF — 4,63:1. Поэтому на светлых поверхностях цвет акцента
+     * остаётся у иконки, а подпись берёт цвет темы.
+     */
+    private static int chipTint(int accent) {
+        return GlassTheme.LIGHT_SURFACES ? GlassTheme.TEXT_PRIMARY : accent;
+    }
+
+    /**
+     * Второстепенная подпись на карточке шторки.
+     *
+     * Раньше это был полупрозрачный белый (0xCCFFFFFF) — на светлой карточке он
+     * даёт 1,1:1, то есть текст карточки уведомления пропадал целиком. В светлой
+     * палитре берётся непрозрачный TEXT_SECONDARY (7,09:1 на белой карточке).
+     */
+    private static int onCardSecondary() {
+        return GlassTheme.LIGHT_SURFACES ? GlassTheme.TEXT_SECONDARY : 0xCCFFFFFF;
+    }
+
     private static int onSurfaceTextColor() {
         return onSurfaceColor();
     }
@@ -1051,7 +1078,7 @@ public final class QuickShadeHelper {
 
         liveTrafficLabel = new TextView(activity);
         liveTrafficLabel.setText(formatNetSpeedLine(netType, liveRxBps, liveTxBps, liveNetSampled));
-        liveTrafficLabel.setTextColor(0xE6FFFFFF);
+        liveTrafficLabel.setTextColor(onSurfaceTextColor());
         liveTrafficLabel.setTextSize(12.5f);
         liveTrafficLabel.setSingleLine(true);
         liveTrafficLabel.setEllipsize(TextUtils.TruncateAt.END);
@@ -1172,7 +1199,7 @@ public final class QuickShadeHelper {
 
         TextView s = new TextView(activity);
         s.setText(sub);
-        s.setTextColor(0xCCFFFFFF);
+        s.setTextColor(onCardSecondary());
         s.setTextSize(11f);
         s.setSingleLine(true);
         s.setEllipsize(TextUtils.TruncateAt.END);
@@ -1182,7 +1209,7 @@ public final class QuickShadeHelper {
 
         TextView corner = new TextView(activity);
         corner.setText("◢");
-        corner.setTextColor(0x99FFFFFF);
+        corner.setTextColor(onSurfaceColor());
         corner.setTextSize(8f);
         FrameLayout.LayoutParams cLp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -1213,7 +1240,7 @@ public final class QuickShadeHelper {
 
         final TextView pctTv = new TextView(activity);
         pctTv.setText(Math.round(level[0] * 100) + "%");
-        pctTv.setTextColor(0xCCFFFFFF);
+        pctTv.setTextColor(onSurfaceTextColor());
         pctTv.setTextSize(10.5f);
         pctTv.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         pctTv.setGravity(Gravity.CENTER);
@@ -1232,7 +1259,7 @@ public final class QuickShadeHelper {
                 autoBtn.setTextSize(10.5f);
                 autoBtn.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
                 autoBtn.setGravity(Gravity.CENTER);
-                autoBtn.setBackground(GlassTheme.makeCircle(autoNow ? GlassTheme.TILE_ACTIVE_BLUE : 0x55000000));
+                autoBtn.setBackground(GlassTheme.makeCircle(autoNow ? GlassTheme.TILE_ACTIVE_BLUE : GlassTheme.SHADE_TILE_OFF));
                 FrameLayout.LayoutParams aLp = new FrameLayout.LayoutParams(dp(22), dp(22));
                 aLp.gravity = Gravity.TOP | Gravity.END;
                 aLp.topMargin = dp(7);
@@ -1385,7 +1412,7 @@ public final class QuickShadeHelper {
             FrameLayout cornerHit = new FrameLayout(activity);
             TextView tri = new TextView(activity);
             tri.setText("◢");
-            tri.setTextColor(0x88FFFFFF);
+            tri.setTextColor(onSurfaceColor());
             tri.setTextSize(7f);
             FrameLayout.LayoutParams tLp = new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -1413,7 +1440,7 @@ public final class QuickShadeHelper {
         if (showLabel) {
             TextView lbl = new TextView(activity);
             lbl.setText(resolveTileLabel(tileId, spec));
-            lbl.setTextColor(0xD9FFFFFF);
+            lbl.setTextColor(onSurfaceTextColor());
             lbl.setTextSize(11f);
             lbl.setGravity(Gravity.CENTER);
             lbl.setMaxLines(2);
@@ -1456,7 +1483,7 @@ public final class QuickShadeHelper {
 
         TextView lbl = new TextView(activity);
         lbl.setText("Добавить");
-        lbl.setTextColor(0xD9FFFFFF);
+        lbl.setTextColor(onSurfaceTextColor());
         lbl.setTextSize(11f);
         lbl.setGravity(Gravity.CENTER);
         lbl.setPadding(0, dp(5), 0, 0);
@@ -1714,7 +1741,7 @@ public final class QuickShadeHelper {
 
         TextView uTxt = new TextView(activity);
         uTxt.setText(lastDismissedBannerText + " • История ›");
-        uTxt.setTextColor(0xFFFFFFFF);
+        uTxt.setTextColor(GlassTheme.TEXT_PRIMARY);
         uTxt.setTextSize(12f);
         uTxt.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         undoPill.addView(uTxt);
@@ -1943,7 +1970,7 @@ public final class QuickShadeHelper {
         if (!bodyText.isEmpty()) {
             TextView bodyTv = new TextView(activity);
             bodyTv.setText(bodyText);
-            bodyTv.setTextColor(0xCCFFFFFF);
+            bodyTv.setTextColor(onCardSecondary());
             bodyTv.setTextSize(13f);
             bodyTv.setMaxLines(2);
             bodyTv.setEllipsize(TextUtils.TruncateAt.END);
@@ -1982,7 +2009,7 @@ public final class QuickShadeHelper {
         // Визуальный «подслой» стопки снизу
         View under = new View(activity);
         GradientDrawable uBg = new GradientDrawable();
-        uBg.setColor(0xFF1D1D20);
+        uBg.setColor(GlassTheme.SURFACE_ELEVATED);
         uBg.setCornerRadii(new float[]{0, 0, 0, 0, dp(14), dp(14), dp(14), dp(14)});
         under.setBackground(uBg);
         LinearLayout.LayoutParams uLp = new LinearLayout.LayoutParams(
@@ -2228,7 +2255,7 @@ public final class QuickShadeHelper {
                         cpBtn.setOrientation(LinearLayout.HORIZONTAL);
                         cpBtn.setGravity(Gravity.CENTER_VERTICAL);
                         boolean isOtp = (hi.otpCode != null);
-                        cpBtn.setBackground(GlassTheme.makePill(isOtp ? 0x3322C55E : 0xFF26262C));
+                        cpBtn.setBackground(GlassTheme.makePill(isOtp ? GlassTheme.ACCENT_SOFT_BG : GlassTheme.SHADE_TILE_OFF));
                         cpBtn.setPadding(dp(8), dp(3), dp(9), dp(3));
 
                         ImageView cpIco = VectorGlyphs.makeIconView(
@@ -2267,7 +2294,7 @@ public final class QuickShadeHelper {
                 if (!txt.isEmpty()) {
                     TextView b = new TextView(activity);
                     b.setText(txt);
-                    b.setTextColor(0xCCFFFFFF);
+                    b.setTextColor(onCardSecondary());
                     b.setTextSize(12.5f);
                     b.setMaxLines(3);
                     b.setEllipsize(TextUtils.TruncateAt.END);
@@ -2555,7 +2582,7 @@ public final class QuickShadeHelper {
             if (!bodyText.isEmpty()) {
                 TextView bodyTv = new TextView(activity);
                 bodyTv.setText(bodyText);
-                bodyTv.setTextColor(0xCCFFFFFF);
+                bodyTv.setTextColor(onCardSecondary());
                 bodyTv.setTextSize(13f);
                 bodyTv.setMaxLines(isExpanded ? 6 : 2);
                 bodyTv.setEllipsize(TextUtils.TruncateAt.END);
@@ -2812,7 +2839,7 @@ public final class QuickShadeHelper {
         LinearLayout chip = new LinearLayout(activity);
         chip.setOrientation(LinearLayout.HORIZONTAL);
         chip.setGravity(Gravity.CENTER_VERTICAL);
-        chip.setBackground(GlassTheme.makeRoundedRect(0xFF28292F, dp(10)));
+        chip.setBackground(GlassTheme.makeRoundedRect(GlassTheme.SHADE_TILE_OFF, dp(10)));
         chip.setPadding(dp(9), dp(5), dp(10), dp(5));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -2827,7 +2854,7 @@ public final class QuickShadeHelper {
         }
         TextView tv = new TextView(activity);
         tv.setText(text);
-        tv.setTextColor(tintColor);
+        tv.setTextColor(chipTint(tintColor));
         tv.setTextSize(11.8f);
         tv.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         chip.addView(tv);
@@ -2897,7 +2924,7 @@ public final class QuickShadeHelper {
 
         LinearLayout card = new LinearLayout(activity);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackground(GlassTheme.makeRoundedRect(0xFF1F222B, dp(20)));
+        card.setBackground(GlassTheme.makeRoundedRect(GlassTheme.SHADE_CARD, dp(20)));
         card.setPadding(dp(13), dp(12), dp(13), dp(12));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -2979,7 +3006,7 @@ public final class QuickShadeHelper {
 
         TextView outLbl = new TextView(activity);
         outLbl.setText(outInfo[1]);
-        outLbl.setTextColor(0xE6FFFFFF);
+        outLbl.setTextColor(onSurfaceTextColor());
         outLbl.setTextSize(11f);
         outLbl.setSingleLine(true);
         outLbl.setMaxWidth(dp(86));
@@ -3530,10 +3557,10 @@ public final class QuickShadeHelper {
 
                     TextView clearAllBtn = new TextView(activity);
                     clearAllBtn.setText("Очистить все");
-                    clearAllBtn.setTextColor(GlassTheme.ACCENT_BLUE);
+                    clearAllBtn.setTextColor(GlassTheme.ACCENT_BLUE_ON_SOFT);
                     clearAllBtn.setTextSize(12f);
                     clearAllBtn.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-                    clearAllBtn.setBackground(GlassTheme.makePill(0xFF1F222C));
+                    clearAllBtn.setBackground(GlassTheme.makePill(GlassTheme.SHADE_TILE_OFF));
                     clearAllBtn.setPadding(dp(10), dp(4), dp(10), dp(4));
                     clearAllBtn.setOnClickListener(v -> {
                         performHaptic(v);
@@ -3623,7 +3650,7 @@ public final class QuickShadeHelper {
 
         TextView lbl = new TextView(activity);
         lbl.setText(resolveTileLabel(tileId, spec));
-        lbl.setTextColor(0xD9FFFFFF);
+        lbl.setTextColor(onSurfaceTextColor());
         lbl.setTextSize(10.5f);
         lbl.setGravity(Gravity.CENTER);
         lbl.setMaxLines(1);
@@ -3668,10 +3695,10 @@ public final class QuickShadeHelper {
             for (final String qr : act.quickReplies) {
                 TextView chip = new TextView(activity);
                 chip.setText(qr);
-                chip.setTextColor(0xFFFFFFFF);
+                chip.setTextColor(GlassTheme.TEXT_PRIMARY);
                 chip.setTextSize(12f);
                 chip.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-                chip.setBackground(GlassTheme.makePill(0xFF252A36));
+                chip.setBackground(GlassTheme.makePill(GlassTheme.SHADE_TILE_OFF));
                 chip.setPadding(dp(11), dp(4), dp(11), dp(4));
                 LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -3877,7 +3904,7 @@ public final class QuickShadeHelper {
         final LinearLayout reorderBar = new LinearLayout(activity);
         reorderBar.setOrientation(LinearLayout.HORIZONTAL);
         reorderBar.setGravity(Gravity.CENTER_VERTICAL);
-        reorderBar.setBackground(GlassTheme.makeRoundedRect(0xFF1A1A1F, dp(14)));
+        reorderBar.setBackground(GlassTheme.makeRoundedRect(GlassTheme.SURFACE_ELEVATED, dp(14)));
         reorderBar.setPadding(dp(12), dp(8), dp(12), dp(8));
         LinearLayout.LayoutParams rbWrapLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -3938,7 +3965,7 @@ public final class QuickShadeHelper {
 
             TextView actHdr = new TextView(activity);
             actHdr.setText("На панели управления (" + activeList.size() + ")");
-            actHdr.setTextColor(0xCCFFFFFF);
+            actHdr.setTextColor(onSurfaceTextColor());
             actHdr.setTextSize(13f);
             actHdr.setPadding(0, 0, 0, dp(10));
             content.addView(actHdr);
@@ -3974,7 +4001,7 @@ public final class QuickShadeHelper {
 
             TextView avHdr = new TextView(activity);
             avHdr.setText("Доступные переключатели (" + avail.size() + ")");
-            avHdr.setTextColor(0xCCFFFFFF);
+            avHdr.setTextColor(onSurfaceTextColor());
             avHdr.setTextSize(13f);
             avHdr.setPadding(0, 0, 0, dp(10));
             content.addView(avHdr);
@@ -4011,7 +4038,7 @@ public final class QuickShadeHelper {
         resetBtn.setTextColor(onSurfaceTextColor());
         resetBtn.setTextSize(14.5f);
         resetBtn.setGravity(Gravity.CENTER);
-        resetBtn.setBackground(GlassTheme.makeRoundedRect(0xFF242427, dp(18)));
+        resetBtn.setBackground(GlassTheme.makeRoundedRect(GlassTheme.SHADE_TILE_OFF, dp(18)));
         resetBtn.setPadding(0, dp(12), 0, dp(12));
         LinearLayout.LayoutParams rbLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         rbLp.rightMargin = dp(10);
@@ -4145,7 +4172,7 @@ public final class QuickShadeHelper {
 
                     TextView lbl = new TextView(activity);
                     lbl.setText(spec.label);
-                    lbl.setTextColor(0xD9FFFFFF);
+                    lbl.setTextColor(onSurfaceTextColor());
                     lbl.setTextSize(10.5f);
                     lbl.setGravity(Gravity.CENTER);
                     lbl.setMaxLines(2);
@@ -5784,7 +5811,7 @@ public final class QuickShadeHelper {
 
             TextView lbl = new TextView(activity);
             lbl.setText(labels[i]);
-            lbl.setTextColor(0xE6FFFFFF);
+            lbl.setTextColor(onSurfaceTextColor());
             lbl.setTextSize(11.5f);
             lbl.setGravity(Gravity.CENTER);
             lbl.setMaxLines(2);

@@ -108,6 +108,14 @@ public class LauncherChecksTest {
         run("NetworkQualityTests", () -> NetworkQualityTests.main(new String[0]));
     }
 
+    @Test
+    public void themeLiteralsStayInPalette() {
+        // §43: храповик на тёмные заливки литералом. Пиксельная самопроверка
+        // видит три экрана; этот тест видит и панель звука, и плашку
+        // уведомления, и экран блокировки, которые на эмуляторе не открыть.
+        run("ThemeLiteralBudgetTest", () -> ThemeLiteralBudgetTest.main(new String[0]));
+    }
+
     private interface Check {
         void run() throws Exception;
     }

@@ -165,7 +165,7 @@ public final class SoundPanelHelper {
         TextView modeLbl = new TextView(ctx);
         boolean fixedVol = isVolumeFixedSafe(am);
         modeLbl.setText(fixedVol ? "Фикс. громкость" : ringerLabel(ringer));
-        modeLbl.setTextColor(fixedVol ? 0xFFF59E0B : theme.textSecondary);
+        modeLbl.setTextColor(fixedVol ? GlassTheme.ACCENT_AMBER : theme.textSecondary);
         modeLbl.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
         hdr.addView(modeLbl);
         box.addView(hdr);
@@ -322,9 +322,10 @@ public final class SoundPanelHelper {
         wrap.addView(fill, fLp);
 
         final ImageView ico = VectorGlyphs.makeIconView(ctx, glyph, 18, Color.WHITE);
-        // The icon straddles the fill boundary; its own dark backing keeps it legible
-        // at every volume on both light and dark tracks.
-        ico.setBackground(GlassTheme.makeCircle(0xFF303642));
+        // Иконка стоит на границе заливки: у неё своя подложка, иначе при громкости
+        // около 50% половина глифа оказывается на заливке, половина — на треке.
+        // Цвет подложки из палитры: 0xFF303642 на светлом треке был тёмным пятном.
+        ico.setBackground(GlassTheme.makeCircle(GlassTheme.SHADE_TILE_OFF));
         FrameLayout.LayoutParams iLp = new FrameLayout.LayoutParams(dp(ctx, 18), dp(ctx, 18));
         iLp.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
         iLp.bottomMargin = dp(ctx, 10);
