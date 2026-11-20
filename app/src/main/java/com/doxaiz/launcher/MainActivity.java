@@ -3972,7 +3972,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
         TextView titleTv = new TextView(this);
         titleTv.setText(folder.folderName);
-        titleTv.setTextColor(Color.WHITE);
+        titleTv.setTextColor(GlassTheme.TEXT_PRIMARY);
         titleTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24.5f);
         titleTv.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         titleTv.setGravity(Gravity.CENTER);
@@ -4052,7 +4052,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
                     TextView lbl = new TextView(this);
                     lbl.setText(formatAppLabel(app));
-                    lbl.setTextColor(Color.WHITE);
+                    lbl.setTextColor(GlassTheme.TEXT_PRIMARY);
                     lbl.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
                     lbl.setGravity(Gravity.CENTER);
                     lbl.setSingleLine(true);
@@ -6717,7 +6717,8 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                 chk.setText(sel ? "✓" : "");
                 chk.setBackground(sel
                         ? GlassTheme.makeCircle(GlassTheme.ACCENT_BLUE)
-                        : GlassTheme.makeGlassRect(this, 0x551C1D22, 0x88FFFFFF, 11f, 1.1f));
+                        : GlassTheme.makeGlassRect(this, GlassTheme.TILE_INACTIVE,
+                                theme.cardBorderColor, 11f, 1.1f));
                 row.addView(chk, new LinearLayout.LayoutParams(dp(22), dp(22)));
 
                 row.setOnClickListener(v -> {
@@ -7416,8 +7417,8 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             FrameLayout card = new FrameLayout(this);
             card.setBackground(GlassTheme.makeGlassRect(
                     this,
-                    active ? 0xFF1A2538 : 0xFF232327,
-                    active ? 0xFF2B8BFF : 0xFF3A3A40,
+                    active ? GlassTheme.SURFACE_ELEVATED : GlassTheme.SHADE_CARD,
+                    active ? GlassTheme.ACCENT_BLUE : theme.cardBorderColor,
                     18f, active ? 1.8f : 1f
             ));
             LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(dp(106), dp(148));
@@ -7459,7 +7460,10 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
             TextView pLbl = new TextView(this);
             pLbl.setText("Экран " + (pageIdx + 1));
-            pLbl.setTextColor(active ? Color.WHITE : 0xFFD5D7DC);
+            // Подсвеченная карточка превью — SURFACE_ELEVATED, и основной акцент
+            // на ней даёт 4,40:1 (ниже порога текста 4,5). Для подписи на мягкой
+            // подложке в теме есть отдельный, более тёмный синий.
+            pLbl.setTextColor(active ? GlassTheme.ACCENT_BLUE_ON_SOFT : GlassTheme.TEXT_MUTED);
             pLbl.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
             pLbl.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
             LinearLayout.LayoutParams plLp = new LinearLayout.LayoutParams(

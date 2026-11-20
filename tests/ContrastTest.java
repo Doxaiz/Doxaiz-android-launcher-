@@ -283,6 +283,20 @@ public final class ContrastTest {
         requireAtLeast(textOn(GlassTheme.SWITCH_OFF, light.cardBgColor), 1.4,
                 "выключенный переключатель различим на карточке");
 
+        // Модальные экраны из настроек: диалог папки и диалог страниц. Оба
+        // строятся через createModalBox() (поверхность из темы), но заголовок
+        // папки, метки приложений и подписи превью были белыми литералами.
+        requireAtLeast(textOn(GlassTheme.TEXT_PRIMARY, light.dialogBgColor), 4.5,
+                "заголовок папки на поверхности диалога");
+        requireAtLeast(textOn(GlassTheme.TEXT_PRIMARY, GlassTheme.SURFACE_ELEVATED), 4.5,
+                "метка приложения в карточке превью папки");
+        requireAtLeast(textOn(GlassTheme.ACCENT_BLUE_ON_SOFT, GlassTheme.SURFACE_ELEVATED), 4.5,
+                "подпись «Экран N» на подсвеченной карточке");
+        requireBelow(textOn(GlassTheme.ACCENT_BLUE, GlassTheme.SURFACE_ELEVATED), 4.5,
+                "основной акцент на подсвеченной карточке не проходит (4,40:1)");
+        requireAtLeast(textOn(GlassTheme.TEXT_MUTED, GlassTheme.SHADE_CARD), 4.5,
+                "подпись неактивной карточки превью");
+
         // Плашка уведомления (heads-up) строится на POPUP_BG темы, то есть в
         // светлой теме она белая. Заголовок и кнопки действий в ней были
         // белыми литералами на тёмной плашке — на светлой это 1,0:1.
