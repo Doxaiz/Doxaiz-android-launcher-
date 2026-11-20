@@ -462,6 +462,22 @@ public final class QuickShadeHelper {
         return shadeDialog != null && shadeDialog.isShowing();
     }
 
+    /**
+     * Корень содержимого шторки — то, что видит пользователь поверх стола.
+     *
+     * Нужен самопроверке темы (debug): она снимает кадр именно с этой вью, а не
+     * ищет «самое большое чужое окно» в процессе. Второй способ ошибался молча —
+     * если поверх шторки в этот момент было другое окно процесса (аварийный
+     * экран), кадр снимался с него, и отчёт выглядел как «светлая тема не
+     * применилась». Ошибка замера не должна выдавать себя за дефект темы.
+     *
+     * @return корень содержимого или null, если шторка не открыта
+     */
+    public View getShadeContentView() {
+        if (!isShowing()) return null;
+        return shadeRoot;
+    }
+
     private void resetTransientShadeState() {
         shadeDialog = null;
         shadeRoot = null;
