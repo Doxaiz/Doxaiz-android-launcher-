@@ -1210,7 +1210,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
         multiSelectCountTv = new TextView(this);
         multiSelectCountTv.setText("Выбрано: 0");
-        multiSelectCountTv.setTextColor(Color.WHITE);
+        multiSelectCountTv.setTextColor(theme.textPrimary);
         multiSelectCountTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f);
         multiSelectCountTv.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         multiSelectBar.addView(multiSelectCountTv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
@@ -1218,7 +1218,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         multiSelectBar.addView(makeMultiSelectActionBtn("folder_plus", "В папку", GlassTheme.ACCENT_BLUE, this::multiSelectCreateFolder));
         View sp1 = new View(this);
         multiSelectBar.addView(sp1, new LinearLayout.LayoutParams(dp(6), dp(1)));
-        multiSelectBar.addView(makeMultiSelectActionBtn("pages", "На экран", 0xFF2B2E38, this::multiSelectMoveToPageModal));
+        multiSelectBar.addView(makeMultiSelectActionBtn("pages", "На экран", GlassTheme.SHADE_TILE_OFF, this::multiSelectMoveToPageModal));
         View sp2 = new View(this);
         multiSelectBar.addView(sp2, new LinearLayout.LayoutParams(dp(6), dp(1)));
         multiSelectBar.addView(makeVectorCircleBtn("close", "Готово", this::exitMultiSelectMode),
@@ -1233,13 +1233,13 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         btn.setGravity(Gravity.CENTER);
         btn.setPadding(dp(10), dp(8), dp(11), dp(8));
         btn.setBackground(GlassTheme.makeRoundedRect(bgColor, dp(14)));
-        ImageView iv = VectorGlyphs.makeIconView(this, glyph, 15, Color.WHITE);
+        ImageView iv = VectorGlyphs.makeIconView(this, glyph, 15, filledButtonText(bgColor));
         LinearLayout.LayoutParams iLp = new LinearLayout.LayoutParams(dp(15), dp(15));
         iLp.rightMargin = dp(5);
         btn.addView(iv, iLp);
         TextView tv = new TextView(this);
         tv.setText(label);
-        tv.setTextColor(Color.WHITE);
+        tv.setTextColor(filledButtonText(bgColor));
         tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
         tv.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         btn.addView(tv);
@@ -1833,7 +1833,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         drawerBatchBar.setOrientation(LinearLayout.HORIZONTAL);
         drawerBatchBar.setGravity(Gravity.CENTER_VERTICAL);
         drawerBatchBar.setBackground(GlassTheme.makeGlassRect(
-                this, 0xF01C1D23, 0x38FFFFFF, 18f, 1f
+                this, GlassTheme.SHADE_CARD, theme.cardBorderColor, 18f, 1f
         ));
         drawerBatchBar.setPadding(dp(14), dp(10), dp(10), dp(10));
         LinearLayout.LayoutParams bbLp = new LinearLayout.LayoutParams(
@@ -1846,7 +1846,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
         drawerBatchCountTv = new TextView(this);
         drawerBatchCountTv.setText("Выберите приложения");
-        drawerBatchCountTv.setTextColor(Color.WHITE);
+        drawerBatchCountTv.setTextColor(theme.textPrimary);
         drawerBatchCountTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f);
         drawerBatchCountTv.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         drawerBatchBar.addView(drawerBatchCountTv, new LinearLayout.LayoutParams(
@@ -1866,7 +1866,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         drawerBatchDeleteBtn.setTextColor(Color.WHITE);
         drawerBatchDeleteBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
         drawerBatchDeleteBtn.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        drawerBatchDeleteBtn.setBackground(GlassTheme.makeRoundedRect(0xFFEF4444, dp(12)));
+        drawerBatchDeleteBtn.setBackground(GlassTheme.makeRoundedRect(GlassTheme.ACCENT_RED, dp(12)));
         drawerBatchDeleteBtn.setPadding(dp(14), dp(7), dp(14), dp(7));
         drawerBatchDeleteBtn.setOnClickListener(v -> startBatchUninstallSelected());
         LinearLayout.LayoutParams bdLp = new LinearLayout.LayoutParams(
@@ -3071,8 +3071,8 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         checkBadge.removeAllViews();
         checkBadge.setBackground(GlassTheme.makeGlassRect(
                 this,
-                picked ? GlassTheme.ACCENT_BLUE : 0xB8181A22,
-                picked ? 0xFFFFFFFF : 0xAAFFFFFF,
+                picked ? GlassTheme.ACCENT_BLUE : theme.chipInactiveBg,
+                picked ? 0xFFFFFFFF : theme.cardBorderColor,
                 11f,
                 1.2f
         ));
@@ -3958,7 +3958,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
         TextView prevTv = new TextView(this);
         prevTv.setText(prevRef != null ? prevRef.folder.folderName : "");
-        prevTv.setTextColor(0x66FFFFFF);
+        prevTv.setTextColor(theme.textHint);
         prevTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f);
         prevTv.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
         prevTv.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -3990,7 +3990,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
         TextView nextTv = new TextView(this);
         nextTv.setText(nextRef != null ? nextRef.folder.folderName : "");
-        nextTv.setTextColor(0x66FFFFFF);
+        nextTv.setTextColor(theme.textHint);
         nextTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f);
         nextTv.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
         nextTv.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
@@ -4103,7 +4103,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
                     TextView pLbl = new TextView(this);
                     pLbl.setText("Добавить");
-                    pLbl.setTextColor(0xE6FFFFFF);
+                    pLbl.setTextColor(GlassTheme.TEXT_PRIMARY);
                     pLbl.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
                     pLbl.setGravity(Gravity.CENTER);
                     LinearLayout.LayoutParams plLp = new LinearLayout.LayoutParams(
@@ -4233,14 +4233,30 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         FrameLayout btn = new FrameLayout(this);
         btn.setContentDescription(desc);
         btn.setBackground(GlassTheme.makeGlassRect(
-                this, 0xFF282830, 0x33FFFFFF, 18f, 1f
+                this, GlassTheme.SHADE_TILE_OFF, theme.cardBorderColor, 18f, 1f
         ));
-        ImageView iv = VectorGlyphs.makeIconView(this, glyph, 16, Color.WHITE);
+        ImageView iv = VectorGlyphs.makeIconView(this, glyph, 16, GlassTheme.TEXT_PRIMARY);
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(16), dp(16));
         lp.gravity = Gravity.CENTER;
         btn.addView(iv, lp);
         btn.setOnClickListener(v -> onClick.run());
         return btn;
+    }
+
+    /**
+     * Цвет подписи на кнопке, залитой переданным цветом.
+     *
+     * Кнопки пакетного выбора заливаются акцентом (ACCENT_BLUE/RED; белый текст
+     * поверх них — 5,29–5,98:1) либо мягкой подложкой SHADE_TILE_OFF, где белая
+     * подпись в светлой теме невидима (1,3:1). Поэтому цвет считается по
+     * фактической светлоте заливки, а не выбирается отдельно для каждой кнопки.
+     */
+    private static int filledButtonText(int fillColor) {
+        int r = (fillColor >> 16) & 0xFF;
+        int g = (fillColor >> 8) & 0xFF;
+        int b = fillColor & 0xFF;
+        double luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        return luma > 140 ? GlassTheme.TEXT_PRIMARY : Color.WHITE;
     }
 
     private static String formatRussianAppsCount(int n) {
@@ -5067,7 +5083,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
                     vh.checkBadge = new TextView(MainActivity.this);
                     vh.checkBadge.setGravity(Gravity.CENTER);
-                    vh.checkBadge.setTextColor(Color.WHITE);
+                    vh.checkBadge.setTextColor(theme.textPrimary);
                     vh.checkBadge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
                     vh.checkBadge.setTypeface(Typeface.DEFAULT_BOLD);
                     vh.checkBadge.setVisibility(View.GONE);
@@ -5088,7 +5104,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
                     vh.checkBadge = new TextView(MainActivity.this);
                     vh.checkBadge.setGravity(Gravity.CENTER);
-                    vh.checkBadge.setTextColor(Color.WHITE);
+                    vh.checkBadge.setTextColor(theme.textPrimary);
                     vh.checkBadge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f);
                     vh.checkBadge.setTypeface(Typeface.DEFAULT_BOLD);
                     vh.checkBadge.setVisibility(View.GONE);
@@ -5154,9 +5170,10 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                     if (vh.batchBgState != desiredState) {
                         vh.batchBgState = desiredState;
                         vh.checkBadge.setBackground(sel
-                                ? GlassTheme.makeCircle(0xFFEF4444)
+                                ? GlassTheme.makeCircle(GlassTheme.ACCENT_RED)
                                 : GlassTheme.makeGlassRect(
-                                        MainActivity.this, 0x991C1D22, 0xCCFFFFFF, 11f, 1.2f));
+                                        MainActivity.this, theme.chipInactiveBg,
+                                        theme.cardBorderColor, 11f, 1.2f));
                     }
                 } else {
                     vh.checkBadge.setVisibility(View.GONE);
@@ -7258,7 +7275,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     private void updateDrawerBatchBtnStyle() {
         if (drawerBatchBtn == null || drawerBatchIcon == null || theme == null) return;
         if (drawerBatchMode) {
-            drawerBatchBtn.setBackground(GlassTheme.makeRoundedRect(0xFFEF4444, dp(12)));
+            drawerBatchBtn.setBackground(GlassTheme.makeRoundedRect(GlassTheme.ACCENT_RED, dp(12)));
             tintIcon(drawerBatchIcon, Color.WHITE);
         } else {
             drawerBatchBtn.setBackground(null);
@@ -7515,8 +7532,9 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             // Кнопка удаления страницы (если страниц больше 1)
             if (desktop.pages.size() > 1 && !prefs.isDesktopLocked()) {
                 FrameLayout delBtn = new FrameLayout(this);
-                delBtn.setBackground(GlassTheme.makeGlassRect(this, 0xFF3A1F22, 0xFFEF4444, 11f, 0.8f));
-                ImageView delIco = VectorGlyphs.makeIconView(this, "close", 10, 0xFFFCA5A5);
+                delBtn.setBackground(GlassTheme.makeGlassRect(this, GlassTheme.TILE_INACTIVE,
+                        GlassTheme.ACCENT_RED, 11f, 0.8f));
+                ImageView delIco = VectorGlyphs.makeIconView(this, "close", 10, GlassTheme.ACCENT_RED);
                 FrameLayout.LayoutParams diLp = new FrameLayout.LayoutParams(dp(10), dp(10));
                 diLp.gravity = Gravity.CENTER;
                 delBtn.addView(delIco, diLp);
@@ -7569,11 +7587,12 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             LinearLayout addCard = new LinearLayout(this);
             addCard.setOrientation(LinearLayout.VERTICAL);
             addCard.setGravity(Gravity.CENTER);
-            addCard.setBackground(GlassTheme.makeGlassRect(this, 0xFF1A1A1E, 0xFF3E3E46, 18f, 1f));
+            addCard.setBackground(GlassTheme.makeGlassRect(this, GlassTheme.SHADE_CARD,
+                    theme.cardBorderColor, 18f, 1f));
             LinearLayout.LayoutParams aLp = new LinearLayout.LayoutParams(dp(94), dp(148));
             addCard.setLayoutParams(aLp);
 
-            ImageView plusIco = VectorGlyphs.makeIconView(this, "plus", 26, 0xFF2B8BFF);
+            ImageView plusIco = VectorGlyphs.makeIconView(this, "plus", 26, GlassTheme.ACCENT_BLUE);
             addCard.addView(plusIco, new LinearLayout.LayoutParams(dp(26), dp(26)));
 
             TextView addLbl = new TextView(this);
@@ -7640,19 +7659,23 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         col.setPadding(dp(4), dp(10), dp(4), dp(10));
         col.setBackground(GlassTheme.makeGlassRect(
                 this,
-                active ? 0xFF2B8BFF : 0xFF28282D,
+                active ? GlassTheme.ACCENT_BLUE : GlassTheme.SHADE_TILE_OFF,
                 Color.TRANSPARENT, 16f, 0f
         ));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         if (leftGap) lp.leftMargin = dp(8);
         col.setLayoutParams(lp);
 
-        ImageView iv = VectorGlyphs.makeIconView(this, glyph, 20, Color.WHITE);
+        // На светлой палитре ACCENT_BLUE (#2169CD) под белой иконкой даёт 5,29:1,
+        // а на мягкой SHADE_TILE_OFF белый был бы невидим — цвет иконки и подписи
+        // зависит от того, активна кнопка или нет.
+        ImageView iv = VectorGlyphs.makeIconView(this, glyph, 20,
+                active ? Color.WHITE : GlassTheme.TEXT_PRIMARY);
         col.addView(iv, new LinearLayout.LayoutParams(dp(20), dp(20)));
 
         TextView tv = new TextView(this);
         tv.setText(label);
-        tv.setTextColor(Color.WHITE);
+        tv.setTextColor(active ? Color.WHITE : GlassTheme.TEXT_PRIMARY);
         tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10.5f);
         tv.setSingleLine(true);
         tv.setEllipsize(TextUtils.TruncateAt.END);
@@ -9806,7 +9829,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         if (mem == null) mem = MemoryHelper.read(this);
         final TextView ramPillText = new TextView(this);
         ramPillText.setText(mem.recentsHeadline);
-        ramPillText.setTextColor(0xF0FFFFFF);
+        ramPillText.setTextColor(GlassTheme.TEXT_PRIMARY);
         ramPillText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
         ramPillText.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         ramPillText.setSingleLine(true);
@@ -9871,7 +9894,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
         TextView batPillTv = new TextView(this);
         batPillTv.setText(batSnap.pillSummary.isEmpty() ? "Батарея • датчики" : batSnap.pillSummary);
-        batPillTv.setTextColor(0xF0FFFFFF);
+        batPillTv.setTextColor(GlassTheme.TEXT_PRIMARY);
         batPillTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.8f);
         batPillTv.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         batPillTv.setSingleLine(true);
@@ -9914,13 +9937,16 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         trashBtn.setBackground(GlassTheme.makeGlassRect(
                 this, GlassTheme.SHADE_TILE_OFF, 0x4AFFFFFF, 29f, 1f
         ));
-        final ImageView trashIv = VectorGlyphs.makeIconView(this, "trash", 24, Color.WHITE);
+        final ImageView trashIv = VectorGlyphs.makeIconView(this, "trash", 24, GlassTheme.TEXT_PRIMARY);
         FrameLayout.LayoutParams tiLp = new FrameLayout.LayoutParams(dp(24), dp(24));
         tiLp.gravity = Gravity.CENTER;
         trashBtn.addView(trashIv, tiLp);
 
         // Doxaiz 4.4: независимый overlay-слой для раскрытой карточки батареи (строго поверх, БЕЗ сдвига окон!)
         // Строим детальную карточку лениво при первом нажатии на плашку, чтобы Recents открывались мгновенно
+        // Затемнение под карточкой батареи: это скрим поверх «Недавних», а не
+        // поверхность интерфейса — он обязан затемнять то, что под ним, в любой
+        // теме, поэтому литерал здесь осознанный (см. ThemeLiteralBudgetTest).
         final FrameLayout batOverlay = new FrameLayout(this);
         batOverlay.setBackgroundColor(0x66000000);
         batOverlay.setVisibility(View.GONE);
@@ -10093,7 +10119,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     ) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackground(GlassTheme.makeGlassRect(this, 0xF51A1C24, 0x38FFFFFF, 20f, 1f));
+        card.setBackground(GlassTheme.makeGlassRect(this, GlassTheme.SHADE_CARD, theme.cardBorderColor, 20f, 1f));
         card.setPadding(dp(12), dp(10), dp(12), dp(10));
 
         LinearLayout hdr = new LinearLayout(this);
@@ -10201,7 +10227,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
         TextView sTv = new TextView(this);
         sTv.setText(sub);
-        sTv.setTextColor(0x99FFFFFF);
+        sTv.setTextColor(theme.textHint);
         sTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f);
         sTv.setSingleLine(true);
         sTv.setEllipsize(TextUtils.TruncateAt.END);
@@ -10342,7 +10368,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             ));
             windowBody.setBackground(GlassTheme.makeGlassRect(
                     this,
-                    0xFF1A1C24,
+                    GlassTheme.SHADE_CARD,
                     locked ? 0x88FBBF24 : 0x33FFFFFF,
                     22f,
                     locked ? 1.4f : 1f
@@ -10430,7 +10456,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                 if (pair[1] != null && !pair[1].isEmpty()) {
                     TextView bBody = new TextView(this);
                     bBody.setText(pair[1]);
-                    bBody.setTextColor(0xE8FFFFFF);
+                    bBody.setTextColor(GlassTheme.TEXT_SECONDARY);
                     bBody.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
                     bBody.setMaxLines(3);
                     bBody.setEllipsize(TextUtils.TruncateAt.END);
@@ -10453,7 +10479,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             center.addView(bigIcon, new LinearLayout.LayoutParams(dp(60), dp(60)));
             TextView lbl = new TextView(this);
             lbl.setText(tab.appLabel);
-            lbl.setTextColor(0xD8FFFFFF);
+            lbl.setTextColor(GlassTheme.TEXT_PRIMARY);
             lbl.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f);
             lbl.setGravity(Gravity.CENTER);
             LinearLayout.LayoutParams lLp = new LinearLayout.LayoutParams(

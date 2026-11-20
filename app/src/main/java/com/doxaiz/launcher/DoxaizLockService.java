@@ -7,7 +7,6 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
-import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.graphics.Typeface;
 import android.os.Build;
@@ -621,8 +620,10 @@ public final class DoxaizLockService extends AccessibilityService {
         // 1) Компактная раскрывающаяся карточка батареи (скрыта по умолчанию — раскрывается ТОЛЬКО при тапе на маленькую плашку!)
         batDetailBox = new LinearLayout(this);
         batDetailBox.setOrientation(LinearLayout.VERTICAL);
+        // Плашка батареи на экране блокировки лежит поверх обоев, поэтому фон
+        // должен быть плотным, а не прозрачным: 0xEE181920 пропускал картинку.
         batDetailBox.setBackground(GlassTheme.makeGlassRect(
-                this, 0xEE181920, 0x38FFFFFF, 18f, 1f
+                this, GlassTheme.SHADE_CARD, GlassTheme.CARD_BORDER_LIVE, 18f, 1f
         ));
         batDetailBox.setPadding(
                 GlassTheme.dp(this, 12), GlassTheme.dp(this, 10),
@@ -635,7 +636,7 @@ public final class DoxaizLockService extends AccessibilityService {
         bdHdr.setGravity(Gravity.CENTER_VERTICAL);
         TextView bdTitle = new TextView(this);
         bdTitle.setText("Батарея и нагрев");
-        bdTitle.setTextColor(Color.WHITE);
+        bdTitle.setTextColor(GlassTheme.TEXT_PRIMARY);
         bdTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
         bdTitle.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         bdHdr.addView(bdTitle, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
@@ -677,8 +678,10 @@ public final class DoxaizLockService extends AccessibilityService {
         LinearLayout batPill = new LinearLayout(this);
         batPill.setOrientation(LinearLayout.HORIZONTAL);
         batPill.setGravity(Gravity.CENTER_VERTICAL);
+        // Плашки экрана блокировки лежат поверх обоев и чужих окон: фон плотный
+        // из темы, иначе светлые обои просвечивают и белая подпись исчезает.
         batPill.setBackground(GlassTheme.makeGlassRect(
-                this, 0xCC1B1D24, 0x30FFFFFF, 16f, 1f
+                this, GlassTheme.SHADE_CARD, GlassTheme.borderOnElevatedSurface(), 16f, 1f
         ));
         batPill.setPadding(
                 GlassTheme.dp(this, 11), GlassTheme.dp(this, 5),
@@ -693,7 +696,7 @@ public final class DoxaizLockService extends AccessibilityService {
         batPillText = new TextView(this);
         batPillText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f);
         batPillText.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        batPillText.setTextColor(0xF0FFFFFF);
+        batPillText.setTextColor(GlassTheme.TEXT_PRIMARY);
         batPillText.setSingleLine(true);
         batPill.addView(batPillText);
 
@@ -715,7 +718,7 @@ public final class DoxaizLockService extends AccessibilityService {
         ramPill.setOrientation(LinearLayout.HORIZONTAL);
         ramPill.setGravity(Gravity.CENTER_VERTICAL);
         ramPill.setBackground(GlassTheme.makeGlassRect(
-                this, 0xCC1B1D24, 0x30FFFFFF, 16f, 1f
+                this, GlassTheme.SHADE_CARD, GlassTheme.borderOnElevatedSurface(), 16f, 1f
         ));
         ramPill.setPadding(
                 GlassTheme.dp(this, 13), GlassTheme.dp(this, 5),
@@ -733,7 +736,7 @@ public final class DoxaizLockService extends AccessibilityService {
         ramHeadView = new TextView(this);
         ramHeadView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
         ramHeadView.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        ramHeadView.setTextColor(0xF0FFFFFF);
+        ramHeadView.setTextColor(GlassTheme.TEXT_PRIMARY);
         ramHeadView.setSingleLine(true);
         ramPill.addView(ramHeadView);
 
@@ -747,10 +750,12 @@ public final class DoxaizLockService extends AccessibilityService {
         int btnPx = GlassTheme.dp(this, 58);
         cleanBtnCircle = new FrameLayout(this);
         cleanBtnCircle.setContentDescription("Очистить все приложения и ОЗУ");
+        // Плавающая кнопка «очистить ОЗУ» лежит поверх чужих окон: фон плотный,
+        // иначе сквозь него просвечивает приложение под ней.
         cleanBtnCircle.setBackground(GlassTheme.makeGlassRect(
-                this, 0xE222242C, 0x4DFFFFFF, 29f, 1f
+                this, GlassTheme.SHADE_CARD, GlassTheme.borderOnElevatedSurface(), 29f, 1f
         ));
-        cleanBtnIcon = VectorGlyphs.makeIconView(this, "trash", 24, Color.WHITE);
+        cleanBtnIcon = VectorGlyphs.makeIconView(this, "trash", 24, GlassTheme.TEXT_PRIMARY);
         FrameLayout.LayoutParams iLp = new FrameLayout.LayoutParams(
                 GlassTheme.dp(this, 24), GlassTheme.dp(this, 24)
         );
@@ -763,7 +768,8 @@ public final class DoxaizLockService extends AccessibilityService {
     private TextView makeOverlayBatTile(LinearLayout row, String label, boolean rightGap) {
         LinearLayout tile = new LinearLayout(this);
         tile.setOrientation(LinearLayout.VERTICAL);
-        tile.setBackground(GlassTheme.makeRoundedRect(0xFF24262E, GlassTheme.dp(this, 11)));
+        tile.setBackground(GlassTheme.makeRoundedRect(GlassTheme.SURFACE_ELEVATED,
+                GlassTheme.dp(this, 11)));
         tile.setPadding(GlassTheme.dp(this, 9), GlassTheme.dp(this, 6),
                 GlassTheme.dp(this, 9), GlassTheme.dp(this, 6));
 
@@ -776,7 +782,7 @@ public final class DoxaizLockService extends AccessibilityService {
 
         TextView vTv = new TextView(this);
         vTv.setText("—");
-        vTv.setTextColor(Color.WHITE);
+        vTv.setTextColor(GlassTheme.TEXT_PRIMARY);
         vTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
         vTv.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         vTv.setSingleLine(true);
@@ -828,7 +834,8 @@ public final class DoxaizLockService extends AccessibilityService {
                     ? BatteryInfoHelper.formatWatts(bat.powerWatts)
                     : (bat.isCharging ? "Зарядка" : "От АКБ");
             batPwrVal.setText(pwr);
-            batPwrVal.setTextColor(bat.isCharging ? 0xFF60A5FA : Color.WHITE);
+            batPwrVal.setTextColor(bat.isCharging
+                    ? GlassTheme.ACCENT_BLUE_ON_SOFT : GlassTheme.TEXT_PRIMARY);
         }
         if (batVoltVal != null) {
             batVoltVal.setText(BatteryInfoHelper.formatVoltage(bat.voltageMv));

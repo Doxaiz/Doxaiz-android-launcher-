@@ -41,6 +41,16 @@ public final class GlassTheme {
     public static volatile int SWITCH_ON         = 0xFF14B8A6;
     public static volatile int SWITCH_OFF        = 0xFF33374E;
     /**
+     * Кружок выключенного переключателя.
+     *
+     * Раньше везде был {@code Color.WHITE} литералом: на тёмной дорожке это
+     * правильно, на светлой {@code #CAD0D8} белый кружок сливался с дорожкой
+     * (контраст 1,5:1) и переключатель выглядел «пустым». Здесь кружок остаётся
+     * светлым на тёмных стилях и становится тёмным на светлом (см. LIGHT_SURFACES
+     * в начале create).
+     */
+    public static volatile int SWITCH_THUMB      = 0xFFF7F4F8;
+    /**
      * Поверхности шторки светлые (тема «Классическая светлая»).
      *
      * Нужен для тех мест, где текст и иконки historically красились белым
@@ -191,6 +201,20 @@ public final class GlassTheme {
         return create(ACTIVE_STYLE, opacityLevel, ORNAMENTS_ON);
     }
 
+    /**
+     * Цвет границы для поверхностей, которые лежат поверх чужих приложений
+     * (капсула Dynamic Bar, вырез камеры в её макете).
+     *
+     * {@link #DIVIDER} в светлой теме — тёмный полупрозрачный (0x1F0B1220): на
+     * светлой поверхности он даёт 1,18:1, то есть границы не видно. Поэтому
+     * здесь берётся cardBorderColor активного стиля — он рассчитан именно на
+     * «граница видна на карточке». Метод статический и не читает Prefs, чтобы
+     * значение можно было посчитать в JVM-тесте.
+     */
+    public static int borderOnElevatedSurface() {
+        return createResolved(ACTIVE_STYLE, 1).cardBorderColor;
+    }
+
     public static GlassTheme create(int styleMode, int opacityLevel, boolean ornamentsEnabled) {
         return createResolved(Prefs.sanitizeVisualStyle(styleMode), opacityLevel, ornamentsEnabled);
     }
@@ -255,6 +279,8 @@ public final class GlassTheme {
             ACCENT_RED = 0xFFBD2737; ACCENT_AMBER = 0xFF8A5A00;
             ACCENT_SOFT_BG = 0x222169CD;
             SWITCH_ON = 0xFF167746; SWITCH_OFF = 0xFFCAD0D8;
+            // Кружок выключенного переключателя — тёмный: белый на #CAD0D8 давал 1,5:1.
+            SWITCH_THUMB = 0xFF3C4654;
             // Подписи: непрозрачные, а не полупрозрачные белые — на светлом фоне
             // 0xB3FFFFFF давал 1,8:1.
             TEXT_SECONDARY = 0xFF4F5968;
@@ -328,6 +354,7 @@ public final class GlassTheme {
             ACCENT_SOFT_BG    = 0x2600D4FF;
             SWITCH_ON         = 0xFF00C2FF;
             SWITCH_OFF        = 0xFF283354;
+            SWITCH_THUMB      = 0xFFE6FBFF;
             TEXT_SECONDARY    = 0xC4D4E6FF;
             TEXT_MUTED        = 0xC8A8C4F0;
             DIVIDER           = 0x2600E5FF;
@@ -404,6 +431,7 @@ public final class GlassTheme {
             ACCENT_SOFT_BG    = 0x252B8BFF;
             SWITCH_ON         = 0xFF22C55E;
             SWITCH_OFF        = 0xFF3E3E44;
+            SWITCH_THUMB      = 0xFFFFFFFF;
             TEXT_SECONDARY    = 0xB3FFFFFF;
             TEXT_MUTED        = 0x80FFFFFF;
             DIVIDER           = 0x1AFFFFFF;
@@ -484,6 +512,7 @@ public final class GlassTheme {
         ACCENT_SOFT_BG    = 0x26E94D8A;
         SWITCH_ON         = 0xFF14B8A6;
         SWITCH_OFF        = 0xFF33374E;
+        SWITCH_THUMB      = 0xFFF7F4F8;
         TEXT_SECONDARY    = 0xC4DCE0F5;
         TEXT_MUTED        = 0xBCA9B0D0;
         DIVIDER           = 0x24F5C451;

@@ -175,7 +175,7 @@ public final class HeadsUpBannerHelper {
 
         TextView appTv = new TextView(activity);
         appTv.setText(appLabel);
-        appTv.setTextColor(0xA6FFFFFF);
+        appTv.setTextColor(GlassTheme.TEXT_MUTED);
         appTv.setTextSize(11f);
         appTv.setMaxLines(1);
         appTv.setEllipsize(TextUtils.TruncateAt.END);
@@ -183,7 +183,8 @@ public final class HeadsUpBannerHelper {
 
         TextView nowTv = new TextView(activity);
         nowTv.setText(item.otpCode != null && !hideText ? "Код" : "сейчас");
-        nowTv.setTextColor(item.otpCode != null && !hideText ? GlassTheme.ACCENT_GREEN : 0x7AFFFFFF);
+        nowTv.setTextColor(item.otpCode != null && !hideText
+                ? GlassTheme.ACCENT_GREEN : GlassTheme.TEXT_MUTED);
         nowTv.setTextSize(10.5f);
         if (item.otpCode != null && !hideText) {
             nowTv.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
@@ -204,7 +205,7 @@ public final class HeadsUpBannerHelper {
         if (bodyText != null && !bodyText.isEmpty()) {
             TextView bodyTv = new TextView(activity);
             bodyTv.setText(bodyText);
-            bodyTv.setTextColor(0xCCFFFFFF);
+            bodyTv.setTextColor(GlassTheme.TEXT_SECONDARY);
             bodyTv.setTextSize(12.2f);
             bodyTv.setMaxLines(2);
             bodyTv.setEllipsize(TextUtils.TruncateAt.END);
@@ -238,17 +239,17 @@ public final class HeadsUpBannerHelper {
                 LinearLayout otpChip = new LinearLayout(activity);
                 otpChip.setOrientation(LinearLayout.HORIZONTAL);
                 otpChip.setGravity(Gravity.CENTER_VERTICAL);
-                otpChip.setBackground(GlassTheme.makePill(GlassTheme.TILE_ACTIVE_GREEN));
+                otpChip.setBackground(GlassTheme.makePill(GlassTheme.ACCENT_SOFT_BG));
                 otpChip.setPadding(dp(11), dp(5), dp(12), dp(5));
 
-                ImageView cpIco = VectorGlyphs.makeIconView(activity, "copy", 12, Color.WHITE);
+                ImageView cpIco = VectorGlyphs.makeIconView(activity, "copy", 12, otpChipText());
                 LinearLayout.LayoutParams ciLp = new LinearLayout.LayoutParams(dp(12), dp(12));
                 ciLp.rightMargin = dp(5);
                 otpChip.addView(cpIco, ciLp);
 
                 TextView otpTv = new TextView(activity);
                 otpTv.setText("Копировать " + item.otpCode);
-                otpTv.setTextColor(Color.WHITE);
+                otpTv.setTextColor(otpChipText());
                 otpTv.setTextSize(12f);
                 otpTv.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
                 otpChip.addView(otpTv);
@@ -554,6 +555,18 @@ public final class HeadsUpBannerHelper {
         } catch (Throwable ignored) {
             return null;
         }
+    }
+
+    /**
+     * Цвет подписи на мягкой подложке OTP-чипа.
+     *
+     * ACCENT_GREEN сам по себе — цвет заливки под белым текстом (5,58:1 на
+     * светлой палитре). На мягкой подложке ACCENT_SOFT_BG тот же акцент даёт
+     * меньше 3:1, поэтому подпись берёт либо белый (тёмные стили), либо
+     * TEXT_PRIMARY (светлый стиль, где подложка светлая).
+     */
+    private int otpChipText() {
+        return GlassTheme.LIGHT_SURFACES ? GlassTheme.TEXT_PRIMARY : Color.WHITE;
     }
 
     private int dp(float v) {
