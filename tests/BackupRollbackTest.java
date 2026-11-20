@@ -127,10 +127,19 @@ public final class BackupRollbackTest {
         DesktopModel desktop = new DesktopModel(prefs);
         desktop.addPage();
 
-        JSONObject page = new JSONObject();
+        // Пустая страница без дока — по правилам validateDesktopJson это НЕ
+        // бэкап (произвольный {"pages":[[]]} от чужого файла не отличить).
+        // Поэтому в копии лежит настоящее приложение.
+        JSONObject item = new JSONObject();
+        item.put("type", "app");
+        item.put("key", "com.android.settings/com.android.settings.Settings#0");
+        item.put("x", 0);
+        item.put("y", 0);
+        JSONArray page = new JSONArray().put(item);
         JSONArray pages = new JSONArray().put(page);
         JSONObject desk = new JSONObject();
         desk.put("pages", pages);
+        desk.put("dock", new JSONArray());
         JSONObject root = new JSONObject();
         root.put("desktop", desk);
         JSONObject settings = new JSONObject();
