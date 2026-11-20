@@ -11292,16 +11292,36 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                             Toast.makeText(this, "Для восстановления защищённой копии установите PIN или пароль экрана", Toast.LENGTH_LONG).show();
                         } else if (!looksValid) {
                             Toast.makeText(this, "Файл не является резервной копией Doxaiz", Toast.LENGTH_SHORT).show();
-                        } else if (BackupHelper.importBackupJson(input, prefs, desktop, importAuth && BiometricHelper.isDeviceSecure(this))) {
-                            // Apply restored privacy state before any desktop rebuild or async repository refresh.
-                            hiddenAppKeys.clear();
-                            hiddenAppKeys.addAll(prefs.getHiddenApps());
-                            currentPage = 0;
-                            applyTheme();
-                            repository.reload();
-                            Toast.makeText(this, "Раскладка восстановлена", Toast.LENGTH_SHORT).show();
                         } else {
-                            Toast.makeText(this, "Файл не является резервной копией Doxaiz", Toast.LENGTH_SHORT).show();
+                            // Три разных исхода, а не «да/нет». Раньше сбой применения
+                            // правильного файла показывался как «файл не тот», и
+                            // пользователь искал другую копию вместо того, чтобы
+                            // посмотреть «Диагностику» (F-21).
+                            BackupHelper.ImportResult result = BackupHelper.importBackupJsonDetailed(
+                                    input, prefs, desktop, importAuth && BiometricHelper.isDeviceSecure(this));
+                            if (result.imported()) {
+                                // Apply restored privacy state before any desktop rebuild or async repository refresh.
+                                hiddenAppKeys.clear();
+                                hiddenAppKeys.addAll(prefs.getHiddenApps());
+                                currentPage = 0;
+                                applyTheme();
+                                repository.reload();
+                                Toast.makeText(this, "Раскладка восстановлена", Toast.LENGTH_SHORT).show();
+                            } else if (result.outcome == BackupHelper.ImportOutcome.ROLLBACK_FAILED) {
+                                // Настройки могли остаться частично применёнными:
+                                // перечитываем то, что реально лежит на диске, чтобы
+                                // интерфейс не показывал состояние, которого нет.
+                                hiddenAppKeys.clear();
+                                hiddenAppKeys.addAll(prefs.getHiddenApps());
+                                applyTheme();
+                                repository.reload();
+                                Toast.makeText(this,
+                                        "Копию применить не удалось, и откат настроек не завершился. "
+                                                + "Подробности — в «Диагностике»",
+                                        Toast.LENGTH_LONG).show();
+                            } else {
+                                Toast.makeText(this, "Файл не является резервной копией Doxaiz", Toast.LENGTH_SHORT).show();
+                            }
                         }
                     });
                 });
