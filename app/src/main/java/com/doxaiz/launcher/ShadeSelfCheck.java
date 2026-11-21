@@ -199,9 +199,21 @@ public final class ShadeSelfCheck {
      * Общая часть для всех экранов: разница только в том, что открыть и какое
      * имя файла использовать.
      */
+    /**
+     * Метрики окна приложения на момент замера: нужны только для отчёта.
+     *
+     * Это {@link android.util.DisplayMetrics} активности — окно без системных
+     * полос, а не физический экран. Поэтому 1080x2209 при экране 1080x2400:
+     * именно так выглядит «кадр шторки» против «полноэкранного окна», и отчёт
+     * должен называть вещи своими именами, иначе он сам становится источником
+     * ложных выводов.
+     */
+    private static int SCREEN_W;
+    private static int SCREEN_H;
+
     private static void evaluateView(Activity activity, View target, String screen,
                                      int expectedStyle) {
-        evaluateView(activity, target, screen, expectedStyle, true);
+        evaluateView(activity, target, screen, expectedStyle, true, null);
     }
 
     /**
@@ -209,9 +221,14 @@ public final class ShadeSelfCheck {
      *                  что корень не нашёлся и кадр снят с другого окна: такой
      *                  замер не доказывает ничего и не должен выглядеть как
      *                  дефект темы.
+     * @param windowName имя измеренного окна для отчёта; null — не печатать.
+     *                   Нужно ровно для того случая, из которого вырос §44:
+     *                   отчёт показывал пиксели, но не говорил, чьи они, и
+     *                   «светлая тема сломалась» выглядело правдоподобно.
      */
     private static void evaluateView(Activity activity, View target, String screen,
-                                     int expectedStyle, boolean rootFound) {
+                                     int expectedStyle, boolean rootFound,
+                                     String windowName) {
         if (target == null || target.getWidth() == 0 || target.getHeight() == 0) {
             writeNamed(activity, screen, "СБОЙ\nне найдено окно для снятия кадра (" + screen + ")");
             return;
@@ -219,6 +236,7 @@ public final class ShadeSelfCheck {
         Bitmap bmp = Bitmap.createBitmap(target.getWidth(), target.getHeight(),
                 Bitmap.Config.ARGB_8888);
         target.draw(new Canvas(bmp));
+        rememberScreenSize(activity);
         Report r = analyse(bmp, expectedStyle, screen);
         bmp.recycle();
 
@@ -231,7 +249,15 @@ public final class ShadeSelfCheck {
         }
         sb.append("экран=").append(screen).append('\n');
         sb.append("стиль=").append(styleName(GlassTheme.ACTIVE_STYLE)).append('\n');
+        if (windowName != null) sb.append("окно=").append(windowName).append('\n');
         sb.append("кадр=").append(r.width).append('x').append(r.height).append('\n');
+        // Метрики приложения рядом с размером кадра. Это НЕ размер экрана:
+        // getDisplayMetrics() отдаёт окно приложения без системных полос
+        // (на эмуляторе 1080x2209 при экране 1080x2400). Поэтому и имя такое:
+        // первая версия поля называлась «экран_устройства» и врала — отчёт
+        // показывал 2209 там, где пользователь видит 2400.
+        sb.append("метрики_приложения=").append(r.screenWidth).append('x')
+                .append(r.screenHeight).append('\n');
         sb.append("самый_частый=#").append(String.format("%06X", r.modeColor & 0xFFFFFF))
                 .append(" доля=").append(pct(r.modeShare)).append('\n');
         sb.append("поверхности_темы=").append(pct(r.surfaceShare)).append('\n');
@@ -243,6 +269,18 @@ public final class ShadeSelfCheck {
             sb.append("причины=").append(r.problems.length() == 0 ? "нет" : r.problems).append('\n');
         }
         writeNamed(activity, screen, sb.toString());
+    }
+
+    /** Метрики приложения по факту, для отчёта. Сбой здесь не ломает замер. */
+    private static void rememberScreenSize(Activity activity) {
+        try {
+            android.util.DisplayMetrics dm = activity.getResources().getDisplayMetrics();
+            SCREEN_W = dm.widthPixels;
+            SCREEN_H = dm.heightPixels;
+        } catch (Throwable t) {
+            SCREEN_W = 0;
+            SCREEN_H = 0;
+        }
     }
 
     /**
@@ -297,7 +335,7 @@ public final class ShadeSelfCheck {
         try {
             View decor = activity.getWindow() != null
                     ? activity.getWindow().getDecorView() : null;
-            evaluateView(activity, decor, screen, expectedStyle);
+            evaluateView(activity, decor, screen, expectedStyle, true, "decorView активности");
         } catch (Throwable t) {
             writeNamed(activity, screen, "СБОЙ\nисключение при снятии кадра: "
                     + t.getClass().getSimpleName() + ": " + t.getMessage());
@@ -335,7 +373,8 @@ public final class ShadeSelfCheck {
             // должен сниматься с проверяемого окна, а не с самого большого.
             View target = shade.getShadeContentView();
             if (target != null && target.getWidth() > 0 && target.getHeight() > 0) {
-                evaluateView(activity, target, SCREEN_SHADE, expectedStyle, true);
+                evaluateView(activity, target, SCREEN_SHADE, expectedStyle, true,
+                        "корень шторки");
                 return;
             }
             if (target != null && attempt < 3) {
@@ -352,7 +391,8 @@ public final class ShadeSelfCheck {
             // Шторка открыта, но её корень недоступен — таких случаев быть не
             // должно. Оставляем прежний поиск, но помечаем отчёт: иначе снова
             // получится «дефект темы» вместо «дефекта замера».
-            evaluateView(activity, findShadeRoot(activity), SCREEN_SHADE, expectedStyle, false);
+            evaluateView(activity, findShadeRoot(activity), SCREEN_SHADE, expectedStyle, false,
+                    "чужое окно процесса (запасной путь)");
         } catch (Throwable t) {
             writeNamed(activity, SCREEN_SHADE, "СБОЙ\nисключение при снятии кадра: "
                     + t.getClass().getSimpleName() + ": " + t.getMessage());
@@ -371,6 +411,7 @@ public final class ShadeSelfCheck {
 
     private static final class Report {
         int width, height;
+        int screenWidth, screenHeight;
         int modeColor;
         double modeShare;
         double surfaceShare;
@@ -393,6 +434,8 @@ public final class ShadeSelfCheck {
         Report r = new Report();
         r.width = bmp.getWidth();
         r.height = bmp.getHeight();
+        r.screenWidth = SCREEN_W;
+        r.screenHeight = SCREEN_H;
 
         int[] surfaces = {
                 GlassTheme.SHADE_BG, GlassTheme.POPUP_BG, GlassTheme.SURFACE_ELEVATED,

@@ -34,4 +34,4 @@ emulator-report/
 apk-sha256.txt
 
 # Временные файлы сообщений коммитов
-.git-msg-*.txt
+.git-msg*.txt
