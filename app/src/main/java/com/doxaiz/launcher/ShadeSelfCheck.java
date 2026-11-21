@@ -200,11 +200,13 @@ public final class ShadeSelfCheck {
      * имя файла использовать.
      */
     /**
-     * Размер экрана устройства, на котором снят кадр: нужен только для отчёта.
+     * Метрики окна приложения на момент замера: нужны только для отчёта.
      *
-     * Заполняется в момент замера. Не константа класса, потому что экран
-     * эмулятора может отличаться от предполагаемого, а отчёт должен показывать
-     * факт, а не ожидание.
+     * Это {@link android.util.DisplayMetrics} активности — окно без системных
+     * полос, а не физический экран. Поэтому 1080x2209 при экране 1080x2400:
+     * именно так выглядит «кадр шторки» против «полноэкранного окна», и отчёт
+     * должен называть вещи своими именами, иначе он сам становится источником
+     * ложных выводов.
      */
     private static int SCREEN_W;
     private static int SCREEN_H;
@@ -249,10 +251,12 @@ public final class ShadeSelfCheck {
         sb.append("стиль=").append(styleName(GlassTheme.ACTIVE_STYLE)).append('\n');
         if (windowName != null) sb.append("окно=").append(windowName).append('\n');
         sb.append("кадр=").append(r.width).append('x').append(r.height).append('\n');
-        // Размер экрана рядом с размером кадра: кадр ниже экрана на высоту
-        // системных полос — это содержимое шторки. Ровно размер экрана означает
-        // полноэкранное окно, и это повод смотреть, чьё оно.
-        sb.append("экран_устройства=").append(r.screenWidth).append('x')
+        // Метрики приложения рядом с размером кадра. Это НЕ размер экрана:
+        // getDisplayMetrics() отдаёт окно приложения без системных полос
+        // (на эмуляторе 1080x2209 при экране 1080x2400). Поэтому и имя такое:
+        // первая версия поля называлась «экран_устройства» и врала — отчёт
+        // показывал 2209 там, где пользователь видит 2400.
+        sb.append("метрики_приложения=").append(r.screenWidth).append('x')
                 .append(r.screenHeight).append('\n');
         sb.append("самый_частый=#").append(String.format("%06X", r.modeColor & 0xFFFFFF))
                 .append(" доля=").append(pct(r.modeShare)).append('\n');
@@ -267,7 +271,7 @@ public final class ShadeSelfCheck {
         writeNamed(activity, screen, sb.toString());
     }
 
-    /** Размер экрана по факту, для отчёта. Сбой здесь не должен ломать замер. */
+    /** Метрики приложения по факту, для отчёта. Сбой здесь не ломает замер. */
     private static void rememberScreenSize(Activity activity) {
         try {
             android.util.DisplayMetrics dm = activity.getResources().getDisplayMetrics();
