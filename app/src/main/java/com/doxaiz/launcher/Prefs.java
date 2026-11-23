@@ -607,6 +607,18 @@ public final class Prefs {
     private final Object usageLock = new Object();
     private Map<String, long[]> usageCache = null;
 
+    /**
+     * Кэш карты «скрыто из Недавних» (пакет → время свайпа).
+     *
+     * Зачем: {@code getRecentlyLaunchedApps()} — горячий путь. Панель «Активные
+     * приложения» вызывается двумя жестами и кликом по строке ОЗУ, и на каждый
+     * вызов разбирала JSON до {@link #MAX_DISMISSED_PKGS} записей, чтобы
+     * сравнить его с шестью временами запуска. Сбрасывается в
+     * {@link #markRecentPackageDismissed} — единственном месте, где карта
+     * меняется, — и вместе с остальными кэшами импорта.
+     */
+    private volatile Map<String, Long> dismissedCache = null;
+
     private Map<String, long[]> ensureUsageCacheLocked() {
         if (usageCache != null) return usageCache;
         Map<String, long[]> map = new HashMap<>();
@@ -832,12 +844,7 @@ public final class Prefs {
         List<AppEntry> out = new ArrayList<>();
         if (limit <= 0 || visible == null || visible.isEmpty()) return out;
         long clearedAt = sp.getLong(KEY_RECENTS_CLEARED_AT, 0L);
-        JSONObject dismissed = null;
-        try {
-            String dRaw = sp.getString(KEY_DISMISSED_PKGS_JSON, null);
-            if (dRaw != null && !dRaw.isEmpty()) dismissed = new JSONObject(dRaw);
-        } catch (Throwable ignored) {
-        }
+        Map<String, Long> dismissed = dismissedCache();
         final Map<String, Long> times = new HashMap<>();
         synchronized (usageLock) {
             Map<String, long[]> map = ensureUsageCacheLocked();
@@ -847,7 +854,8 @@ public final class Prefs {
                 if (rec == null) continue;
                 long ts = rec[1];
                 if (ts <= 0L || ts <= clearedAt) continue;
-                if (dismissed != null && ts <= dismissed.optLong(e.packageName, 0L)) continue;
+                Long dismissedAt = dismissed.get(e.packageName);
+                if (dismissedAt != null && ts <= dismissedAt) continue;
                 times.put(e.key, ts);
                 out.add(e);
             }
@@ -882,8 +890,15 @@ public final class Prefs {
             JSONObject obj = (dRaw != null && !dRaw.isEmpty()) ? new JSONObject(dRaw) : new JSONObject();
             Map<String, Long> entries = parseDismissed(obj);
             entries.put(pkg, System.currentTimeMillis());
+            Map<String, Long> kept = trimDismissed(entries, MAX_DISMISSED_PKGS);
             sp.edit().putString(KEY_DISMISSED_PKGS_JSON,
-                    dismissedToJson(trimDismissed(entries, MAX_DISMISSED_PKGS)).toString()).apply();
+                    dismissedToJson(kept).toString()).apply();
+            // Кэш обновляем ровно тем, что записали: следующий вызов «Недавних»
+            // обязан видеть новый свайп, иначе скрытая карточка вернётся.
+            // volatile — потому что панель собирается на UI-потоке, а свайп по
+            // карточке может прийти из другого потока; без него кэш читался бы
+            // по устаревшей ссылке.
+            dismissedCache = kept;
         } catch (Throwable ignored) {
         }
     }
@@ -918,6 +933,32 @@ public final class Prefs {
     }
 
     /** Разбор JSON «скрытых из Недавних» в обычную карту. */
+    /**
+     * Карта «скрыто из Недавних», прочитанная из настроек не более одного раза
+     * подряд.
+     *
+     * Поведение то же, что было при разборе JSON на каждый вызов: битые данные
+     * дают пустую карту (как прежний {@code catch} вокруг
+     * {@code new JSONObject}), отсутствие ключа — тоже. Отличие только в цене:
+     * разбор уходит из повторных вызовов.
+     */
+    private Map<String, Long> dismissedCache() {
+        Map<String, Long> cached = dismissedCache;
+        if (cached != null) return cached;
+        Map<String, Long> parsed = new HashMap<>();
+        String raw = sp.getString(KEY_DISMISSED_PKGS_JSON, null);
+        if (raw != null && !raw.isEmpty()) {
+            try {
+                parsed = parseDismissed(new JSONObject(raw));
+            } catch (Throwable ignored) {
+                // Битые данные — то же, что «ничего не скрыто». Именно так вёл
+                // себя прежний код; отличалась только стоимость повторного разбора.
+            }
+        }
+        dismissedCache = parsed;
+        return parsed;
+    }
+
     private static Map<String, Long> parseDismissed(JSONObject obj) {
         Map<String, Long> out = new HashMap<>();
         if (obj == null) return out;
@@ -948,6 +989,9 @@ public final class Prefs {
                 .putLong(KEY_RECENTS_CLEARED_AT, System.currentTimeMillis())
                 .remove(KEY_DISMISSED_PKGS_JSON)
                 .apply();
+        // Ключ удалён — кэш обязан стать пустым, иначе карта из прошлого
+        // открытия панели продолжала бы фильтровать Недавние.
+        dismissedCache = new HashMap<>();
     }
 
     // =========================================================================
@@ -1150,6 +1194,10 @@ public final class Prefs {
 
     public void markAllRecentTabsClearedExcept(Set<String> keepPkgs) {
         if (keepPkgs == null || keepPkgs.isEmpty()) {
+            // Пустой набор закреплённых означает «закрыть всё»: результат обязан
+            // быть тем же, что у markAllRecentTabsCleared(). Раньше эта ветка
+            // ничего не делала — «Закрыть все» с пустым набором не скрывало
+            // ничего, хотя пользователь нажал именно это.
             markAllRecentTabsCleared();
             return;
         }
@@ -1172,6 +1220,11 @@ public final class Prefs {
                 }
             }
             sp.edit().putString(KEY_DISMISSED_PKGS_JSON, dismissed.toString()).apply();
+            // Кэш обязан следовать за записью. Это ВТОРОЕ место, которое пишет
+            // ту же карту (первое — markRecentPackageDismissed), и без сброса
+            // «Закрыть все» в Недавних оставляло бы в кэше старую карту: карточки
+            // вернулись бы при следующем открытии панели.
+            dismissedCache = parseDismissed(dismissed);
         } catch (Throwable ignored) {
         }
     }
@@ -1525,7 +1578,14 @@ public final class Prefs {
         }
     }
 
-    /** Сбрасывает кэши чтения (скрытые приложения, разделы, категории, журнал запусков). */
+    /**
+     * Сбрасывает кэши чтения (скрытые приложения, разделы, категории, журнал
+     * запусков и карта «скрыто из Недавних»).
+     *
+     * Сброс обязателен именно потому, что кэши появились: если импорт копии
+     * заменил preferences, а кэш остался, пользователь увидел бы состояние
+     * прошлой копии — те же грабли, что были у отката импорта (§43).
+     */
     void invalidateCachesAfterImport() {
         synchronized (prefsCacheLock) {
             hiddenAppsCache = null;
@@ -1535,5 +1595,6 @@ public final class Prefs {
         synchronized (usageLock) {
             usageCache = null;
         }
+        dismissedCache = null;
     }
 }
