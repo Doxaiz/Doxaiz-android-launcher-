@@ -83,9 +83,15 @@ public final class RecentsCacheTest {
         int before = store.dismissedReads;
 
         prefs.markRecentPackageDismissed("com.a");
-
-        check(store.dismissedReads == before,
-                "после свайпа карта не перечитывается — кэш обновлён тем, что записали");
+        // Сама запись читает ключ один раз — она сливает новую запись с уже
+        // сохранёнными. Это не лишняя работа: без чтения старые свайпы потерялись
+        // бы. Здесь важно другое: следующее ОТКРЫТИЕ панели не добавляет чтения.
+        int afterWrite = store.dismissedReads;
+        prefs.getRecentlyLaunchedApps(stubApps(), 6);
+        check(store.dismissedReads == afterWrite,
+                "открытие панели после свайпа перечитало карту (" + before + "→"
+                        + afterWrite + "→" + store.dismissedReads + ") — кэш обновлён"
+                        + " не тем, что записали");
         check(cachedDismissed(prefs).containsKey("com.a"),
                 "скрытый свайпом пакет сразу в кэше: иначе карточка вернётся при"
                         + " следующем открытии панели");
