@@ -2779,7 +2779,10 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     private void publishDesktopBuildStats() {
         try {
             if (!BuildConfig.DEBUG) return;
-            if (desktopBuilds % 4 != 0) return;
+            // Пишем на каждую пересборку, а не раз в N: пересборка стола не
+            // происходит в кадре, 40 байт дешевле, а гейт по счётчику уже один
+            // раз привёл к тому, что файла не было вовсе — при старте
+            // пересборок меньше четырёх.
             String line = "builds=" + desktopBuilds
                     + " tiles=" + desktopTilesBuilt
                     + " wasted=" + desktopTilesBuiltWasted
