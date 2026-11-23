@@ -183,6 +183,14 @@ public final class RecentsCacheTest {
                 null, 0L, pkg, null, true, true, 0, 0L);
     }
 
+    /**
+     * Журнал запусков в том виде, в каком его пишет recordAppLaunch:
+     * ключ — {@code pkg/class#user}, а не имя пакета.
+     *
+     * Первая версия теста клала ключом пакет, и «Недавние» честно не находили
+     * ни одной записи (reads=0 в диагностике): падал тест, а не код. Форма
+     * ключа строится тем же правилом, что в {@link AppEntry#key}.
+     */
     private static String usageJson(String[] pkgs, long[] times) {
         try {
             JSONObject root = new JSONObject();
@@ -190,7 +198,7 @@ public final class RecentsCacheTest {
                 JSONObject o = new JSONObject();
                 o.put("c", 3);
                 o.put("t", times[i]);
-                root.put(pkgs[i], o);
+                root.put(pkgs[i] + "/" + pkgs[i] + ".Main#0", o);
             }
             return root.toString();
         } catch (JSONException e) {

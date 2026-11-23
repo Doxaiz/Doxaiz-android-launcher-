@@ -1213,6 +1213,11 @@ public final class Prefs {
                 }
             }
             sp.edit().putString(KEY_DISMISSED_PKGS_JSON, dismissed.toString()).apply();
+            // Кэш обязан следовать за записью. Это ВТОРОЕ место, которое пишет
+            // ту же карту (первое — markRecentPackageDismissed), и без сброса
+            // «Закрыть все» в Недавних оставляло бы в кэше старую карту: карточки
+            // вернулись бы при следующем открытии панели.
+            dismissedCache = parseDismissed(dismissed);
         } catch (Throwable ignored) {
         }
     }
