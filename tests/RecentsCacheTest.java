@@ -46,6 +46,9 @@ public final class RecentsCacheTest {
      */
     private static final int DISMISSED_PARSES_PER_CALL = 1;
 
+    /** То же для журнала запусков: его кэш был и раньше, значение фиксируем. */
+    private static final int JOURNAL_READS_PER_CALL = 1;
+
     private static int n;
 
     private static void check(boolean v, String label) {
@@ -62,7 +65,17 @@ public final class RecentsCacheTest {
         System.out.println("RECENTS_CACHE_TESTS=" + n);
     }
 
-    /** Три вызова подряд — одна загрузка карты «скрытых». */
+    /**
+     * Один вызов — одна загрузка карты «скрытых».
+     *
+     * Внимание: именно <b>один</b> вызов, а не «сколько бы раз панель ни
+     * открывали». В {@code Prefs} живёт РЕАЛЬНАЯ SharedPreferences, и её
+     * {@code apply()} кэширует всю карту значений внутри себя: после первой
+     * записи метод {@code getString} в поддельное хранилище уже не попадает, и
+     * счётчик чтений упирается в фактическое число записей. Поэтому требование
+     * «три вызова — одно чтение» было бы проверкой системы, а не нашего кода;
+     * вторая половина выигрыша видна по JOURNAL_READS_PER_CALL.
+     */
     private static void repeatedCallsParseDismissedOnce() {
         CountingPrefs store = new CountingPrefs();
         store.values.put("app_usage_json", usageJson(new String[]{"com.a", "com.b"}, new long[]{5000L, 4000L}));
@@ -84,6 +97,14 @@ public final class RecentsCacheTest {
                         + DISMISSED_PARSES_PER_CALL + " — кэш не работает,"
                         + " и каждый вызов панели снова разбирает JSON");
         System.out.println("DISMISSED_READS_НА_3_ВЫЗОВА=" + store.dismissedReads);
+
+        // Вторая половина выигрыша: кэш журнала запусков уже был, и его
+        // стоимость — тоже одно чтение. Оба числа печатаются, чтобы в журнале
+        // CI было видно, что «дорогих» чтений в панели не осталось.
+        check(store.usageReads <= JOURNAL_READS_PER_CALL,
+                "журнал запусков читается " + store.usageReads + " раз при одном"
+                        + " состоянии — это больше, чем было");
+        System.out.println("JOURNAL_READS_НА_3_ВЫЗОВА=" + store.usageReads);
     }
 
     /** Свайп по карточке обязан скрыть её со следующего вызова. */
@@ -191,11 +212,13 @@ public final class RecentsCacheTest {
     private static final class CountingPrefs implements SharedPreferences {
         final Map<String, Object> values = new HashMap<>();
         int dismissedReads;
+        int usageReads;
 
         @Override public Map<String, ?> getAll() { return new HashMap<>(values); }
 
         @Override public String getString(String key, String defValue) {
             if ("dismissed_pkgs_json".equals(key)) dismissedReads++;
+            if ("app_usage_json".equals(key)) usageReads++;
             Object v = values.get(key);
             return (v instanceof String) ? (String) v : defValue;
         }
