@@ -28,15 +28,13 @@ import java.util.Set;
  * самого поля через рефлексию. Это то, что изменено, и то, что можно доказать
  * без Android.
  *
- * <p><b>Граница, честно:</b> правила отбора (порог «очищено», порядок по
- * времени, лимит) здесь не проверяются. Они работают с {@link AppEntry}, а в
- * юнит-тестовом {@code android.jar} методы {@code ComponentName} — заглушки:
- * {@code getPackageName()} возвращает null, и любой AppEntry получает
- * {@code key = "null/null#0"}. Первая версия этого теста именно на этом и
- * падала (диагностика показала {@code key1=null/null#0 result={}}). Правила
- * отбора при правке не менялись: сравнение {@code ts <= dismissedAt} осталось
- * тем же (прежний {@code optLong(pkg, 0L)} при {@code ts > 0} даёт тот же
- * результат), а сами они проверяются на устройстве и в прогоне эмулятора.
+ * <p><b>Про заглушки android.jar.</b> В юнит-тестах {@code ComponentName} —
+ * заглушка: {@code getPackageName()} возвращает null. Первая версия этого теста
+ * на этом и падала ({@code key1=null/null#0 result={}}), а до правки — что хуже —
+ * «проходила», ничего не проверяя. Поэтому правило отбора вынесено в чистую
+ * функцию {@link Prefs#isRecentVisible} и проверяется здесь целиком, без
+ * {@code AppEntry}. Отдельная проверка {@link #appEntryKeysAreNotStubs()}
+ * запрещает возврат к зелёным тестам на заглушках.
  */
 public final class RecentsCacheTest {
 
@@ -48,12 +46,56 @@ public final class RecentsCacheTest {
     }
 
     public static void main(String[] args) throws Exception {
+        recentVisibilityRule();
+        appEntryKeysAreNotStubs();
         cacheLoadsOncePerInstance();
         dismissalUpdatesCacheWithoutReread();
         closeAllUpdatesCache();
         importInvalidatesCache();
 
         System.out.println("RECENTS_CACHE_TESTS=" + n);
+    }
+
+    /**
+     * Правило отбора «Недавних» целиком — без AppEntry и без Android.
+     *
+     * Это те три сравнения, из-за которых в §46 пришлось переписывать тест:
+     * порог «очищено», скрытие свайпом и отсутствие записи в журнале.
+     */
+    private static void recentVisibilityRule() {
+        check(Prefs.isRecentVisible(1000L, 0L, null), "свежий запуск виден");
+        check(!Prefs.isRecentVisible(0L, 0L, null), "нулевое время запуска не видно");
+        check(!Prefs.isRecentVisible(-5L, 0L, null), "отрицательное время не видно");
+        check(!Prefs.isRecentVisible(1000L, 1000L, null), "запуск ровно в момент очистки не виден");
+        check(!Prefs.isRecentVisible(999L, 1000L, null), "запуск до очистки не виден");
+        check(Prefs.isRecentVisible(1001L, 1000L, null), "запуск после очистки виден");
+        check(!Prefs.isRecentVisible(1000L, 0L, 1000L), "свайп ровно в момент запуска скрывает");
+        check(!Prefs.isRecentVisible(999L, 0L, 1000L), "свайп позже запуска скрывает");
+        check(Prefs.isRecentVisible(1001L, 0L, 1000L), "запуск позже свайпа виден снова");
+        check(Prefs.isRecentVisible(1L, 0L, null), "самый старый ненулевой запуск виден");
+        // Смысл отдельного правила: null и «ноль» — разные вещи. Прежний
+        // optLong(pkg, 0L) подставлял 0, и это работало только потому, что
+        // ts > 0 проверялось выше. Теперь связь записана явно и проверена.
+        check(!Prefs.isRecentVisible(0L, 0L, 0L), "нулевой запуск не виден даже без свайпа");
+    }
+
+    /**
+     * Ключи AppEntry в юнит-тестах не должны быть заглушками.
+     *
+     * Зачем это отдельная проверка: в §46 тест на AppEntry «проходил», потому что
+     * ComponentName в android.jar — заглушка и любой пакет получал
+     * key = "null/null#0". Утверждения вида «скрытый пакет отфильтрован»
+     * выполнялись на пустом списке. Здесь фиксируется: если заглушка вернётся,
+     * ключ не станет null-склейкой, а набор из разных пакетов не схлопнется в
+     * один ключ — на таком наборе нельзя молча проверять правила.
+     */
+    private static void appEntryKeysAreNotStubs() {
+        AppEntry a = makeApp("com.a");
+        AppEntry b = makeApp("com.b");
+        check(a.key != null && !a.key.startsWith("null"), "ключ не начинается с null: " + a.key);
+        check(!a.key.equals(b.key), "разные пакеты дают разные ключи: " + a.key + " / " + b.key);
+        check(a.packageName != null, "packageName не null: заглушка вернулась?");
+        System.out.println("APP_ENTRY_KEY_В_JVM=" + a.key);
     }
 
     /** Второй вызов не читает ключ заново: карта уже в памяти. */
@@ -169,6 +211,11 @@ public final class RecentsCacheTest {
      * объект нужен. Что его поля в JVM пусты — на механику кэша не влияет:
      * карта «скрытых» загружается до обхода списка.
      */
+    private static AppEntry makeApp(String pkg) {
+        return new AppEntry(new android.content.ComponentName(pkg, pkg + ".Main"),
+                null, 0L, pkg, null, true, true, 0, 0L);
+    }
+
     private static List<AppEntry> stubApps() {
         return new ArrayList<>(Collections.singletonList(
                 new AppEntry(new android.content.ComponentName("com.a", "com.a.Main"),

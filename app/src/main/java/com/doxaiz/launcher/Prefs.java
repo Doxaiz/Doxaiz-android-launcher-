@@ -840,6 +840,29 @@ public final class Prefs {
         return out;
     }
 
+    /**
+     * Попадает ли запись журнала в «Недавние» — чистое правило, без Android.
+     *
+     * Вынесено из {@link #getRecentlyLaunchedApps} по итогам §46: там тест не мог
+     * проверить правила отбора, потому что работает с {@link AppEntry}, а в
+     * юнит-тестовом {@code android.jar} {@code ComponentName} — заглушка. Из-за
+     * этого проверки выполнялись на пустом наборе и «проходили» (зелёный тест,
+     * доказывавший ничего). Правило — это три сравнения, и им не нужен AppEntry.
+     *
+     * @param ts         время запуска из журнала
+     * @param clearedAt  время «очистить Недавние»; запуски не позже него не видны
+     * @param dismissedAt время свайпа по карточке этого пакета, null — не скрыт
+     * @return видна ли запись
+     */
+    static boolean isRecentVisible(long ts, long clearedAt, Long dismissedAt) {
+        if (ts <= 0L || ts <= clearedAt) return false;
+        // Прежний код: dismissed.optLong(pkg, 0L) и «ts <= dismissedAt». При
+        // отсутствии записи optLong даёт 0, и 0 >= ts невозможно при ts > 0 —
+        // то есть отсутствие записи означало «видна». Здесь то же самое, но без
+        // подстановки нуля.
+        return dismissedAt == null || ts > dismissedAt;
+    }
+
     public List<AppEntry> getRecentlyLaunchedApps(List<AppEntry> visible, int limit) {
         List<AppEntry> out = new ArrayList<>();
         if (limit <= 0 || visible == null || visible.isEmpty()) return out;
@@ -853,9 +876,7 @@ public final class Prefs {
                 long[] rec = map.get(e.key);
                 if (rec == null) continue;
                 long ts = rec[1];
-                if (ts <= 0L || ts <= clearedAt) continue;
-                Long dismissedAt = dismissed.get(e.packageName);
-                if (dismissedAt != null && ts <= dismissedAt) continue;
+                if (!isRecentVisible(ts, clearedAt, dismissed.get(e.packageName))) continue;
                 times.put(e.key, ts);
                 out.add(e);
             }

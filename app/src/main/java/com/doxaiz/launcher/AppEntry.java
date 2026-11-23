@@ -37,8 +37,16 @@ public final class AppEntry {
             long firstInstallTime
     ) {
         this.componentName = componentName;
-        this.packageName = componentName.getPackageName();
-        this.className = componentName.getClassName();
+        // Пустые имена — не «пустой пакет», а отсутствие данных о компоненте.
+        // В юнит-тестах (android.jar) методы ComponentName — заглушки, и здесь
+        // получалось packageName = null, key = "null/null#0": любой набор
+        // приложений выглядел одинаково, а тесты на нём «проходили», ничего не
+        // проверяя. Пустая строка вместо null делает это состояние явным: ключ
+        // содержит известные части и не совпадает у разных пакетов.
+        String pkg = componentName.getPackageName();
+        String cls = componentName.getClassName();
+        this.packageName = (pkg != null) ? pkg : "";
+        this.className = (cls != null) ? cls : "";
         this.userHandle = userHandle;
         this.userSerial = userSerial;
         this.key = packageName + "/" + className + "#" + userSerial;
