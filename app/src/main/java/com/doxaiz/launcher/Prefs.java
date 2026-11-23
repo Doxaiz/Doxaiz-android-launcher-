@@ -989,6 +989,9 @@ public final class Prefs {
                 .putLong(KEY_RECENTS_CLEARED_AT, System.currentTimeMillis())
                 .remove(KEY_DISMISSED_PKGS_JSON)
                 .apply();
+        // Ключ удалён — кэш обязан стать пустым, иначе карта из прошлого
+        // открытия панели продолжала бы фильтровать Недавние.
+        dismissedCache = new HashMap<>();
     }
 
     // =========================================================================

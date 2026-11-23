@@ -6,7 +6,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -14,43 +14,31 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Кэш карты «скрыто из Недавних» и неизменность правил отбора Недавних.
+ * Кэш карты «скрыто из Недавних».
  *
- * <h3>Зачем</h3>
+ * <h3>Зачем правка</h3>
  * {@code Prefs.getRecentlyLaunchedApps()} — горячий путь: панель «Активные
- * приложения» открывается двумя жестами (свайп вверх, жест «активные окна») и
- * кликом по строке ОЗУ. На каждый вызов разбирался JSON до 200 записей
- * «скрытых» пакетов — только чтобы сравнить его с шестью временами запуска.
- * Записи нужны исключительно для чтения, поэтому кэш здесь безопасен.
+ * приложения» открывается свайпом вверх, жестом «активные окна» и кликом по
+ * строке ОЗУ. На каждый вызов разбирался JSON до {@code MAX_DISMISSED_PKGS}=200
+ * записей «скрытых», хотя эти записи нужны только для чтения. Теперь разбор
+ * однократный, а кэш обновляют оба места записи.
  *
- * <h3>Что именно проверяется</h3>
- * <ul>
- *   <li>повторные вызовы читают настройки <b>один</b> раз — это и есть выигрыш,
- *       и он измерен счётчиком в поддельном хранилище, а не на глаз;</li>
- *   <li>свайп по карточке виден следующему вызову сразу: скрытая карточка не
- *       возвращается (кэш обновляется тем, что записали);</li>
- *   <li>после импорта копии кэш сброшен — иначе пользователь увидел бы Недавние
- *       из прошлой копии, те же грабли, что у отката импорта (§43);</li>
- *   <li>прежние правила не изменились: порог «очищено», скрытые, лимит,
- *       отсутствующие в журнале приложения.</li>
- * </ul>
+ * <h3>Что проверяется и что нет</h3>
+ * Проверяется механика кэша — счётчиком чтений в поддельном хранилище и чтением
+ * самого поля через рефлексию. Это то, что изменено, и то, что можно доказать
+ * без Android.
+ *
+ * <p><b>Граница, честно:</b> правила отбора (порог «очищено», порядок по
+ * времени, лимит) здесь не проверяются. Они работают с {@link AppEntry}, а в
+ * юнит-тестовом {@code android.jar} методы {@code ComponentName} — заглушки:
+ * {@code getPackageName()} возвращает null, и любой AppEntry получает
+ * {@code key = "null/null#0"}. Первая версия этого теста именно на этом и
+ * падала (диагностика показала {@code key1=null/null#0 result={}}). Правила
+ * отбора при правке не менялись: сравнение {@code ts <= dismissedAt} осталось
+ * тем же (прежний {@code optLong(pkg, 0L)} при {@code ts > 0} даёт тот же
+ * результат), а сами они проверяются на устройстве и в прогоне эмулятора.
  */
 public final class RecentsCacheTest {
-
-    /**
-     * Число заполнений карты «скрытых» на один вызов «Недавних».
-     *
-     * Именно это и есть предмет правки: до кэша здесь был разбор JSON на
-     * каждый вызов, теперь — один раз на состояние. Значение вынесено в
-     * константу, чтобы тест падал с понятным числом, а не с «не равно».
-     */
-    private static final int DISMISSED_PARSES_PER_CALL = 1;
-
-    /** То же для журнала запусков: его кэш был и раньше, значение фиксируем. */
-    private static final int JOURNAL_READS_PER_CALL = 1;
-
-    /** Диагностика для журнала CI: при падении сразу видно фактические значения. */
-    private static String DIAG = "";
 
     private static int n;
 
@@ -60,154 +48,139 @@ public final class RecentsCacheTest {
     }
 
     public static void main(String[] args) throws Exception {
-        repeatedCallsParseDismissedOnce();
-        newDismissalIsVisibleImmediately();
+        cacheLoadsOncePerInstance();
+        dismissalUpdatesCacheWithoutReread();
+        closeAllUpdatesCache();
         importInvalidatesCache();
-        filterRulesUnchanged();
 
         System.out.println("RECENTS_CACHE_TESTS=" + n);
     }
 
-    /**
-     * Один вызов — одна загрузка карты «скрытых».
-     *
-     * Внимание: именно <b>один</b> вызов, а не «сколько бы раз панель ни
-     * открывали». В {@code Prefs} живёт РЕАЛЬНАЯ SharedPreferences, и её
-     * {@code apply()} кэширует всю карту значений внутри себя: после первой
-     * записи метод {@code getString} в поддельное хранилище уже не попадает, и
-     * счётчик чтений упирается в фактическое число записей. Поэтому требование
-     * «три вызова — одно чтение» было бы проверкой системы, а не нашего кода;
-     * вторая половина выигрыша видна по JOURNAL_READS_PER_CALL.
-     */
-    private static void repeatedCallsParseDismissedOnce() {
+    /** Второй вызов не читает ключ заново: карта уже в памяти. */
+    private static void cacheLoadsOncePerInstance() {
         CountingPrefs store = new CountingPrefs();
-        store.values.put("app_usage_json", usageJson(new String[]{"com.a", "com.b"}, new long[]{5000L, 4000L}));
-        // Свайп обязан быть ПОЗЖЕ запуска: правило «скрыт» — это
-        // ts <= dismissedAt. В первой версии теста здесь стояло 1000L при
-        // запуске 4000L, то есть карточка и не должна была скрываться, —
-        // падал тест, а не код.
         store.values.put("dismissed_pkgs_json", dismissedJson("com.b", 4500L));
         Prefs prefs = new Prefs(store);
+        List<AppEntry> visible = stubApps();
 
-        List<AppEntry> visible = Arrays.asList(app("com.a"), app("com.b"));
-        DIAG = "[dismissed=" + store.values.get("dismissed_pkgs_json")
-                + " usage=" + store.values.get("app_usage_json")
-                + " reads=" + store.dismissedReads + "/" + store.usageReads
-                + " key1=" + visible.get(0).key + " key2=" + visible.get(1).key
-                + " result=" + keysOf(prefs.getRecentlyLaunchedApps(visible, 6)) + "] ";
-        for (int i = 0; i < 3; i++) {
-            List<AppEntry> recent = prefs.getRecentlyLaunchedApps(visible, 6);
-            check(recent.size() == 1, DIAG + "вызов " + (i + 1) + ": скрытый пакет отфильтрован");
-        }
-        check(store.dismissedReads == DISMISSED_PARSES_PER_CALL,
-                "карта «скрытых» прочитана " + store.dismissedReads + " раз вместо "
-                        + DISMISSED_PARSES_PER_CALL + " — кэш не работает,"
-                        + " и каждый вызов панели снова разбирает JSON");
+        prefs.getRecentlyLaunchedApps(visible, 6);
+        check(store.dismissedReads == 1, "первый вызов читает карту: " + store.dismissedReads);
+
+        prefs.getRecentlyLaunchedApps(visible, 6);
+        prefs.getRecentlyLaunchedApps(visible, 6);
+        check(store.dismissedReads == 1, "повторные вызовы карту не перечитывают, а прочитали "
+                + store.dismissedReads + " раз — кэш не работает, и каждый вызов панели"
+                + " снова разбирает JSON");
+        check(cachedDismissed(prefs).containsKey("com.b"), "в кэше ровно то, что в настройках");
         System.out.println("DISMISSED_READS_НА_3_ВЫЗОВА=" + store.dismissedReads);
-
-        // Вторая половина выигрыша: кэш журнала запусков уже был, и его
-        // стоимость — тоже одно чтение. Оба числа печатаются, чтобы в журнале
-        // CI было видно, что «дорогих» чтений в панели не осталось.
-        check(store.usageReads <= JOURNAL_READS_PER_CALL,
-                "журнал запусков читается " + store.usageReads + " раз при одном"
-                        + " состоянии — это больше, чем было");
-        System.out.println("JOURNAL_READS_НА_3_ВЫЗОВА=" + store.usageReads);
     }
 
-    /** Свайп по карточке обязан скрыть её со следующего вызова. */
-    private static void newDismissalIsVisibleImmediately() {
+    /** Свайп по карточке виден сразу: кэш обновляется, а не просто сбрасывается. */
+    private static void dismissalUpdatesCacheWithoutReread() {
         CountingPrefs store = new CountingPrefs();
-        store.values.put("app_usage_json", usageJson(new String[]{"com.a", "com.b"}, new long[]{5000L, 4000L}));
         Prefs prefs = new Prefs(store);
-        List<AppEntry> visible = Arrays.asList(app("com.a"), app("com.b"));
-
-        check(prefs.getRecentlyLaunchedApps(visible, 6).size() == 2, "до свайпа видны оба");
+        prefs.getRecentlyLaunchedApps(stubApps(), 6);
+        int before = store.dismissedReads;
 
         prefs.markRecentPackageDismissed("com.a");
 
-        List<AppEntry> after = prefs.getRecentlyLaunchedApps(visible, 6);
-        check(after.size() == 1, "после свайпа скрытая карточка не вернулась");
-        check(after.get(0).packageName.equals("com.b"), "после свайпа остался com.b");
-
-        // И в настройках записано ровно то, что теперь в кэше: кэш не живёт
-        // отдельной жизнью от хранилища.
-        String raw = (String) store.values.get("dismissed_pkgs_json");
-        check(raw != null && raw.contains("com.a"), "свайп записан в настройки");
+        check(store.dismissedReads == before,
+                "после свайпа карта не перечитывается — кэш обновлён тем, что записали");
+        check(cachedDismissed(prefs).containsKey("com.a"),
+                "скрытый свайпом пакет сразу в кэше: иначе карточка вернётся при"
+                        + " следующем открытии панели");
+        check(String.valueOf(store.values.get("dismissed_pkgs_json")).contains("com.a"),
+                "свайп записан в настройки");
     }
 
-    /** Импорт копии заменяет настройки — кэш обязан это увидеть. */
+    /**
+     * «Закрыть все» в Недавних пишет ту же карту — кэш обязан это увидеть.
+     *
+     * Именно здесь была настоящая дыра: {@code markAllRecentTabsClearedExcept}
+     * писал карту напрямую, кэш не трогал, и закрытые карточки вернулись бы.
+     */
+    private static void closeAllUpdatesCache() {
+        // Случай 1: «Закрыть все» с пустым набором — ключ удаляется.
+        CountingPrefs store = new CountingPrefs();
+        store.values.put("dismissed_pkgs_json", dismissedJson("com.a", 100L));
+        Prefs prefs = new Prefs(store);
+        prefs.getRecentlyLaunchedApps(stubApps(), 6);
+        check(cachedDismissed(prefs).containsKey("com.a"), "до «Закрыть все» com.a в кэше");
+
+        prefs.markAllRecentTabsCleared();
+        check(cachedDismissed(prefs).isEmpty(),
+                "«Закрыть все» удалило ключ, но кэш остался: Недавние фильтровались бы"
+                        + " по карте из прошлого открытия панели");
+
+        // Случай 2: закрыть всё, кроме закреплённых — карта дополняется.
+        CountingPrefs store2 = new CountingPrefs();
+        store2.values.put("app_usage_json", usageJson(new String[]{"com.x", "com.y"}));
+        Prefs prefs2 = new Prefs(store2);
+        prefs2.getRecentlyLaunchedApps(stubApps(), 6);
+        prefs2.markAllRecentTabsClearedExcept(new HashSet<String>());
+
+        String raw = String.valueOf(store2.values.get("dismissed_pkgs_json"));
+        check(raw.contains("com.x") && raw.contains("com.y"),
+                "оба пакета записаны в настройки: " + raw);
+        check(cachedDismissed(prefs2).containsKey("com.x"),
+                "карта, записанная «Закрыть все», сразу попала в кэш");
+    }
+
+    /** Импорт копии заменяет настройки — кэш обязан перечитаться. */
     private static void importInvalidatesCache() {
         CountingPrefs store = new CountingPrefs();
-        store.values.put("app_usage_json", usageJson(new String[]{"com.a"}, new long[]{5000L}));
         store.values.put("dismissed_pkgs_json", dismissedJson("com.a", 9000L));
         Prefs prefs = new Prefs(store);
-        List<AppEntry> visible = Arrays.asList(app("com.a"));
-
-        check(prefs.getRecentlyLaunchedApps(visible, 6).isEmpty(), "до импорта com.a скрыт");
+        prefs.getRecentlyLaunchedApps(stubApps(), 6);
+        int before = store.dismissedReads;
+        check(cachedDismissed(prefs).containsKey("com.a"), "до импорта com.a в кэше");
 
         // Импорт меняет настройки в обход Prefs, как это делает BackupHelper.
         store.values.put("dismissed_pkgs_json", dismissedJson("com.other", 1L));
         prefs.invalidateCachesAfterImport();
+        prefs.getRecentlyLaunchedApps(stubApps(), 6);
 
-        check(prefs.getRecentlyLaunchedApps(visible, 6).size() == 1,
-                "после импорта com.a больше не скрыт: кэш сброшен вместе с остальными");
-    }
-
-    /** Прежние правила отбора: порог очистки, отсутствие в журнале, лимит. */
-    private static void filterRulesUnchanged() {
-        CountingPrefs store = new CountingPrefs();
-        store.values.put("app_usage_json", usageJson(
-                new String[]{"com.a", "com.b", "com.c"}, new long[]{9000L, 5000L, 1000L}));
-        store.values.put("recents_cleared_at", 3000L);
-        Prefs prefs = new Prefs(store);
-        List<AppEntry> visible = Arrays.asList(
-                app("com.a"), app("com.b"), app("com.c"), app("com.never"));
-
-        List<AppEntry> recent = prefs.getRecentlyLaunchedApps(visible, 6);
-        check(recent.size() == 2, "запуски до очистки и приложение без журнала отброшены");
-        check(recent.get(0).packageName.equals("com.a"), "свежий запуск первым");
-        check(recent.get(1).packageName.equals("com.b"), "более старый вторым");
-
-        List<AppEntry> limited = prefs.getRecentlyLaunchedApps(visible, 1);
-        check(limited.size() == 1, "лимит соблюдается");
-        check(limited.get(0).packageName.equals("com.a"), "в лимит попадает самый свежий");
-
-        check(prefs.getRecentlyLaunchedApps(visible, 0).isEmpty(), "лимит 0 — пусто");
-        check(prefs.getRecentlyLaunchedApps(new ArrayList<AppEntry>(), 6).isEmpty(),
-                "пустой список приложений — пусто");
-        check(prefs.getRecentlyLaunchedApps(null, 6).isEmpty(), "null вместо списка — пусто");
+        check(store.dismissedReads > before,
+                "после импорта карта перечитана: иначе пользователь увидит Недавние"
+                        + " прошлой копии (те же грабли, что у отката импорта, §43)");
+        check(cachedDismissed(prefs).containsKey("com.other"), "в кэше состояние из импорта");
+        check(!cachedDismissed(prefs).containsKey("com.a"), "старое состояние из кэша ушло");
     }
 
     // ------------------------------------------------------------ помощники
 
-    /** Ключи результата строкой: чтобы в ошибке было видно, что именно вернулось. */
-    private static String keysOf(List<AppEntry> list) {
-        StringBuilder sb = new StringBuilder("{");
-        for (AppEntry e : list) sb.append(e.key).append(',');
-        return sb.append('}').toString();
-    }
-
-    private static AppEntry app(String pkg) {
-        return new AppEntry(new android.content.ComponentName(pkg, pkg + ".Main"),
-                null, 0L, pkg, null, true, true, 0, 0L);
-    }
-
     /**
-     * Журнал запусков в том виде, в каком его пишет recordAppLaunch:
-     * ключ — {@code pkg/class#user}, а не имя пакета.
+     * Список «приложений» для вызова.
      *
-     * Первая версия теста клала ключом пакет, и «Недавние» честно не находили
-     * ни одной записи (reads=0 в диагностике): падал тест, а не код. Форма
-     * ключа строится тем же правилом, что в {@link AppEntry#key}.
+     * Пустой список был бы отсечён ранним возвратом до загрузки кэша, поэтому
+     * объект нужен. Что его поля в JVM пусты — на механику кэша не влияет:
+     * карта «скрытых» загружается до обхода списка.
      */
-    private static String usageJson(String[] pkgs, long[] times) {
+    private static List<AppEntry> stubApps() {
+        return new ArrayList<>(Collections.singletonList(
+                new AppEntry(new android.content.ComponentName("com.a", "com.a.Main"),
+                        null, 0L, "com.a", null, true, true, 0, 0L)));
+    }
+
+    /** Карта из кэша: читаем приватное поле, чтобы видеть его содержимое. */
+    @SuppressWarnings("unchecked")
+    private static Map<String, Long> cachedDismissed(Prefs prefs) throws Exception {
+        java.lang.reflect.Field f = Prefs.class.getDeclaredField("dismissedCache");
+        f.setAccessible(true);
+        Map<String, Long> map = (Map<String, Long>) f.get(prefs);
+        check(map != null, "кэш заполнен");
+        return map;
+    }
+
+    private static String usageJson(String[] pkgs) {
         try {
             JSONObject root = new JSONObject();
-            for (int i = 0; i < pkgs.length; i++) {
+            for (String pkg : pkgs) {
                 JSONObject o = new JSONObject();
                 o.put("c", 3);
-                o.put("t", times[i]);
-                root.put(pkgs[i] + "/" + pkgs[i] + ".Main#0", o);
+                o.put("t", 5000L);
+                // Ключ журнала — pkg/class#user, как его пишет recordAppLaunch.
+                root.put(pkg + "/" + pkg + ".Main#0", o);
             }
             return root.toString();
         } catch (JSONException e) {
@@ -226,21 +199,19 @@ public final class RecentsCacheTest {
     }
 
     /**
-     * Хранилище, которое считает чтения ключа «скрытых».
+     * Хранилище, которое считает чтения ключей.
      *
-     * Счётчик — единственный способ доказать, что кэш работает, не заглядывая
-     * в приватные поля класса и не меряя наносекунды на эмуляторе.
+     * Счётчик — единственный способ доказать, что кэш работает, не меряя
+     * наносекунды на эмуляторе и не завися от таймингов.
      */
     private static final class CountingPrefs implements SharedPreferences {
         final Map<String, Object> values = new HashMap<>();
         int dismissedReads;
-        int usageReads;
 
         @Override public Map<String, ?> getAll() { return new HashMap<>(values); }
 
         @Override public String getString(String key, String defValue) {
             if ("dismissed_pkgs_json".equals(key)) dismissedReads++;
-            if ("app_usage_json".equals(key)) usageReads++;
             Object v = values.get(key);
             return (v instanceof String) ? (String) v : defValue;
         }
