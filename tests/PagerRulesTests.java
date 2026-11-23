@@ -28,7 +28,11 @@ public final class PagerRulesTests {
         dragDecidesByDistance();
         wrapTransitionOnlyOnEdges();
 
-        System.out.println("PagerRulesTests: " + n + " проверок пройдено");
+        // Токен вида ИМЯ=<число> — контракт с обёрткой LauncherChecksTest: она
+        // требует его и падает, если проверок ноль. Иначе набор, из которого
+        // убрали все проверки, «проходил» бы молча (см. AUDIT §48).
+        if (n <= 0) throw new AssertionError("ни одной проверки не выполнено");
+        System.out.println("PAGER_RULES_CHECKS=" + n);
     }
 
     private static void singlePageNeverScrolls() {

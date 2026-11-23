@@ -48,7 +48,11 @@ public final class DiagnosticsTests {
         clearWipesMemoryAndStorage();
         originNamesTheFile();
 
-        System.out.println("DiagnosticsTests: " + checks + " проверок пройдено");
+        // Токен вида ИМЯ=<число> — контракт с обёрткой LauncherChecksTest: она
+        // требует его и падает, если проверок ноль. Иначе набор, из которого
+        // убрали все проверки, «проходил» бы молча (см. AUDIT §48).
+        if (checks <= 0) throw new AssertionError("ни одной проверки не выполнено");
+        System.out.println("DIAGNOSTICS_CHECKS=" + checks);
     }
 
     // ---------------------------------------------------------------- сценарии

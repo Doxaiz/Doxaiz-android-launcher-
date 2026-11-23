@@ -148,17 +148,104 @@ public class LauncherChecksTest {
         run("ThemeLiteralBudgetTest", () -> ThemeLiteralBudgetTest.main(new String[0]));
     }
 
+    /**
+     * Правило «набор обязан сообщить число проверок» проверяется на строках,
+     * а не на реальном наборе: иначе проверка правила зависела бы от того,
+     * сколько проверок сегодня в конкретном файле.
+     */
+    @Test
+    public void reportedChecksContract() {
+        if (reportedChecks("Audit60Tests: 12 проверок пройдено") != 0) {
+            fail("текст без токена не должен считаться доказательством");
+        }
+        if (reportedChecks("V52_TESTS=17") != 17) {
+            fail("токен ИМЯ=<число> должен читаться");
+        }
+        if (reportedChecks("Промежуточное=3\nИТОГ=42") != 42) {
+            fail("берётся последний токен: итог в конце");
+        }
+        if (reportedChecks("ИТОГ=0") != 0) {
+            fail("ноль проверок — не доказательство");
+        }
+        if (reportedChecks("") != 0) {
+            fail("пустой вывод — не доказательство");
+        }
+        if (reportedChecks(null) != 0) {
+            fail("null — не доказательство");
+        }
+        // Уже многострочный вывод с числом в составной строке тоже годится:
+        // наборы печатают маркеры и по ходу дела.
+        if (reportedChecks("APP_ENTRY_КЛЮЧИ_В_JVM=/a | /b\nRECENTS_CACHE_TESTS=28") != 28) {
+            fail("последний токен с числом побеждает");
+        }
+    }
+
     private interface Check {
         void run() throws Exception;
     }
 
+    /**
+     * Запускает набор и требует, чтобы он <b>доказал</b> выполнение проверок.
+     *
+     * <h3>Зачем это изменилось (AUDIT §48)</h3>
+     * Раньше здесь был голый {@code check.run()}: успех означал «не бросил
+     * исключение». Набор, из которого убрали все проверки, проходил так же
+     * зелёным, как и полный, — та же болезнь, что в §47 (тест, зелёный на
+     * заглушках), только с другой стороны: зелёный на пустоте.
+     *
+     * <p>Теперь вывод набора перехватывается, и в нём обязан быть токен
+     * {@code ИМЯ=<число>} с положительным числом. Это ровно то, что набор печатает
+     * последней строкой, а при нуле проверок он сам бросает исключение — то есть
+     * соответствие проверяется с двух сторон.
+     */
     private static void run(String name, Check check) {
+        java.io.PrintStream original = System.out;
+        java.io.ByteArrayOutputStream captured = new java.io.ByteArrayOutputStream();
+        try {
+            System.setOut(new java.io.PrintStream(captured, true, "UTF-8"));
+        } catch (java.io.UnsupportedEncodingException e) {
+            fail(name + " не выполнился: " + e);
+            return;
+        }
         try {
             check.run();
         } catch (AssertionError e) {
             fail(name + " упал: " + e.getMessage());
         } catch (Exception e) {
             fail(name + " не выполнился: " + e);
+        } finally {
+            System.setOut(original);
         }
+        String output = captured.toString();
+        // Вывод набора — в отчёт теста: при разборе прогона видно, какие числа
+        // получились, а не только «прошло».
+        original.print(output);
+        int checks = reportedChecks(output);
+        if (checks <= 0) {
+            fail(name + " не сообщил число выполненных проверок (ожидался токен"
+                    + " вида ИМЯ=<число>): набор мог не выполнить ни одной проверки."
+                    + " Вывод: " + output.trim());
+        }
+    }
+
+    /**
+     * Число из последнего токена {@code ИМЯ=<число>} в выводе набора.
+     *
+     * Берётся последний: наборы печатают промежуточные строки, итог — в конце.
+     */
+    static int reportedChecks(String output) {
+        if (output == null) return 0;
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("(?:^|\\s)([A-ZА-Я_0-9]{3,})=(\\d+)")
+                .matcher(output);
+        int last = -1;
+        while (m.find()) {
+            try {
+                last = Integer.parseInt(m.group(2));
+            } catch (NumberFormatException ignored) {
+                // Токен с числом не разобрался — считаем, что доказательства нет.
+            }
+        }
+        return Math.max(last, 0);
     }
 }
