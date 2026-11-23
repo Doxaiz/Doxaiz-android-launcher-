@@ -127,6 +127,20 @@ public class LauncherChecksTest {
     }
 
     @Test
+    public void appEntryKeysAreObservableInJvm() {
+        // §46: тест на AppEntry «проходил», ничего не проверяя, потому что
+        // ComponentName в юнит-тестовом android.jar — заглушка. Здесь факт
+        // печатается прямо в отчёт JUnit (он виден в артефакте CI), чтобы при
+        // разборе следующего зелёного прогона было видно, на каком наборе он
+        // получен. Падением это не делается: неразличимость ключей в JVM —
+        // свойство среды, а не дефект кода.
+        AppEntry probe = new AppEntry(new android.content.ComponentName("com.a", "com.a.Main"),
+                null, 0L, "com.a", null, true, true, 0, 0L);
+        System.out.println("APP_ENTRY_КЛЮЧ_В_JVM=" + probe.key
+                + " packageName=" + (probe.packageName == null ? "<null>" : "'" + probe.packageName + "'"));
+    }
+
+    @Test
     public void themeLiteralsStayInPalette() {
         // §43: храповик на тёмные заливки литералом. Пиксельная самопроверка
         // видит три экрана; этот тест видит и панель звука, и плашку
