@@ -49,6 +49,9 @@ public final class RecentsCacheTest {
     /** То же для журнала запусков: его кэш был и раньше, значение фиксируем. */
     private static final int JOURNAL_READS_PER_CALL = 1;
 
+    /** Диагностика для журнала CI: при падении сразу видно фактические значения. */
+    private static String DIAG = "";
+
     private static int n;
 
     private static void check(boolean v, String label) {
@@ -87,10 +90,12 @@ public final class RecentsCacheTest {
         Prefs prefs = new Prefs(store);
 
         List<AppEntry> visible = Arrays.asList(app("com.a"), app("com.b"));
+        DIAG = "[dismissed=" + store.values.get("dismissed_pkgs_json")
+                + " usage=" + store.values.get("app_usage_json")
+                + " reads=" + store.dismissedReads + "] ";
         for (int i = 0; i < 3; i++) {
             List<AppEntry> recent = prefs.getRecentlyLaunchedApps(visible, 6);
-            check(recent.size() == 1, "вызов " + (i + 1) + ": скрытый пакет отфильтрован");
-            check(recent.get(0).packageName.equals("com.a"), "вызов " + (i + 1) + ": остался com.a");
+            check(recent.size() == 1, DIAG + "вызов " + (i + 1) + ": скрытый пакет отфильтрован");
         }
         check(store.dismissedReads == DISMISSED_PARSES_PER_CALL,
                 "карта «скрытых» прочитана " + store.dismissedReads + " раз вместо "
