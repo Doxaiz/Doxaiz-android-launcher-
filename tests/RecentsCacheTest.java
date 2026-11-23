@@ -57,7 +57,7 @@ public final class RecentsCacheTest {
     }
 
     /** Второй вызов не читает ключ заново: карта уже в памяти. */
-    private static void cacheLoadsOncePerInstance() {
+    private static void cacheLoadsOncePerInstance() throws Exception {
         CountingPrefs store = new CountingPrefs();
         store.values.put("dismissed_pkgs_json", dismissedJson("com.b", 4500L));
         Prefs prefs = new Prefs(store);
@@ -76,7 +76,7 @@ public final class RecentsCacheTest {
     }
 
     /** Свайп по карточке виден сразу: кэш обновляется, а не просто сбрасывается. */
-    private static void dismissalUpdatesCacheWithoutReread() {
+    private static void dismissalUpdatesCacheWithoutReread() throws Exception {
         CountingPrefs store = new CountingPrefs();
         Prefs prefs = new Prefs(store);
         prefs.getRecentlyLaunchedApps(stubApps(), 6);
@@ -99,7 +99,7 @@ public final class RecentsCacheTest {
      * Именно здесь была настоящая дыра: {@code markAllRecentTabsClearedExcept}
      * писал карту напрямую, кэш не трогал, и закрытые карточки вернулись бы.
      */
-    private static void closeAllUpdatesCache() {
+    private static void closeAllUpdatesCache() throws Exception {
         // Случай 1: «Закрыть все» с пустым набором — ключ удаляется.
         CountingPrefs store = new CountingPrefs();
         store.values.put("dismissed_pkgs_json", dismissedJson("com.a", 100L));
@@ -127,7 +127,7 @@ public final class RecentsCacheTest {
     }
 
     /** Импорт копии заменяет настройки — кэш обязан перечитаться. */
-    private static void importInvalidatesCache() {
+    private static void importInvalidatesCache() throws Exception {
         CountingPrefs store = new CountingPrefs();
         store.values.put("dismissed_pkgs_json", dismissedJson("com.a", 9000L));
         Prefs prefs = new Prefs(store);
