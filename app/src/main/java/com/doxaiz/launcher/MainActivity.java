@@ -2744,12 +2744,20 @@ public class MainActivity extends Activity implements AppRepository.Listener {
      * читается из CI через run-as.
      */
     private int desktopBuilds = 0;
+    /** Пересборки, выполненные до прихода списка приложений (appsByKey пуст). */
+    private int desktopBuildsBeforeApps = 0;
     private long desktopTilesBuilt = 0L;
-    private long desktopTilesBuiltWasted = 0L;
+    private long desktopFolderTiles = 0L;
+    private long desktopTilesWithoutData = 0L;
     private final List<BadgeSlot> dockBadgeSlots = new ArrayList<>();
 
     private void rebuildDesktop() {
         desktopBuilds++;
+        // Сборка «в пустоту»: приложения ещё не пришли из репозитория, значит
+        // плитки приложений построить не из чего, и следующий вызов
+        // onAppsUpdated пересоберёт всё заново. Это и есть та работа, которую
+        // нельзя оправдать ни одним кадром.
+        if (appsByKey.isEmpty()) desktopBuildsBeforeApps++;
         cancelDragCleanup();
         desktopBadgeSlots.clear();
         appTiles.clear();
@@ -2784,8 +2792,10 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             // раз привёл к тому, что файла не было вовсе — при старте
             // пересборок меньше четырёх.
             String line = "builds=" + desktopBuilds
+                    + " builds_no_apps=" + desktopBuildsBeforeApps
                     + " tiles=" + desktopTilesBuilt
-                    + " wasted=" + desktopTilesBuiltWasted
+                    + " folders=" + desktopFolderTiles
+                    + " tiles_no_data=" + desktopTilesWithoutData
                     + " pages=" + (desktop != null ? desktop.pages.size() : -1)
                     + " apps=" + appsByKey.size() + "\n";
             java.io.File f = new java.io.File(getFilesDir(), "doxaiz_build_stats.txt");
@@ -2885,11 +2895,15 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             if (tile != null) {
                 visibleCount++;
                 desktopTilesBuilt++;
-                // Плитка, которую некому показать: приложения ещё нет в
-                // appsByKey, и bindIcon для неё даже не вызывался. Такая работа
-                // не видна пользователю ни в одном кадре — это потерянный труд.
-                if (!appsByKey.containsKey(item.appKey)) {
-                    desktopTilesBuiltWasted++;
+                if (item.type == DesktopItem.TYPE_FOLDER) {
+                    desktopFolderTiles++;
+                } else if (!appsByKey.containsKey(item.appKey)) {
+                    // Плитка приложения, которого нет в appsByKey: иконку для
+                    // неё связать не с чем, значит в кадре она пустая. Считаем
+                    // отдельно от папок: у папки appKey — идентификатор папки
+                    // (f_1), его в appsByKey не бывает по определению, и первая
+                    // версия счётчика записывала каждую папку в «потерянные».
+                    desktopTilesWithoutData++;
                 }
                 grid.addView(tile, new FreeGridPageView.LayoutParams(item.col, item.row));
             }
