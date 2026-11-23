@@ -129,10 +129,14 @@ public final class RecentsCacheTest {
         prefs2.getRecentlyLaunchedApps(stubApps(), 6);
         prefs2.markAllRecentTabsClearedExcept(new HashSet<String>() {{ add("com.keep"); }});
 
+        // Сравнивать JSON-строку с Map.toString() нельзя — это разные форматы,
+        // и такой тест падал бы всегда. Сравниваем содержимое по ключам.
         String raw = String.valueOf(store2.values.get("dismissed_pkgs_json"));
-        check(raw.equals(String.valueOf(cachedDismissed(prefs2))),
+        Map<String, Long> inStore = parseFlat(raw);
+        Map<String, Long> inCache = cachedDismissed(prefs2);
+        check(inStore.equals(inCache),
                 "кэш расходится с настройками после «Закрыть все»: в настройках "
-                        + raw + ", в кэше " + cachedDismissed(prefs2));
+                        + inStore + ", в кэше " + inCache);
     }
 
     /** Импорт копии заменяет настройки — кэш обязан перечитаться. */
@@ -179,6 +183,22 @@ public final class RecentsCacheTest {
         Map<String, Long> map = (Map<String, Long>) f.get(prefs);
         check(map != null, "кэш заполнен");
         return map;
+    }
+
+    /** Плоский JSON вида {"пакет":время} в карту. */
+    private static Map<String, Long> parseFlat(String raw) {
+        Map<String, Long> out = new HashMap<>();
+        try {
+            JSONObject obj = new JSONObject(raw);
+            java.util.Iterator<String> it = obj.keys();
+            while (it.hasNext()) {
+                String k = it.next();
+                out.put(k, obj.optLong(k, 0L));
+            }
+        } catch (JSONException e) {
+            throw new AssertionError("не удалось разобрать карту скрытых: " + e.getMessage());
+        }
+        return out;
     }
 
     private static String usageJson(String[] pkgs) {
