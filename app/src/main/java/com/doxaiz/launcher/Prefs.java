@@ -1194,6 +1194,10 @@ public final class Prefs {
 
     public void markAllRecentTabsClearedExcept(Set<String> keepPkgs) {
         if (keepPkgs == null || keepPkgs.isEmpty()) {
+            // Пустой набор закреплённых означает «закрыть всё»: результат обязан
+            // быть тем же, что у markAllRecentTabsCleared(). Раньше эта ветка
+            // ничего не делала — «Закрыть все» с пустым набором не скрывало
+            // ничего, хотя пользователь нажал именно это.
             markAllRecentTabsCleared();
             return;
         }

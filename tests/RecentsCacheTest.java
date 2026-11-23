@@ -118,18 +118,21 @@ public final class RecentsCacheTest {
                 "«Закрыть все» удалило ключ, но кэш остался: Недавние фильтровались бы"
                         + " по карте из прошлого открытия панели");
 
-        // Случай 2: закрыть всё, кроме закреплённых — карта дополняется.
+        // Случай 2: «Закрыть все» с непустым набором закреплённых. Ветку нельзя
+        // проверить в JVM: она берёт ключи из журнала запусков (AppEntry.key), а в
+        // юнит-тестовом android.jar ComponentName — заглушка, и ключи получаются
+        // "null/null#0". Проверяем то, что от неё зависит и здесь наблюдаемо:
+        // кэш после вызова согласован с настройками, а не остался старым.
         CountingPrefs store2 = new CountingPrefs();
         store2.values.put("app_usage_json", usageJson(new String[]{"com.x", "com.y"}));
         Prefs prefs2 = new Prefs(store2);
         prefs2.getRecentlyLaunchedApps(stubApps(), 6);
-        prefs2.markAllRecentTabsClearedExcept(new HashSet<String>());
+        prefs2.markAllRecentTabsClearedExcept(new HashSet<String>() {{ add("com.keep"); }});
 
         String raw = String.valueOf(store2.values.get("dismissed_pkgs_json"));
-        check(raw.contains("com.x") && raw.contains("com.y"),
-                "оба пакета записаны в настройки: " + raw);
-        check(cachedDismissed(prefs2).containsKey("com.x"),
-                "карта, записанная «Закрыть все», сразу попала в кэш");
+        check(raw.equals(String.valueOf(cachedDismissed(prefs2))),
+                "кэш расходится с настройками после «Закрыть все»: в настройках "
+                        + raw + ", в кэше " + cachedDismissed(prefs2));
     }
 
     /** Импорт копии заменяет настройки — кэш обязан перечитаться. */
