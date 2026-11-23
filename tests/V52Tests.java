@@ -14,6 +14,9 @@ public final class V52Tests {
   test(AnimeBackdropView.computeScrimAlphas(0)[1] < AnimeBackdropView.computeScrimAlphas(1)[1]); test(AnimeBackdropView.computeScrimAlphas(1)[1] < AnimeBackdropView.computeScrimAlphas(2)[1]);
   test(AnimeParticlesView.shouldAnimate(true,0,true,true,false)); test(AnimeParticlesView.shouldAnimate(true,1,true,true,false)); test(!AnimeParticlesView.shouldAnimate(true,2,true,true,false)); test(!AnimeParticlesView.shouldAnimate(false,0,true,true,false)); test(!AnimeParticlesView.shouldAnimate(true,0,false,true,false)); test(!AnimeParticlesView.shouldAnimate(true,0,true,false,false)); test(!AnimeParticlesView.shouldAnimate(true,0,true,true,true));
   test(BackupHelper.sanitizeTileCsv("wifi, !@# ,torch").equals("wifi,torch"));
-  System.out.println("V52 TESTS PASSED: "+count);
+  // Токен вида ИМЯ=<число> — контракт с обёрткой LauncherChecksTest: без него
+  // набор, оставшийся без проверок, выглядел бы зелёным (AUDIT §48).
+  if (count <= 0) throw new AssertionError("ни одной проверки не выполнено");
+  System.out.println("V52_TESTS=" + count);
  }
 }

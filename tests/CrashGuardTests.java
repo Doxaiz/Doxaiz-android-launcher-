@@ -42,7 +42,11 @@ public final class CrashGuardTests {
         disabledGuardIsSilent();
         resetClearsEverything();
 
-        System.out.println("CrashGuardTests: " + checks + " проверок пройдено");
+        // Токен вида ИМЯ=<число> — контракт с обёрткой LauncherChecksTest: она
+        // требует его и падает, если проверок ноль. Иначе набор, из которого
+        // убрали все проверки, «проходил» бы молча (см. AUDIT §48).
+        if (checks <= 0) throw new AssertionError("ни одной проверки не выполнено");
+        System.out.println("CRASH_GUARD_CHECKS=" + checks);
     }
 
     // ---------------------------------------------------------------- сценарии
