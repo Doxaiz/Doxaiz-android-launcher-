@@ -92,7 +92,9 @@ public final class RecentsCacheTest {
         List<AppEntry> visible = Arrays.asList(app("com.a"), app("com.b"));
         DIAG = "[dismissed=" + store.values.get("dismissed_pkgs_json")
                 + " usage=" + store.values.get("app_usage_json")
-                + " reads=" + store.dismissedReads + "] ";
+                + " reads=" + store.dismissedReads + "/" + store.usageReads
+                + " key1=" + visible.get(0).key + " key2=" + visible.get(1).key
+                + " result=" + keysOf(prefs.getRecentlyLaunchedApps(visible, 6)) + "] ";
         for (int i = 0; i < 3; i++) {
             List<AppEntry> recent = prefs.getRecentlyLaunchedApps(visible, 6);
             check(recent.size() == 1, DIAG + "вызов " + (i + 1) + ": скрытый пакет отфильтрован");
@@ -177,6 +179,13 @@ public final class RecentsCacheTest {
     }
 
     // ------------------------------------------------------------ помощники
+
+    /** Ключи результата строкой: чтобы в ошибке было видно, что именно вернулось. */
+    private static String keysOf(List<AppEntry> list) {
+        StringBuilder sb = new StringBuilder("{");
+        for (AppEntry e : list) sb.append(e.key).append(',');
+        return sb.append('}').toString();
+    }
 
     private static AppEntry app(String pkg) {
         return new AppEntry(new android.content.ComponentName(pkg, pkg + ".Main"),
