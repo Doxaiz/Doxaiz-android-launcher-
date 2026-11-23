@@ -345,7 +345,7 @@ if [ "${SKIP_CRASH_SCENARIO:-0}" = "1" ]; then
         local out="$OUT/coldstart-$label.txt"
         local passes="${COLD_START_PASSES:-3}"
         : > "$out"
-        local round=1
+        local round=1 empty=0
         while [ "$round" -le "$passes" ]; do
             # force-stop, а не просто перезапуск: без него это тёплый старт, и
             # число было бы только про отрисовку.
@@ -353,6 +353,19 @@ if [ "${SKIP_CRASH_SCENARIO:-0}" = "1" ]; then
             sleep 2
             printf -- '--- раунд %s\n' "$round" >> "$out"
             adb shell am start -W -n "$PKG/.MainActivity" >> "$out" 2>&1 || true
+            if ! grep -q "TotalTime" "$out" 2>/dev/null; then
+                # Эмулятор не отдал число. Если и второй раунд пуст — дальше
+                # ждать нечего: два предыдущих прогона показали, что на
+                # зависшем эмуляторе эти раунды съедают время, которого потом
+                # не хватает проверкам темы.
+                empty=$((empty + 1))
+                if [ "$empty" -ge 2 ]; then
+                    echo "ранний выход: эмулятор не отдаёт TotalTime" >> "$out"
+                    break
+                fi
+            else
+                empty=0
+            fi
             sleep 2
             round=$((round + 1))
         done
@@ -375,11 +388,22 @@ if not totals:
     print('нет чисел')
     sys.exit(0)
 med = statistics.median(totals)
-print('медиана=%d мс (мин=%d макс=%d) стартов=%d состояния=%s'
-      % (int(med), min(totals), max(totals), len(totals), ','.join(states) or '?'))
+# Пустой LaunchState — это НЕ «холодный» и не «тёплый»: am start иногда печатает
+# только TotalTime. Считать такое доказательством холодного старта нельзя,
+# поэтому пишем «?» и отдельно предупреждаем, если холодных меньше, чем стартов.
+known = [x for x in states if x and x != 'UNKNOWN']
+cold = sum(1 for x in known if x.upper() == 'COLD')
+print('медиана=%d мс (мин=%d макс=%d) стартов=%d холодных=%d состояния=%s'
+      % (int(med), min(totals), max(totals), len(totals), cold,
+         ','.join(known) or '?'))
 PYEOF
 )"
         summary "холодный старт ($caption)" "$(cat "$out")"
+        if echo "$parsed" | grep -q "холодных=0"; then
+            # Число есть, а холодным старт не подтверждён: замер честно
+            # показывает это, а не выдаёт тёплый старт за холодный.
+            echo "::warning title=холодный старт::$caption — am start не подтвердил холодный старт (нет LaunchState: COLD); число не сравнивать с бюджетом"
+        fi
         if [ -z "$parsed" ] || [ "$parsed" = "нет чисел" ]; then
             # Нет данных — это не «быстро», а «неизвестно». Предупреждение, а не
             # провал: числа терялись и раньше из-за нестабильности эмулятора, и
@@ -652,14 +676,25 @@ smoke_screen() {
 
         # Тема и экран передаются параметрами intent, а не правкой shared_prefs:
         # такая правка уже один раз сломала разбор XML в CI.
+        : > "$OUT/selfcheck-start-$label.txt"
         adb shell am start -W -n "$PKG/.MainActivity" \
             --ez doxaiz_shade_selfcheck true --ei doxaiz_style "$theme" \
             --es doxaiz_screen "$screen" \
-            > "$OUT/selfcheck-start-$label.txt" 2>&1 || true
+            >> "$OUT/selfcheck-start-$label.txt" 2>&1 || true
         waited=0 report=""
         while [ "$waited" -lt 40 ]; do
             report="$(adb shell "run-as $PKG cat files/$report_file" 2>/dev/null | tr -d '\r')"
             [ -n "$report" ] && break
+            # Ранний выход: отчёт пишет само приложение, поэтому его отсутствие
+            # вместе с упавшим запуском означает «экран не открывался», а не
+            # «медленный рендер». Ждать 40 с на каждый из четырёх экранов в этом
+            # случае бессмысленно — так прогон 45212976273 потерял время,
+            # которого потом не хватило остальным проверкам.
+            if [ "$waited" -ge 15 ] && ! adb shell pidof "$PKG" >/dev/null 2>&1 \
+                    && grep -qiE "Error|Exception|does not exist" "$OUT/selfcheck-start-$label.txt" 2>/dev/null; then
+                note "$label" "процесс не работает и am start с ошибкой — ждать отчёт незачем"
+                break
+            fi
             sleep 1
             waited=$((waited + 1))
         done
@@ -672,7 +707,17 @@ smoke_screen() {
 
     adb exec-out screencap -p > "$OUT/screen-$label.png" 2>/dev/null || true
     if [ -z "$report" ]; then
-        report_fail "Светлая тема ($label): самопроверка экрана $screen не оставила отчёт за ${waited} с (две попытки)"
+        # Причина важнее факта: «отчёта нет» один и тот же текст и для
+        # незапустившегося экрана, и для зависшего эмулятора.
+        local why="причина не определена"
+        if ! adb shell pidof "$PKG" >/dev/null 2>&1; then
+            why="процесс $PKG не работает"
+        elif grep -qiE "Error|Exception|does not exist" "$OUT/selfcheck-start-$label.txt" 2>/dev/null; then
+            why="am start завершился ошибкой (см. selfcheck-start-$label.txt)"
+        elif adb shell dumpsys window 2>/dev/null | grep -q "$PKG"; then
+            why="процесс жив и окно на экране — отчёт не записан приложением"
+        fi
+        report_fail "Светлая тема ($label): самопроверка экрана $screen не оставила отчёт за ${waited} с (две попытки); $why"
         return 1
     fi
     summary "$label" "$report"
