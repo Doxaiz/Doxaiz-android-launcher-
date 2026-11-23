@@ -398,6 +398,12 @@ print('медиана=%d мс (мин=%d макс=%d) стартов=%d холо
          ','.join(known) or '?'))
 PYEOF
 )"
+        # Работа при старте — в целых величинах. Отдельной аннотацией её выводить
+        # нельзя: GitHub показывает не больше 10 notice на шаг, и эта заметка уже
+        # один раз вытеснилась. Поэтому статистика идёт в ту же строку, что и
+        # время, — она гарантированно видна рядом с числами старта.
+        local build_stats
+        build_stats="$(adb shell "run-as $PKG cat files/doxaiz_build_stats.txt" 2>/dev/null | tr -d '\r\n')"
         summary "холодный старт ($caption)" "$(cat "$out")"
         if echo "$parsed" | grep -q "холодных=0"; then
             # Число есть, а холодным старт не подтверждён: замер честно
@@ -411,7 +417,11 @@ PYEOF
             echo "::warning title=холодный старт::$caption — TotalTime не найден в выводе am start (эмулятор); число неизвестно, не 0"
             note "холодный старт" "$caption — нет данных"
         else
-            note "холодный старт" "$caption: $parsed"
+            if [ -n "$build_stats" ]; then
+                note "холодный старт" "$caption: $parsed; работа: $build_stats"
+            else
+                note "холодный старт" "$caption: $parsed; счётчик работы не записан"
+            fi
         fi
     }
     cold_start_measure "home" "рабочий стол"
@@ -890,6 +900,7 @@ PYEOF
     else
         note "пересчёт-каталога" "файл замера не создан (менее 8 пересчётов или не debug)"
     fi
+
 else
     note "поиск-метрики" "каталог не открылся — замер набора текста пропущен"
 fi

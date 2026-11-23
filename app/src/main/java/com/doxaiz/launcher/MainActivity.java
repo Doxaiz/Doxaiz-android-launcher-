@@ -2729,9 +2729,35 @@ public class MainActivity extends Activity implements AppRepository.Listener {
      * это и был тот самый провал кадра (F-05).
      */
     private final Map<String, List<AppTileRef>> appTiles = new HashMap<>();
+
+    /**
+     * Сколько раз рабочий стол пересобирался и сколько плиток при этом создано.
+     *
+     * Зачем считать, а не мерить время: время холодного старта на эмуляторе
+     * плавает почти втрое на неизменном коде (AUDIT §50.8 — 1234, 2544 и
+     * 3535 мс), поэтому «стало быстрее» по секундомеру здесь не доказывается.
+     * Число созданных плиток — целое и воспроизводимое: если при старте
+     * строится вся раскладка, а на экране видна одна страница, счётчик это
+     * покажет независимо от загрузки раннера.
+     *
+     * Публикуется только в debug-сборке в files/doxaiz_build_stats.txt и
+     * читается из CI через run-as.
+     */
+    private int desktopBuilds = 0;
+    /** Пересборки, выполненные до прихода списка приложений (appsByKey пуст). */
+    private int desktopBuildsBeforeApps = 0;
+    private long desktopTilesBuilt = 0L;
+    private long desktopFolderTiles = 0L;
+    private long desktopTilesWithoutData = 0L;
     private final List<BadgeSlot> dockBadgeSlots = new ArrayList<>();
 
     private void rebuildDesktop() {
+        desktopBuilds++;
+        // Сборка «в пустоту»: приложения ещё не пришли из репозитория, значит
+        // плитки приложений построить не из чего, и следующий вызов
+        // onAppsUpdated пересоберёт всё заново. Это и есть та работа, которую
+        // нельзя оправдать ни одним кадром.
+        if (appsByKey.isEmpty()) desktopBuildsBeforeApps++;
         cancelDragCleanup();
         desktopBadgeSlots.clear();
         appTiles.clear();
@@ -2748,6 +2774,37 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         pagerView.setPages(pageViews, currentPage);
         rebuildPageDots();
         rebuildDock();
+        publishDesktopBuildStats();
+    }
+
+    /**
+     * Пишет накопленные счётчики пересборок рабочего стола в файл.
+     *
+     * Только debug и только раз в 4 пересборки — как {@link #recordFilterCost}:
+     * синхронная запись 40 байт дешевле задачи в пул, но и её не нужно делать
+     * на каждую пересборку. Ошибка записи не имеет права мешать интерфейсу.
+     */
+    private void publishDesktopBuildStats() {
+        try {
+            if (!BuildConfig.DEBUG) return;
+            // Пишем на каждую пересборку, а не раз в N: пересборка стола не
+            // происходит в кадре, 40 байт дешевле, а гейт по счётчику уже один
+            // раз привёл к тому, что файла не было вовсе — при старте
+            // пересборок меньше четырёх.
+            String line = "builds=" + desktopBuilds
+                    + " builds_no_apps=" + desktopBuildsBeforeApps
+                    + " tiles=" + desktopTilesBuilt
+                    + " folders=" + desktopFolderTiles
+                    + " tiles_no_data=" + desktopTilesWithoutData
+                    + " pages=" + (desktop != null ? desktop.pages.size() : -1)
+                    + " apps=" + appsByKey.size() + "\n";
+            java.io.File f = new java.io.File(getFilesDir(), "doxaiz_build_stats.txt");
+            try (java.io.FileOutputStream out = new java.io.FileOutputStream(f, false)) {
+                out.write(line.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            }
+        } catch (Throwable t) {
+            Diagnostics.record("MainActivity.publishDesktopBuildStats", t);
+        }
     }
 
     /**
@@ -2837,6 +2894,17 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             }
             if (tile != null) {
                 visibleCount++;
+                desktopTilesBuilt++;
+                if (item.type == DesktopItem.TYPE_FOLDER) {
+                    desktopFolderTiles++;
+                } else if (!appsByKey.containsKey(item.appKey)) {
+                    // Плитка приложения, которого нет в appsByKey: иконку для
+                    // неё связать не с чем, значит в кадре она пустая. Считаем
+                    // отдельно от папок: у папки appKey — идентификатор папки
+                    // (f_1), его в appsByKey не бывает по определению, и первая
+                    // версия счётчика записывала каждую папку в «потерянные».
+                    desktopTilesWithoutData++;
+                }
                 grid.addView(tile, new FreeGridPageView.LayoutParams(item.col, item.row));
             }
         }
