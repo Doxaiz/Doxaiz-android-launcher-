@@ -2729,9 +2729,27 @@ public class MainActivity extends Activity implements AppRepository.Listener {
      * это и был тот самый провал кадра (F-05).
      */
     private final Map<String, List<AppTileRef>> appTiles = new HashMap<>();
+
+    /**
+     * Сколько раз рабочий стол пересобирался и сколько плиток при этом создано.
+     *
+     * Зачем считать, а не мерить время: время холодного старта на эмуляторе
+     * плавает почти втрое на неизменном коде (AUDIT §50.8 — 1234, 2544 и
+     * 3535 мс), поэтому «стало быстрее» по секундомеру здесь не доказывается.
+     * Число созданных плиток — целое и воспроизводимое: если при старте
+     * строится вся раскладка, а на экране видна одна страница, счётчик это
+     * покажет независимо от загрузки раннера.
+     *
+     * Публикуется только в debug-сборке в files/doxaiz_build_stats.txt и
+     * читается из CI через run-as.
+     */
+    private int desktopBuilds = 0;
+    private long desktopTilesBuilt = 0L;
+    private long desktopTilesBuiltWasted = 0L;
     private final List<BadgeSlot> dockBadgeSlots = new ArrayList<>();
 
     private void rebuildDesktop() {
+        desktopBuilds++;
         cancelDragCleanup();
         desktopBadgeSlots.clear();
         appTiles.clear();
@@ -2748,6 +2766,32 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         pagerView.setPages(pageViews, currentPage);
         rebuildPageDots();
         rebuildDock();
+        publishDesktopBuildStats();
+    }
+
+    /**
+     * Пишет накопленные счётчики пересборок рабочего стола в файл.
+     *
+     * Только debug и только раз в 4 пересборки — как {@link #recordFilterCost}:
+     * синхронная запись 40 байт дешевле задачи в пул, но и её не нужно делать
+     * на каждую пересборку. Ошибка записи не имеет права мешать интерфейсу.
+     */
+    private void publishDesktopBuildStats() {
+        try {
+            if (!BuildConfig.DEBUG) return;
+            if (desktopBuilds % 4 != 0) return;
+            String line = "builds=" + desktopBuilds
+                    + " tiles=" + desktopTilesBuilt
+                    + " wasted=" + desktopTilesBuiltWasted
+                    + " pages=" + (desktop != null ? desktop.pages.size() : -1)
+                    + " apps=" + appsByKey.size() + "\n";
+            java.io.File f = new java.io.File(getFilesDir(), "doxaiz_build_stats.txt");
+            try (java.io.FileOutputStream out = new java.io.FileOutputStream(f, false)) {
+                out.write(line.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            }
+        } catch (Throwable t) {
+            Diagnostics.record("MainActivity.publishDesktopBuildStats", t);
+        }
     }
 
     /**
@@ -2837,6 +2881,13 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             }
             if (tile != null) {
                 visibleCount++;
+                desktopTilesBuilt++;
+                // Плитка, которую некому показать: приложения ещё нет в
+                // appsByKey, и bindIcon для неё даже не вызывался. Такая работа
+                // не видна пользователю ни в одном кадре — это потерянный труд.
+                if (!appsByKey.containsKey(item.appKey)) {
+                    desktopTilesBuiltWasted++;
+                }
                 grid.addView(tile, new FreeGridPageView.LayoutParams(item.col, item.row));
             }
         }
