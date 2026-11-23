@@ -66,7 +66,11 @@ public final class RecentsCacheTest {
     private static void repeatedCallsParseDismissedOnce() {
         CountingPrefs store = new CountingPrefs();
         store.values.put("app_usage_json", usageJson(new String[]{"com.a", "com.b"}, new long[]{5000L, 4000L}));
-        store.values.put("dismissed_pkgs_json", dismissedJson("com.b", 1000L));
+        // Свайп обязан быть ПОЗЖЕ запуска: правило «скрыт» — это
+        // ts <= dismissedAt. В первой версии теста здесь стояло 1000L при
+        // запуске 4000L, то есть карточка и не должна была скрываться, —
+        // падал тест, а не код.
+        store.values.put("dismissed_pkgs_json", dismissedJson("com.b", 4500L));
         Prefs prefs = new Prefs(store);
 
         List<AppEntry> visible = Arrays.asList(app("com.a"), app("com.b"));
