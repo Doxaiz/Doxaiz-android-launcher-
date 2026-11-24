@@ -52,6 +52,14 @@ public class LauncherChecksTest {
     }
 
     @Test
+    public void desktopBuildPolicy() {
+        // §51.5: условие «не строить стол, пока не пришли приложения» нельзя
+        // было проверить ничем, кроме устройства, а на эмуляторе всегда 19
+        // приложений. Логика вынесена в чистую функцию и проверяется здесь.
+        run("DesktopBuildPolicyTests", () -> DesktopBuildPolicyTests.main(new String[0]));
+    }
+
+    @Test
     public void contrastOnUnknownWallpaper() {
         run("ContrastTest", () -> ContrastTest.main(new String[0]));
     }
