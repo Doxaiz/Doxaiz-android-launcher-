@@ -1,0 +1,40 @@
+// Генератор baseline- и startup-профилей для Doxaiz (AUDIT §54).
+//
+// Зачем отдельный модуль. Профиль — это список методов, которые ART
+// компилирует заранее; собирается он прогоном настоящих действий на устройстве.
+// Без генератора профиль пришлось бы писать руками, а это угадывание.
+//
+// Почему `com.android.test`, а не `com.android.library`: такой модуль не
+// попадает в APK, он только запускает инструментальные тесты против :app.
+plugins {
+    id 'com.android.test'
+    id 'androidx.baselineprofile'
+}
+
+android {
+    namespace 'com.doxaiz.launcher.baselineprofile'
+    compileSdk 34
+
+    defaultConfig {
+        // Macrobenchmark требует API 28+; у приложения minSdk 26, но профиль
+        // генерируется на эмуляторе API 34, который уже используется в CI.
+        minSdk 28
+        targetSdk 34
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+    }
+
+    // Что именно профилируем: приложение, а не библиотеку.
+    targetProjectPath = ':app'
+    experimentalProperties['android.experimental.self-instrumenting'] = true
+}
+
+dependencies {
+    implementation 'androidx.test.ext:junit:1.1.5'
+    implementation 'androidx.test.uiautomator:uiautomator:2.3.0'
+    implementation 'androidx.benchmark:benchmark-macro-junit4:1.2.4'
+}
+
+// Блок baselineProfile {} здесь НЕ настраивается: у модуля-генератора другое
+// расширение (producer), и свойства потребителя вроде saveInSrc и
+// automaticGenerationDuringBuild к нему не относятся — Gradle падал с
+// «unknown property automaticGenerationDuringBuild». Эти настройки живут в :app.
