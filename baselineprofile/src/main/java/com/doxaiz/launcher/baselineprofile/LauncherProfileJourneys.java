@@ -57,13 +57,17 @@ final class LauncherProfileJourneys {
         if (!drawerGrid.waitForExists(UI_TIMEOUT_MS)) {
             throw new AssertionError("В каталоге не появился список приложений");
         }
-        if (!drawerGrid.scrollForward()) {
-            throw new AssertionError("Сетка приложений не прокручивается вниз");
+        try {
+            if (!drawerGrid.scrollForward()) {
+                throw new AssertionError("Сетка приложений не прокручивается вниз");
+            }
+            device.waitForIdle(2_000L);
+            if (!drawerGrid.scrollBackward()) {
+                throw new AssertionError("Сетка приложений не прокручивается обратно вверх");
+            }
+            device.waitForIdle(2_000L);
+        } catch (UiObjectNotFoundException e) {
+            throw new AssertionError("Не удалось прокрутить сетку приложений", e);
         }
-        device.waitForIdle(2_000L);
-        if (!drawerGrid.scrollBackward()) {
-            throw new AssertionError("Сетка приложений не прокручивается обратно вверх");
-        }
-        device.waitForIdle(2_000L);
     }
 }
