@@ -4483,3 +4483,94 @@ ViewStub и ленивое построение UI, откладывание н�
 «Cutting Android Cold Start from 3s to 800ms» — порядок работы: сначала
 измерение (`am start -W`), затем разбиение инициализации на синхронную,
 отложенную и фоновую.
+
+## 54. Baseline и startup-профили: инфраструктура есть, профиля нет
+
+### 54.1 Откуда взялось направление
+
+По §52–53 точечные правки `onCreate` дают единицы процентов. Документация
+Google называет другим рычагом **startup-профили**: подмножество baseline,
+по которому build-система оптимизирует раскладку DEX. Заявленный эффект —
+**15–30 % быстрее, чем при одном baseline-профиле** [1]. Это на порядок больше
+того, что дали все правки §50–53 вместе.
+
+Условия по документации: R8 включён и `dexLayoutOptimization` включён. У нас R8
+уже включён по F-20 и проверяется отдельным шагом CI — то есть половина
+требований выполнена ещё до этой работы.
+
+### 54.2 Что сделано
+
+| Что | Где | Зачем |
+|---|---|---|
+| Модуль-генератор | `baselineprofile/` (`com.android.test`) | прогон настоящих действий на устройстве, из которого получается профиль |
+| Сценарий | `BaselineProfileGenerator.startupAndDrawer()` | холодный старт **и** открытие каталога: каталог — второй по частоте экран |
+| `includeInStartupProfile = true` | там же | без него нет startup-профиля, а именно он даёт заявленные 15–30 % |
+| Плагин и зависимость | `:app` | `androidx.baselineprofile`, `profileinstaller:1.3.1`, `baselineProfile project(':baselineprofile')` |
+| `android.useAndroidX=true` | `gradle.properties` | без этого флага AGP не собирает проект с `profileinstaller` |
+
+Профиль **не сгенерирован**: для этого нужен прогон на устройстве
+(`:app:generateReleaseBaselineProfile`), а генерация при обычной сборке
+намеренно выключена — она занимает минуты и не должна быть условием CI на
+каждый коммит.
+
+### 54.3 Три падения, каждое названо по причине
+
+Инфраструктура не заработала с первого раза, и это стоит записать: все три
+ошибки типовые, и все три я нашёл по тексту, а не подбором.
+
+1. **`unknown property automaticGenerationDuringBuild`** (`45684652064`).
+   Свойства потребителя профиля (`saveInSrc`, `mergeIntoMain`,
+   `dexLayoutOptimization`, `automaticGenerationDuringBuild`) относятся к
+   расширению `BaselineProfileConsumerExtension` в `:app`. У модуля-генератора
+   расширение другое — `...ProducerExtension`. Блок `baselineProfile {}` в
+   `baselineprofile/build.gradle` убран.
+2. **`android.useAndroidX property is not enabled`** (`45685554102`).
+   Проект был написан на чистом Android API, AndroidX в нём не использовался
+   вовсе. `profileinstaller` — AndroidX-зависимость, поэтому флаг обязателен.
+   Jetifier намеренно выключен: старых support-библиотек нет.
+3. **`Dex optimization based on startup profile has been turned on ... but there
+   are no input baseline profile found`** (`45686563422`).
+   Я включил `dexLayoutOptimization = true` до того, как в репозитории появился
+   профиль. R8 требует входной файл и падает на
+   `:app:minifyReleaseWithR8`. Флаг выключен до генерации профиля — теперь это
+   записано в самом `build.gradle` рядом с флагом, чтобы порядок нельзя было
+   перепутать молча.
+
+Прогон `45687522464` после исправлений: 4/4 `success`.
+
+### 54.4 Что нужно, чтобы получить выигрыш
+
+1. Прогнать `:app:generateReleaseBaselineProfile` на эмуляторе API 34 с KVM
+   (образ уже используется в CI).
+2. Положить `baseline-prof.txt` и `startup-prof.txt` в репозиторий
+   (`saveInSrc = true` кладёт их в `src/<variant>/generated/baselineProfiles`).
+3. Включить `dexLayoutOptimization = true`.
+4. Измерить: тот же замер холодного старта (§50) **до** и **после**. Порог
+   нельзя брать из документации — 15–30 % там про приложения с сотнями методов
+   в горячем пути, а у нас 121–543 мс `onCreate` с тремя равными фазами.
+
+Шаг 1 — единственное, чего я не могу сделать из песочницы: генерация требует
+устройства и занимает минуты. Всё остальное подготовлено.
+
+### 54.5 Границы
+
+* **Ускорения пока нет.** Есть инфраструктура; выигрыш появится только после
+  генерации профиля, и его размер неизвестен.
+* Профиль устаревает: если добавить экран и не добавить его в сценарий
+  генератора, он останется без оптимизации. Это записано в самом генераторе.
+* `profileinstaller` добавляет в APK зависимость — впервые за всю историю
+  проекта, где «без сторонних зависимостей в рантайме» было заявленным
+  принципом. Это осознанная плата: без него профиль не доставляется на
+  устройства с Android ниже 12.
+
+### 54.6 Ссылки
+
+[1] «Create Startup Profiles» (developer.android.com): startup-профили дают
+15–30 % сверх baseline, требуют R8 и `dexLayoutOptimization`; в AGP 8.1–8.2
+оптимизация выключена по умолчанию и включается флагом в блоке `baselineProfile`
+модуля приложения.
+[2] «Create Baseline Profiles»: генератор — модуль `com.android.test` с
+`targetProjectPath = ':app'`; профиль пишется в `src/<variant>/generated/baselineProfiles`.
+[3] «Automated Performance Hygiene: Baseline Profiles and Macrobenchmarks in
+CI/CD»: в CI профиль генерируется на Gradle Managed Device, файл
+`baseline-prof.txt` коммитится как запасной вариант.
