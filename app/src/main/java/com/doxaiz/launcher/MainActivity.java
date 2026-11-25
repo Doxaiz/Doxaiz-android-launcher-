@@ -2172,6 +2172,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         // так, будто построение каталога бесплатно. Ровно та же ошибка порядка,
         // что была со счётчиком папок в §51.2.
         publishDesktopBuildStats();
+    }
 
     /**
      * Обновляет цвета подписей на уже построенных страницах рабочего стола:
