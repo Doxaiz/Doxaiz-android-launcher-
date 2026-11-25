@@ -417,8 +417,11 @@ PYEOF
             echo "::warning title=холодный старт::$caption — TotalTime не найден в выводе am start (эмулятор); число неизвестно, не 0"
             note "холодный старт" "$caption — нет данных"
         else
+            # Лимит выше общего: здесь рядом с медианой идут и счётчики работы,
+            # и фазы. При 240 символах строка обрезалась на ms_drawer, и
+            # ms_drawer_after — цена каталога — не была видна вовсе.
             if [ -n "$build_stats" ]; then
-                note "холодный старт" "$caption: $parsed; работа: $build_stats"
+                NOTE_MAX_CHARS=420 note "холодный старт" "$caption: $parsed; работа: $build_stats"
             else
                 note "холодный старт" "$caption: $parsed; счётчик работы не записан"
             fi

@@ -2158,12 +2158,20 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             refreshDesktopTextColors();
         }
         refreshDrawerMemory();
+        final long drawerUiStartNs = System.nanoTime();
         rebuildDrawerRecent();
         rebuildDrawerCategories();
         rebuildAlphabetBar();
+        phaseDrawerUiNs = System.nanoTime() - drawerUiStartNs;
         if (currentScreen == SCREEN_SETTINGS) {
             rebuildSettingsContent();
         }
+        // Публикуем ещё раз: файл пишется внутри rebuildDesktop, а фаза каталога
+        // считается уже после неё. Без этого повторного вызова в отчёт попадало
+        // значение от предыдущего запуска — при первом старте это 0, и выглядело
+        // так, будто построение каталога бесплатно. Ровно та же ошибка порядка,
+        // что была со счётчиком папок в §51.2.
+        publishDesktopBuildStats();
     }
 
     /**
@@ -2674,11 +2682,14 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
         repository.prewarmIcons(desktop.collectPriorityIconKeys(currentPage));
         rebuildDesktop();
+        final long afterAppsStartNs = System.nanoTime();
         if (currentScreen == SCREEN_DRAWER) {
             rebuildDrawerCategories();
         }
         applyFilter(drawerSearchInput != null ? drawerSearchInput.getText().toString() : "", false);
         rebuildDrawerRecent();
+        phaseDrawerAfterAppsNs = System.nanoTime() - afterAppsStartNs;
+        publishDesktopBuildStats();
 
         // Если сейчас открыта папка — обновим её содержимое
         if (openFolderId != null && openFolderPage >= 0 && modalOverlay.getVisibility() == View.VISIBLE) {
@@ -2766,6 +2777,24 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     private long phaseBuildUiNs = 0L;
     /** Инициализация до построения интерфейса: prefs, диагностика, модели. */
     private long phaseInitNs = 0L;
+    /**
+     * Часть {@code applyTheme}, которая строит интерфейс каталога: «частые»,
+     * чипы категорий и алфавитную полосу.
+     *
+     * На старте показан рабочий стол, а каталог не виден — но эта работа
+     * выполняется. Сколько она стоит, до сих пор не было видно: она входила в
+     * общий {@code ms_theme}. Без числа правку «строить каталог при первом
+     * открытии» нельзя ни оправдать, ни отклонить.
+     */
+    private long phaseDrawerUiNs = 0L;
+    /**
+     * Построение каталога в {@code onAppsUpdated} — там, где приложения уже есть.
+     *
+     * {@code ms_drawer} в {@code applyTheme} на старте равен нулю не потому, что
+     * работа дешева, а потому что список приложений ещё пуст: все три
+     * построителя выходят сразу. Реальная цена каталога платится здесь.
+     */
+    private long phaseDrawerAfterAppsNs = 0L;
     private long phaseBuildNs = 0L;
     private long phaseTotalNs = 0L;
     private int desktopBuilds = 0;
@@ -2828,6 +2857,8 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                     + " ms_total=" + (phaseTotalNs / 1_000_000L)
                     + " ms_init=" + (phaseInitNs / 1_000_000L)
                     + " ms_ui=" + (phaseBuildUiNs / 1_000_000L)
+                    + " ms_drawer=" + (phaseDrawerUiNs / 1_000_000L)
+                    + " ms_drawer_after=" + (phaseDrawerAfterAppsNs / 1_000_000L)
                     + " ms_theme=" + (phaseThemeNs / 1_000_000L)
                     + " ms_build_last=" + (phaseBuildNs / 1_000_000L)
                     + "\n";
