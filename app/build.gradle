@@ -55,27 +55,27 @@ android {
     }
 }
 
+// Для AGP 8.2.2 startup-профиль обязателен, когда включена DEX-раскладка.
+// Проверяем файл до конфигурации плагина: обычная release-сборка без профиля
+// остаётся валидной, а после генерации/коммита профиль включает оптимизацию.
+// При генерации и сборке в CI это две отдельные команды Gradle, поэтому
+// повторная конфигурация увидит только что созданный файл.
+def hasGeneratedStartupProfile = file('src/main/generated/baselineProfiles/startup-prof.txt').isFile()
+
 baselineProfile {
-    // Профиль лежит в репозитории и попадает в сборку сразу: генерация — это
-    // прогон на устройстве, она не должна быть условием обычной сборки.
+    // Источник обновляется вручную/в workflow по кнопке: генерация требует устройства.
     saveInSrc = true
-    // AGP 8.2 не поддерживает отдельные профили на вариант — плагин сводит их.
+    // На AGP 8.2 все варианты объединяются в src/main/generated/baselineProfiles/.
     mergeIntoMain = true
-    // Оптимизация раскладки DEX по startup-профилю.
-    //
-    // ВЫКЛЮЧЕНА, пока профиля нет в репозитории. С включённым флагом R8 падает
-    // на :app:minifyReleaseWithR8: «Dex optimization based on startup profile
-    // has been turned on ... but there are no input baseline profile found».
-    // Порядок обязателен: сначала сгенерировать профиль на устройстве
-    // (:app:generateReleaseBaselineProfile), затем включить флаг. Обратный
-    // порядок ломает release-сборку — проверено в прогоне 45686563422.
-    dexLayoutOptimization = false
+    // Не включаем оптимизацию, пока R8 не получит настоящий startup-prof.txt.
+    // Без файла R8 падает на :app:minifyReleaseWithR8 — прогон 45686563422.
+    dexLayoutOptimization = hasGeneratedStartupProfile
 }
 
 dependencies {
-    // ProfileInstaller: доставляет профиль на устройстве (Android 12+ умеет сам,
-    // но profileinstaller нужен как зависимость для сборки профиля).
-    implementation 'androidx.profileinstaller:profileinstaller:1.3.1'
+    // ProfileInstaller устанавливает/передаёт ART упакованный профиль при
+    // установке APK вне Google Play, в том числе при sideload из GitHub Release.
+    implementation 'androidx.profileinstaller:profileinstaller:1.4.1'
     baselineProfile project(':baselineprofile')
     // Без сторонних зависимостей в рантайме — минимальный размер APK и мгновенный отклик.
     testImplementation 'junit:junit:4.13.2'

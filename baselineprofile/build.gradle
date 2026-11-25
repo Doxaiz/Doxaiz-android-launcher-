@@ -34,7 +34,9 @@ dependencies {
     implementation 'androidx.benchmark:benchmark-macro-junit4:1.2.4'
 }
 
-// Блок baselineProfile {} здесь НЕ настраивается: у модуля-генератора другое
-// расширение (producer), и свойства потребителя вроде saveInSrc и
-// automaticGenerationDuringBuild к нему не относятся — Gradle падал с
-// «unknown property automaticGenerationDuringBuild». Эти настройки живут в :app.
+// Генерация запускается внутри подключённого эмулятора GitHub Actions.
+// Это producer-настройка; consumer-параметры (saveInSrc, mergeIntoMain и
+// dexLayoutOptimization) принадлежат :app и находятся там.
+baselineProfile {
+    useConnectedDevices = true
+}

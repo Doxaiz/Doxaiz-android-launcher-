@@ -1,5 +1,6 @@
 package com.doxaiz.launcher.baselineprofile;
 
+import androidx.benchmark.macro.MacrobenchmarkScope;
 import androidx.benchmark.macro.junit4.BaselineProfileRule;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.uiautomator.UiDevice;
@@ -9,77 +10,60 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 /**
- * Генератор профилей для Doxaiz (AUDIT §54).
+ * Генерирует baseline- и startup-профили из реальных действий пользователя.
  *
- * <p>Что делает: запускает холодный старт и несколько основных действий,
- * записывает, какие методы реально исполнялись, и складывает результат в
- * {@code baseline-prof.txt} и {@code startup-prof.txt}. ART компилирует эти
- * методы заранее, поэтому первый запуск у пользователя не тратит время на
- * интерпретацию.
- *
- * <p><b>Почему пути именно такие.</b> Сценарий повторяет то, что делает
- * пользователь при первом запуске: рабочий стол, затем открытие каталога. Если
- * профилировать только старт, каталог останется некомпилированным, и первое
- * открытие будет медленным — а это второй по частоте экран.
- *
- * <p><b>Чего профиль не делает.</b> Он не ускоряет то, чего нет в сценарии: если
- * добавить новый тяжёлый экран и не добавить его сюда, он останется без
- * оптимизации. Поэтому {@code docs/maintenance/AUDIT.md} §54 требует обновлять
- * этот файл вместе с новыми экранами.
- *
- * <p><b>Как запускать.</b> {@code ./gradlew :app:generateReleaseBaselineProfile}
- * на устройстве или эмуляторе API 34. В обычном CI не запускается: это минуты
- * прогона, а не секунды.
+ * <p>Запуск: {@code ./gradlew :app:generateBaselineProfile}. Так как в
+ * {@code :app} задано {@code mergeIntoMain = true}, файлы появляются в
+ * {@code app/src/main/generated/baselineProfiles/}. Нужен подключённый
+ * эмулятор или устройство.
  */
 @RunWith(AndroidJUnit4.class)
 public class BaselineProfileGenerator {
 
+    private static final String PACKAGE_NAME = "com.doxaiz.launcher";
+
     @Rule
     public final BaselineProfileRule rule = new BaselineProfileRule();
 
-    /** Имя пакета приложения: то же, что applicationId в :app. */
-    private static final String PACKAGE_NAME = "com.doxaiz.launcher";
-
     /**
-     * Холодный старт + открытие каталога.
+     * В startup-профиль входит только путь до первого экрана.
      *
-     * <p>{@code includeInStartupProfile = true} — это и есть «startup»-часть:
-     * её build-система использует для оптимизации раскладки DEX, что по
-     * документации даёт 15–30 % сверх обычного профиля.
+     * <p>Startup-профиль влияет на раскладку DEX, поэтому в него нельзя
+     * включать действия после старта (например, прокрутку каталога): для них
+     * остаётся общий baseline-профиль.
      */
     @Test
-    public void startupAndDrawer() {
+    public void startup() {
         rule.collect(
                 PACKAGE_NAME,
-                10,     // до 10 итераций: профиль получается устойчивее
-                5,      // стабильные итерации — когда список методов перестал расти
-                true,   // includeInStartupProfile
-                profileBlock -> {
-                    UiDevice device = androidx.test.platform.app.InstrumentationRegistry
-                            .getInstrumentation().getUiAutomation() != null
-                            ? androidx.test.uiautomator.UiDevice.getInstance(
-                                    androidx.test.platform.app.InstrumentationRegistry.getInstrumentation())
-                            : null;
-                    // Сначала рабочий стол: это и есть холодный старт.
-                    pressHome();
-                    startActivityAndWait();
+                10,
+                5,
+                null,
+                true,
+                (MacrobenchmarkScope scope) -> {
+                    scope.pressHome();
+                    scope.startActivityAndWait();
+                    UiDevice device = LauncherProfileJourneys.device();
+                    device.waitForIdle(2_000L);
+                    return kotlin.Unit.INSTANCE;
+                });
+    }
 
-                    if (device != null) {
-                        device.waitForIdle(2_000);
-                        // Каталог: второй по частоте экран. Жест тот же, что у
-                        // пользователя — свайп вверх по рабочему столу.
-                        try {
-                            device.swipe(device.getDisplayWidth() / 2,
-                                    (int) (device.getDisplayHeight() * 0.7),
-                                    device.getDisplayWidth() / 2,
-                                    (int) (device.getDisplayHeight() * 0.25),
-                                    30);
-                        } catch (Throwable ignored) {
-                            // Свайп — не цель профиля: если жест не прошёл,
-                            // профиль всё равно корректен, просто без каталога.
-                        }
-                        device.waitForIdle(2_000);
-                    }
+    /** Каталог и прокрутка попадают в baseline, но не в startup-профиль. */
+    @Test
+    public void drawerJourney() {
+        rule.collect(
+                PACKAGE_NAME,
+                10,
+                5,
+                null,
+                false,
+                (MacrobenchmarkScope scope) -> {
+                    scope.pressHome();
+                    scope.startActivityAndWait();
+                    LauncherProfileJourneys.openDrawerAndScroll(
+                            LauncherProfileJourneys.device());
+                    return kotlin.Unit.INSTANCE;
                 });
     }
 }
