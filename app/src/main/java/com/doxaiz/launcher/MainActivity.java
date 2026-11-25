@@ -2158,9 +2158,11 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             refreshDesktopTextColors();
         }
         refreshDrawerMemory();
+        final long drawerUiStartNs = System.nanoTime();
         rebuildDrawerRecent();
         rebuildDrawerCategories();
         rebuildAlphabetBar();
+        phaseDrawerUiNs = System.nanoTime() - drawerUiStartNs;
         if (currentScreen == SCREEN_SETTINGS) {
             rebuildSettingsContent();
         }
@@ -2766,6 +2768,16 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     private long phaseBuildUiNs = 0L;
     /** Инициализация до построения интерфейса: prefs, диагностика, модели. */
     private long phaseInitNs = 0L;
+    /**
+     * Часть {@code applyTheme}, которая строит интерфейс каталога: «частые»,
+     * чипы категорий и алфавитную полосу.
+     *
+     * На старте показан рабочий стол, а каталог не виден — но эта работа
+     * выполняется. Сколько она стоит, до сих пор не было видно: она входила в
+     * общий {@code ms_theme}. Без числа правку «строить каталог при первом
+     * открытии» нельзя ни оправдать, ни отклонить.
+     */
+    private long phaseDrawerUiNs = 0L;
     private long phaseBuildNs = 0L;
     private long phaseTotalNs = 0L;
     private int desktopBuilds = 0;
@@ -2828,6 +2840,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                     + " ms_total=" + (phaseTotalNs / 1_000_000L)
                     + " ms_init=" + (phaseInitNs / 1_000_000L)
                     + " ms_ui=" + (phaseBuildUiNs / 1_000_000L)
+                    + " ms_drawer=" + (phaseDrawerUiNs / 1_000_000L)
                     + " ms_theme=" + (phaseThemeNs / 1_000_000L)
                     + " ms_build_last=" + (phaseBuildNs / 1_000_000L)
                     + "\n";
