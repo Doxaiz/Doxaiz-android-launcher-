@@ -19,3 +19,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "DoxaizLauncher"
 include ':app'
+include ':baselineprofile'

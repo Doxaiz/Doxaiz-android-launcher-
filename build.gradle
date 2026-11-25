@@ -1,3 +1,6 @@
 plugins {
     id 'com.android.application' version '8.2.2' apply false
+    // Генератор baseline/startup-профилей (AUDIT §54). Версия 1.2.4 совместима
+    // с AGP 8.2; плагин только объявлен здесь, применяется в :app и :baselineprofile.
+    id 'androidx.baselineprofile' version '1.2.4' apply false
 }

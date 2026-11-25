@@ -1,5 +1,8 @@
 plugins {
     id 'com.android.application'
+    // Профили (AUDIT §54): build-система кладёт baseline-prof.txt и
+    // startup-prof.txt в APK, ART компилирует эти методы заранее.
+    id 'androidx.baselineprofile'
 }
 
 android {
@@ -52,7 +55,28 @@ android {
     }
 }
 
+baselineProfile {
+    // Профиль лежит в репозитории и попадает в сборку сразу: генерация — это
+    // прогон на устройстве, она не должна быть условием обычной сборки.
+    saveInSrc = true
+    // AGP 8.2 не поддерживает отдельные профили на вариант — плагин сводит их.
+    mergeIntoMain = true
+    // Оптимизация раскладки DEX по startup-профилю.
+    //
+    // ВЫКЛЮЧЕНА, пока профиля нет в репозитории. С включённым флагом R8 падает
+    // на :app:minifyReleaseWithR8: «Dex optimization based on startup profile
+    // has been turned on ... but there are no input baseline profile found».
+    // Порядок обязателен: сначала сгенерировать профиль на устройстве
+    // (:app:generateReleaseBaselineProfile), затем включить флаг. Обратный
+    // порядок ломает release-сборку — проверено в прогоне 45686563422.
+    dexLayoutOptimization = false
+}
+
 dependencies {
+    // ProfileInstaller: доставляет профиль на устройстве (Android 12+ умеет сам,
+    // но profileinstaller нужен как зависимость для сборки профиля).
+    implementation 'androidx.profileinstaller:profileinstaller:1.3.1'
+    baselineProfile project(':baselineprofile')
     // Без сторонних зависимостей в рантайме — минимальный размер APK и мгновенный отклик.
     testImplementation 'junit:junit:4.13.2'
     // F-18: настоящий org.json для JVM-тестов. В APK он не попадает — это
