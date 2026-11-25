@@ -2682,11 +2682,14 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
         repository.prewarmIcons(desktop.collectPriorityIconKeys(currentPage));
         rebuildDesktop();
+        final long afterAppsStartNs = System.nanoTime();
         if (currentScreen == SCREEN_DRAWER) {
             rebuildDrawerCategories();
         }
         applyFilter(drawerSearchInput != null ? drawerSearchInput.getText().toString() : "", false);
         rebuildDrawerRecent();
+        phaseDrawerAfterAppsNs = System.nanoTime() - afterAppsStartNs;
+        publishDesktopBuildStats();
 
         // Если сейчас открыта папка — обновим её содержимое
         if (openFolderId != null && openFolderPage >= 0 && modalOverlay.getVisibility() == View.VISIBLE) {
@@ -2784,6 +2787,14 @@ public class MainActivity extends Activity implements AppRepository.Listener {
      * открытии» нельзя ни оправдать, ни отклонить.
      */
     private long phaseDrawerUiNs = 0L;
+    /**
+     * Построение каталога в {@code onAppsUpdated} — там, где приложения уже есть.
+     *
+     * {@code ms_drawer} в {@code applyTheme} на старте равен нулю не потому, что
+     * работа дешева, а потому что список приложений ещё пуст: все три
+     * построителя выходят сразу. Реальная цена каталога платится здесь.
+     */
+    private long phaseDrawerAfterAppsNs = 0L;
     private long phaseBuildNs = 0L;
     private long phaseTotalNs = 0L;
     private int desktopBuilds = 0;
@@ -2847,6 +2858,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                     + " ms_init=" + (phaseInitNs / 1_000_000L)
                     + " ms_ui=" + (phaseBuildUiNs / 1_000_000L)
                     + " ms_drawer=" + (phaseDrawerUiNs / 1_000_000L)
+                    + " ms_drawer_after=" + (phaseDrawerAfterAppsNs / 1_000_000L)
                     + " ms_theme=" + (phaseThemeNs / 1_000_000L)
                     + " ms_build_last=" + (phaseBuildNs / 1_000_000L)
                     + "\n";
