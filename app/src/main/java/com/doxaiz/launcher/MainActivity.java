@@ -364,6 +364,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        final long onCreateStartNs = System.nanoTime();
         super.onCreate(savedInstanceState);
 
         prefs = new Prefs(this);
@@ -498,7 +499,9 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         });
         repository.start();
 
+        final long themeStartNs = System.nanoTime();
         applyTheme();
+        phaseThemeNs = System.nanoTime() - themeStartNs;
         showScreen(SCREEN_HOME);
 
         // Рабочий стол построен и показан: запуск удался. Снимаем отметку
@@ -544,6 +547,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             // не нужна и не должна мешать показать его при новом сбое.
             startedInSafeMode = false;
         });
+        phaseTotalNs = System.nanoTime() - onCreateStartNs;
     }
 
     /**
@@ -2743,6 +2747,20 @@ public class MainActivity extends Activity implements AppRepository.Listener {
      * Публикуется только в debug-сборке в files/doxaiz_build_stats.txt и
      * читается из CI через run-as.
      */
+    /**
+     * Стоимость фаз холодного старта в наносекундах, по последнему запуску.
+     *
+     * Нужна, чтобы отличить «дорогую» работу от «заметной». Замер §51 показал,
+     * что при старте стол пересобирается дважды, но сколько стоит первый,
+     * впустую потраченный проход — не было видно: он строит две подсказки, а не
+     * 15 плиток, и мог оказаться дешёвым. Опираться на догадку «дорого, потому
+     * что лишнее» нельзя.
+     *
+     * Пишется в тот же файл, что и счётчики, чтобы не заводить второй канал.
+     */
+    private long phaseThemeNs = 0L;
+    private long phaseBuildNs = 0L;
+    private long phaseTotalNs = 0L;
     private int desktopBuilds = 0;
     /** Пересборки, выполненные до прихода списка приложений (appsByKey пуст). */
     private int desktopBuildsBeforeApps = 0;
@@ -2752,6 +2770,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     private final List<BadgeSlot> dockBadgeSlots = new ArrayList<>();
 
     private void rebuildDesktop() {
+        final long buildStartNs = System.nanoTime();
         desktopBuilds++;
         // Сборка «в пустоту»: приложения ещё не пришли из репозитория, значит
         // плитки приложений построить не из чего, и следующий вызов
@@ -2774,6 +2793,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         pagerView.setPages(pageViews, currentPage);
         rebuildPageDots();
         rebuildDock();
+        phaseBuildNs = System.nanoTime() - buildStartNs;
         publishDesktopBuildStats();
     }
 
@@ -2797,7 +2817,11 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                     + " folders=" + desktopFolderTiles
                     + " tiles_no_data=" + desktopTilesWithoutData
                     + " pages=" + (desktop != null ? desktop.pages.size() : -1)
-                    + " apps=" + appsByKey.size() + "\n";
+                    + " apps=" + appsByKey.size()
+                    + " ms_total=" + (phaseTotalNs / 1_000_000L)
+                    + " ms_theme=" + (phaseThemeNs / 1_000_000L)
+                    + " ms_build_last=" + (phaseBuildNs / 1_000_000L)
+                    + "\n";
             java.io.File f = new java.io.File(getFilesDir(), "doxaiz_build_stats.txt");
             try (java.io.FileOutputStream out = new java.io.FileOutputStream(f, false)) {
                 out.write(line.getBytes(java.nio.charset.StandardCharsets.UTF_8));
