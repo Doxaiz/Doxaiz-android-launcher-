@@ -4508,7 +4508,7 @@ Google называет другим рычагом **startup-профили**: 
 | Плагин и доставка | `:app` | `androidx.baselineprofile`, `profileinstaller:1.4.1`, `baselineProfile project(':baselineprofile')` |
 | DEX-layout | `app/build.gradle` | `dexLayoutOptimization` включается только если существует `startup-prof.txt`; без него R8 не падает на обычной release-сборке |
 | Macrobenchmark | `StartupBenchmarks` | 4 теста: холодный старт (`StartupTimingMetric`) и прокрутка (`FrameTimingMetric`), каждый с `None` и `Partial(Require)` |
-| Компиляция в CI | `.github/workflows/ci.yml` | `:baselineprofile:assemble` компилирует test-only модуль без запуска тестов на каждом коммите |
+| Компиляция в CI | `.github/workflows/ci.yml` | `:baselineprofile:compileBenchmarkReleaseJavaWithJavac` компилирует исходники тестового варианта без connected-задач на каждом коммите |
 | Ручной workflow | `.github/workflows/baseline-profile.yml` | API 34: генерация, R8-release и Macrobenchmark; артефакты сохраняются, коммит профилей — только по отдельному флагу в текущую ветку |
 | AndroidX | `gradle.properties` | `android.useAndroidX=true` нужен для `profileinstaller` |
 
@@ -4568,8 +4568,13 @@ Google называет другим рычагом **startup-профили**: 
 * **Ускорения пока нет.** В репозитории нет сгенерированных профилей; без
   `startup-prof.txt` DEX-layout остаётся выключен. Размер возможного эффекта
   неизвестен, и проценты из документации не являются результатом проекта.
-* YAML обоих workflow и встроенные shell/Python-фрагменты проверены парсерами;
-  Gradle-сборка модуля, тесты и ручной workflow ещё не запускались.
+* YAML обоих workflow и встроенные shell/Python-фрагменты проверены парсерами.
+  Прогон CI `45699616434` прошёл JVM-тесты (96/96), lint и R8 release; Java-
+  исходники генератора/бенчмарков скомпилировались. Но `:baselineprofile:assemble`
+  затем запустил `connectedNonMinifiedReleaseAndroidTest` без подключённого
+  устройства и упал. В CI заменена aggregate-задача на прямую компиляцию
+  `compileBenchmarkReleaseJavaWithJavac`; эту правку ещё нужно перепроверить.
+  Ручной workflow и Macrobenchmark не запускались.
 * Профиль устаревает: если добавить экран и не добавить его в сценарий
   генератора, он останется без оптимизации. Это записано в самом генераторе.
 * `profileinstaller` добавляет в APK зависимость — впервые за всю историю

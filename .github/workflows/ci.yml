@@ -219,12 +219,13 @@ jobs:
         if: failure()
         run: bash .github/scripts/gradle-failure.sh gradle-release.log
 
-      # Собираем test-only модуль без запуска на устройстве: так CI проверяет,
-      # что генератор профилей и Macrobenchmark-классы хотя бы компилируются.
-      - name: Скомпилировать генератор и Macrobenchmark
+      # Компилируем исходники тестового варианта напрямую. Aggregate assemble
+      # у com.android.test может включить connected-задачи генерации профиля;
+      # проверка в обычном CI не должна требовать подключённого устройства.
+      - name: Скомпилировать генератор и Macrobenchmark без устройства
         run: |
           set -o pipefail
-          ./gradlew --no-daemon --stacktrace :baselineprofile:assemble 2>&1 | tee gradle-baselineprofile.log
+          ./gradlew --no-daemon --stacktrace :baselineprofile:compileBenchmarkReleaseJavaWithJavac 2>&1 | tee gradle-baselineprofile.log
 
       - name: Причина падения сборки профилей
         if: failure()
