@@ -481,8 +481,11 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             }
         });
 
+        phaseInitNs = System.nanoTime() - onCreateStartNs;
         setupWindow();
+        final long buildUiStartNs = System.nanoTime();
         buildRootUi();
+        phaseBuildUiNs = System.nanoTime() - buildUiStartNs;
         setContentView(rootContainer);
         setupInsets();
         setupBackHandler();
@@ -2759,6 +2762,10 @@ public class MainActivity extends Activity implements AppRepository.Listener {
      * Пишется в тот же файл, что и счётчики, чтобы не заводить второй канал.
      */
     private long phaseThemeNs = 0L;
+    /** Построение корневого интерфейса: док, шторка, каталог, настройки. */
+    private long phaseBuildUiNs = 0L;
+    /** Инициализация до построения интерфейса: prefs, диагностика, модели. */
+    private long phaseInitNs = 0L;
     private long phaseBuildNs = 0L;
     private long phaseTotalNs = 0L;
     private int desktopBuilds = 0;
@@ -2819,6 +2826,8 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                     + " pages=" + (desktop != null ? desktop.pages.size() : -1)
                     + " apps=" + appsByKey.size()
                     + " ms_total=" + (phaseTotalNs / 1_000_000L)
+                    + " ms_init=" + (phaseInitNs / 1_000_000L)
+                    + " ms_ui=" + (phaseBuildUiNs / 1_000_000L)
                     + " ms_theme=" + (phaseThemeNs / 1_000_000L)
                     + " ms_build_last=" + (phaseBuildNs / 1_000_000L)
                     + "\n";
