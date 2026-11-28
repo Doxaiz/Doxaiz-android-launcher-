@@ -168,9 +168,12 @@ jobs:
     runs-on: ubuntu-latest
     needs: unit-tests
     timeout-minutes: 30
-    # Запись нужна только шагу «Обновить APK в единственном релизе»: по
-    # умолчанию GITHUB_TOKEN читает репозиторий и не может менять релизы.
-    # Шаг всё равно выполняется только для push в main.
+    env:
+      RELEASE_VERSION: '1.0.1'
+      RELEASE_VERSION_CODE: '2'
+    # Запись нужна только шагу публикации APK в релизе.
+    # По умолчанию GITHUB_TOKEN читает репозиторий и не может менять релизы.
+    # Публикация всё равно выполняется только для push/workflow_dispatch с main.
     permissions:
       contents: write
     steps:
@@ -198,7 +201,10 @@ jobs:
           BUILD_TOOLS="$(ls -d "$SDK"/build-tools/* | sort -V | tail -1)"
           APK="$(find app/build/outputs/apk/debug -name '*.apk' | head -1)"
           echo "APK: $APK"
-          "$BUILD_TOOLS/aapt2" dump badging "$APK" | head -5
+          BADGING="$("$BUILD_TOOLS/aapt2" dump badging "$APK")"
+          printf '%s\n' "$BADGING" | head -5
+          printf '%s\n' "$BADGING" | grep -F "package: name='com.doxaiz.launcher' versionCode='$RELEASE_VERSION_CODE' versionName='$RELEASE_VERSION'" >/dev/null \
+            || { echo "::error title=APK::ожидались versionCode=$RELEASE_VERSION_CODE, versionName=$RELEASE_VERSION"; exit 1; }
           echo "--- разрешения ---"
           # 0aapt2 dump permissions поддерживается с build-tools 31+
           "$BUILD_TOOLS/aapt2" dump permissions "$APK" || true
@@ -238,11 +244,13 @@ jobs:
             app/build/outputs/apk/debug/*.apk
             apk-sha256.txt
 
-      # Публичный релиз живёт по одному тегу и обновляется НА МЕСТЕ: новых
-      # тегов не появляется, история не превращается в свалку. Нумерация начата
-      # заново с 1.0.0 — прежние тестовые релизы удалены осознанно.
+      # Текущий публичный релиз — v1.0.1 с versionCode 2. Первый запуск после
+      # merge создаёт его отдельным тегом; старый v1.0.0 удаляется вручную после
+      # проверки новых assets. Повторные push в main обновляют только v1.0.1.
+      # Следующая версия требует согласованного versionCode/versionName и этого
+      # релизного target; не переиспользуйте этот tag для другой версии.
       #
-      # Если релиза `v1.0.0` ещё нет, шаг создаёт его из текущего коммита main.
+      # Если релиза `v1.0.1` ещё нет, шаг создаёт его из текущего коммита main.
       # Зачем: скачать артефакт CI из некоторых окружений нельзя (хост хранилища
       # артефактов заблокирован), а APK из релиза доступен обычной ссылкой.
       # Условие допускает и ручной запуск (workflow_dispatch) с main: 18.11
@@ -257,28 +265,29 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          TAG="v1.0.0"
+          TAG="v${RELEASE_VERSION}"
+          APK_NAME="doxaiz-${RELEASE_VERSION}.apk"
           # Причина падения должна быть в аннотации, а не только в логе:
           # первая попытка упала из-за прав GITHUB_TOKEN (contents: read).
           fail() { echo "::error title=релиз::$1"; exit 1; }
           APK="$(find app/build/outputs/apk/debug -name '*.apk' | head -1)"
           [ -f "$APK" ] || fail "APK не найден в app/build/outputs/apk/debug"
-          cp "$APK" doxaiz-1.0.0.apk
+          cp "$APK" "$APK_NAME"
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             # Первая публикация: создаём тег и релиз из текущего main.
-            gh release create "$TAG" doxaiz-1.0.0.apk \
+            gh release create "$TAG" "$APK_NAME" \
               --target "$GITHUB_SHA" \
-              --title "Doxaiz 1.0.0" \
+              --title "Doxaiz ${RELEASE_VERSION}" \
               --notes-file docs/RELEASE_NOTES.md \
               || fail "не удалось создать релиз $TAG"
             echo "::notice title=релиз::создан $TAG"
           else
             echo "::notice title=релиз::релиз $TAG уже есть — обновляю на месте"
-            gh release edit "$TAG" --title "Doxaiz 1.0.0" \
+            gh release edit "$TAG" --title "Doxaiz ${RELEASE_VERSION}" \
               --notes-file docs/RELEASE_NOTES.md \
               || fail "не удалось обновить заметки релиза $TAG"
           fi
-          gh release upload "$TAG" doxaiz-1.0.0.apk --clobber \
+          gh release upload "$TAG" "$APK_NAME" --clobber \
             || fail "не удалось обновить APK в релизе $TAG"
           gh release upload "$TAG" apk-sha256.txt --clobber || true
           # Видео лежат в docs/ рядом с исходниками: загрузка ассетов из
@@ -301,11 +310,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          TAG="v1.0.0"
+          TAG="v${RELEASE_VERSION}"
+          APK_NAME="doxaiz-${RELEASE_VERSION}.apk"
           WANT="$(cut -d' ' -f1 apk-sha256.txt)"
           rm -rf /tmp/release-check
-          gh release download "$TAG" --pattern doxaiz-1.0.0.apk --dir /tmp/release-check
-          GOT="$(sha256sum /tmp/release-check/doxaiz-1.0.0.apk | cut -d' ' -f1)"
+          gh release download "$TAG" --pattern "$APK_NAME" --dir /tmp/release-check
+          GOT="$(sha256sum "/tmp/release-check/$APK_NAME" | cut -d' ' -f1)"
           echo "собрано сейчас: $WANT"
           echo "лежит в релизе: $GOT"
           if [ "$WANT" != "$GOT" ]; then
@@ -324,10 +334,8 @@ jobs:
             echo "::notice title=релиз::$NAME в $TAG совпадает с docs/"
           done
 
-      # Тег должен указывать на коммит, из которого собран APK. Иначе скачавший
-      # релиз не может понять, какой код внутри: 18.11 тег остался на 4890c04,
-      # а APK был пересобран из более позднего main. Релиз один и обновляется на
-      # месте — значит, и тег переезжает вместе с ним.
+      # Тег должен указывать на коммит, из которого собран APK. Повторная
+      # публикация v1.0.1 двигает именно этот tag вместе с обновлённым APK.
       - name: Сдвинуть тег релиза на опубликованный коммит
         if: >-
           github.ref == 'refs/heads/main' &&
@@ -336,10 +344,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/v1.0.0" \
+          TAG="v${RELEASE_VERSION}"
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/${TAG}" \
             -f sha="$GITHUB_SHA" -F force=true >/dev/null \
-            || { echo "::error title=тег::не удалось сдвинуть v1.0.0 на $GITHUB_SHA"; exit 1; }
-          echo "::notice title=тег::v1.0.0 теперь указывает на ${GITHUB_SHA:0:7}"
+            || { echo "::error title=тег::не удалось сдвинуть $TAG на $GITHUB_SHA"; exit 1; }
+          echo "::notice title=тег::$TAG теперь указывает на ${GITHUB_SHA:0:7}"
 
   emulator:
     name: Запуск на эмуляторе (API 34)
