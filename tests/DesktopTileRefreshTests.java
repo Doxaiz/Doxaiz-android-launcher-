@@ -21,6 +21,7 @@ public final class DesktopTileRefreshTests {
     public static void main(String[] args) {
         identicalText();
         newAppMarker();
+        folderContentDescription();
         nulls();
 
         System.out.println("DESKTOP_TILE_TESTS=" + n);
@@ -53,6 +54,15 @@ public final class DesktopTileRefreshTests {
         check(TileLabels.sameText(marked, "• Банк"),
                 "та же метка распознаётся как та же");
         check(marked.toString().startsWith("• "), "метка — префикс «• »");
+    }
+
+    private static void folderContentDescription() {
+        check("Инструменты".equals(FolderTileLabels.contentDescription("Инструменты", 0)),
+                "пустая папка описывается только именем");
+        check("Игры, приложений: 3".equals(FolderTileLabels.contentDescription("Игры", 3)),
+                "описание папки включает число приложений");
+        check("Папка, приложений: 1".equals(FolderTileLabels.contentDescription(null, 1)),
+                "null-имя использует безопасное название");
     }
 
     private static void nulls() {

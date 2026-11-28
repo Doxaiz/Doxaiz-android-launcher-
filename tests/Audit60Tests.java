@@ -18,8 +18,8 @@ import java.util.Set;
  *     перезапуска (загрузка из JSON) координаты по-прежнему уникальны. Именно
  *     здесь раньше два элемента оказывались на одной клетке, и второй
  *     становился недоступным для нажатий (findItemIndexAt ищет по координатам).
- *  2. Отсутствие дублей: containsAnyDesktopItem() и containsAppAnywhere()
- *     видят папки и приложения, а не только «верхний уровень страницы».
+ *  2. Отсутствие дублей: containsAnyDesktopItem()/containsAppAnywhere() видят
+ *     содержимое папок, а containsPageApp() отличает плитку страницы от папки/дока.
  *  3. Флаг однократного импорта со штатного экрана: значение по умолчанию —
  *     false, после записи — true, ключ сохраняется в SharedPreferences.
  *  4. Даунсэмплинг иконки из дискового кэша: маленькие иконки не трогаем,
@@ -189,12 +189,16 @@ public final class Audit60Tests {
         desktop.pages.get(0).add(DesktopItem.appAt("a", 0, 0));
         check(desktop.containsAnyDesktopItem(), "иконка видна как содержимое");
         check(desktop.containsAppAnywhere("a"), "приложение найдено");
+        check(desktop.containsPageApp("a"), "приложение найдено как отдельная плитка страницы");
 
         // Приложение внутри папки: на верхнем уровне его нет, но дубль создавать нельзя.
         DesktopItem folder = DesktopItem.folderAt("f1", "Папка",
                 Collections.singletonList("b"), 1, 0);
         desktop.pages.get(0).add(folder);
         check(desktop.containsAppAnywhere("b"), "приложение внутри папки найдено");
+        check(!desktop.containsPageApp("b"), "элемент папки не считается отдельной плиткой страницы");
+        desktop.dock.add("d");
+        check(!desktop.containsPageApp("d"), "приложение в доке не считается плиткой страницы");
         check(!desktop.containsAppAnywhere("c"), "чужое приложение не считается своим");
     }
 
