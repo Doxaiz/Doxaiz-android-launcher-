@@ -12,6 +12,8 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 /** Повторно используемые действия генератора профиля и макробенчмарков. */
 final class LauncherProfileJourneys {
@@ -37,20 +39,68 @@ final class LauncherProfileJourneys {
                 "baseline-profile-ui.xml");
         try {
             device.dumpWindowHierarchy(hierarchy);
-            StringBuilder xml = new StringBuilder();
+            Set<String> packages = new LinkedHashSet<>();
+            StringBuilder drawerMatches = new StringBuilder();
+            StringBuilder appNodes = new StringBuilder();
+            StringBuilder otherLabels = new StringBuilder();
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(
                     new FileInputStream(hierarchy), StandardCharsets.UTF_8))) {
                 String line;
-                while ((line = reader.readLine()) != null && xml.length() < 1_000) {
-                    xml.append(line.trim()).append(' ');
+                while ((line = reader.readLine()) != null) {
+                    if (!line.trim().startsWith("<node ")) continue;
+                    String packageName = xmlAttribute(line, "package");
+                    String text = xmlAttribute(line, "text");
+                    String description = xmlAttribute(line, "content-desc");
+                    if (!packageName.isEmpty()) packages.add(packageName);
+                    boolean appNode = "com.doxaiz.launcher".equals(packageName);
+                    boolean clickable = "true".equals(xmlAttribute(line, "clickable"));
+                    if (!appNode && text.isEmpty() && description.isEmpty()) continue;
+                    if (appNode && text.isEmpty() && description.isEmpty() && !clickable) continue;
+
+                    String label = !description.isEmpty() ? description : text;
+                    String className = xmlAttribute(line, "class");
+                    int lastPackageSeparator = className.lastIndexOf('.');
+                    if (lastPackageSeparator >= 0) {
+                        className = className.substring(lastPackageSeparator + 1);
+                    }
+                    String node = packageName + "/" + className
+                            + "[" + label + "]@" + xmlAttribute(line, "bounds");
+                    StringBuilder destination;
+                    int maxLength;
+                    if (appNode && label.contains("Все приложения")) {
+                        destination = drawerMatches;
+                        maxLength = 300;
+                    } else if (appNode) {
+                        destination = appNodes;
+                        maxLength = 600;
+                    } else {
+                        destination = otherLabels;
+                        maxLength = 300;
+                    }
+                    if (destination.length() < maxLength) {
+                        if (destination.length() > 0) destination.append(' ');
+                        destination.append(node);
+                    }
                 }
             }
-            result.append("; hierarchy=").append(xml);
+            result.append("; packages=").append(packages)
+                    .append("; drawerMatches=").append(drawerMatches)
+                    .append("; appNodes=").append(appNodes)
+                    .append("; otherLabels=").append(otherLabels);
         } catch (Exception e) {
             result.append("; hierarchy-dump=").append(e.getClass().getSimpleName())
                     .append(':').append(e.getMessage());
         }
         return result.toString();
+    }
+
+    private static String xmlAttribute(String node, String name) {
+        String key = name + "=" + (char) 34;
+        int start = node.indexOf(key);
+        if (start < 0) return "";
+        start += key.length();
+        int end = node.indexOf((char) 34, start);
+        return end < 0 ? "" : node.substring(start, end);
     }
 
     /** Закрывает каталог, если он остался открытым после предыдущей итерации. */
