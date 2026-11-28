@@ -4618,6 +4618,7 @@ fling-жесты в обе стороны.
 `includeInStartupProfile = true`.
 [9] Android [performance-samples, `StartupBenchmark.kt`](https://github.com/android/performance-samples/blob/main/MacrobenchmarkSample/macrobenchmark/src/main/kotlin/com/example/macrobenchmark/benchmark/startup/StartupBenchmark.kt):
 сравниваются `None`, `Partial(Disable)` с JIT warmup, `Partial(Require)` и `Full`.
+[10] AndroidX [`BySelector.java`](https://github.com/androidx/androidx/blob/androidx-main/test/uiautomator/uiautomator/src/main/java/androidx/test/uiautomator/BySelector.java): у селектора есть критерии `clickable(boolean)` и `scrollable(boolean)`, использованные в новом сценарии.
 
 ### 54.7 Ручная проверка (2026-11-28)
 
@@ -4653,8 +4654,8 @@ startup-профилем и Macrobenchmark ещё не дошли до выпо�
 
 `LauncherProfileJourneys` переведён с `UiSelector`/`UiScrollable` на `By`,
 `Until` и `UiObject2`: кнопка каталога по-прежнему имеет резервный тап по
-координатам из UI dump; у сетки проверяется `isScrollable()`, затем выполняются
-два fling-жеста вниз и вверх без проверки граничного boolean. В
+координатам из UI dump; тест дожидается `GridView` с критерием `scrollable(true)`,
+затем выполняет два fling-жеста вниз и вверх без проверки граничного boolean. В
 `StartupBenchmarks` добавлены два контрольных теста `Partial(Disable, 3)` — для
 старта и прокрутки; теперь сценарии покрывают `None`, `Disable` и `Require`.
 Это изменения тестового контура, а не runtime-оптимизация лаунчера. Они пока не

@@ -150,8 +150,9 @@ final class LauncherProfileJourneys {
     static void openDrawerAndScroll(UiDevice device) {
         ensureDrawerClosed(device);
         boolean clicked = false;
-        if (device.wait(Until.hasObject(By.desc("Все приложения")), UI_TIMEOUT_MS)) {
-            UiObject2 openButton = device.findObject(By.desc("Все приложения"));
+        By drawerButtonSelector = By.desc("Все приложения").clickable(true);
+        if (device.wait(Until.hasObject(drawerButtonSelector), UI_TIMEOUT_MS)) {
+            UiObject2 openButton = device.findObject(drawerButtonSelector);
             if (openButton != null) {
                 try {
                     openButton.click();
@@ -181,16 +182,17 @@ final class LauncherProfileJourneys {
             throw new AssertionError("В каталоге не появился список приложений; "
                     + describeCurrentUi(device));
         }
-        UiObject2 drawerGrid = device.findObject(gridSelector);
+        By scrollableGridSelector = By.clazz("android.widget.GridView").scrollable(true);
+        if (!device.wait(Until.hasObject(scrollableGridSelector), UI_TIMEOUT_MS)) {
+            throw new AssertionError("Сетка приложений не стала прокручиваемой; "
+                    + describeCurrentUi(device));
+        }
+        UiObject2 drawerGrid = device.findObject(scrollableGridSelector);
         if (drawerGrid == null) {
-            throw new AssertionError("Список приложений исчез после ожидания; "
+            throw new AssertionError("Прокручиваемая сетка исчезла после ожидания; "
                     + describeCurrentUi(device));
         }
         try {
-            if (!drawerGrid.isScrollable()) {
-                throw new AssertionError("Список приложений не помечен прокручиваемым; "
-                        + describeCurrentUi(device));
-            }
             // Fling возвращает false и при достижении края списка. Поэтому
             // успешность каждого жеста не трактуем как наличие следующей страницы:
             // выполняем несколько движений в обе стороны, как в Android perf-samples.
