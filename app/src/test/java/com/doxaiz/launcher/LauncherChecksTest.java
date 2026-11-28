@@ -90,6 +90,11 @@ public class LauncherChecksTest {
     }
 
     @Test
+    public void notificationBadgePolicy() {
+        run("NotificationBadgePolicyTests", () -> NotificationBadgePolicyTests.main(new String[0]));
+    }
+
+    @Test
     public void customLabelsStorage() {
         run("CustomLabelsTests", () -> CustomLabelsTests.main(new String[0]));
     }

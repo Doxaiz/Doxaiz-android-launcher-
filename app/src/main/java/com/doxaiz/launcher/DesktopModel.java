@@ -1045,6 +1045,17 @@ public final class DesktopModel {
         return false;
     }
 
+    /** Whether an app has its own page tile (not just a folder entry or dock slot). */
+    public boolean containsPageApp(String appKey) {
+        if (appKey == null || appKey.isEmpty()) return false;
+        for (List<DesktopItem> page : pages) {
+            for (DesktopItem item : page) {
+                if (item.type == DesktopItem.TYPE_APP && appKey.equals(item.appKey)) return true;
+            }
+        }
+        return false;
+    }
+
     public boolean addAppToPage(int pageIndex, String appKey, int cols, boolean preferBottom) {
         return addAppToPageAt(pageIndex, appKey, -1, -1, cols, preferBottom);
     }

@@ -787,7 +787,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             }
             dynamicBarHelper.refresh();
         }
-        if (prefs.getNotifBadgeMode() != Prefs.NOTIF_BADGE_NONE && !dragging && !dragPending) {
+        if (isNotificationBadgeEnabled() && !dragging && !dragPending) {
             int h = DoxaizNotificationService.getBadgeStateHash();
             if (h != lastUnreadHash) {
                 lastUnreadHash = h;
@@ -947,7 +947,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             int badgeHash = DoxaizNotificationService.getBadgeStateHash();
             if (badgeHash != lastUnreadHash) {
                 lastUnreadHash = badgeHash;
-                if (prefs.getNotifBadgeMode() != Prefs.NOTIF_BADGE_NONE) {
+                if (isNotificationBadgeEnabled()) {
                     refreshBadgesInPlace();
                 }
             }
@@ -1265,15 +1265,33 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             selectedAppKeys.add(initialAppKey);
         }
         updateMultiSelectBar();
-        rebuildDesktop();
+        updateMultiSelectDesktopTiles(true, false);
     }
 
     private void exitMultiSelectMode() {
+        exitMultiSelectMode(false);
+    }
+
+    private void exitMultiSelectMode(boolean desktopChanged) {
         if (!multiSelectMode) return;
         multiSelectMode = false;
         selectedAppKeys.clear();
         updateMultiSelectBar();
-        rebuildDesktop();
+        updateMultiSelectDesktopTiles(false, desktopChanged);
+    }
+
+    /** Switches selection chrome in place; structural multi-select actions still use the rebuild fallback. */
+    private void updateMultiSelectDesktopTiles(boolean active, boolean desktopChanged) {
+        if (active) {
+            // Hide notification badges underneath the selection checks. Slots are kept
+            // so exit can restore them without rebuilding the desktop pages.
+            updateBadgeSlotList(desktopBadgeSlots, Prefs.NOTIF_BADGE_NONE);
+        }
+        if (desktopChanged || !refreshMultiSelectTileVisuals(active)) {
+            rebuildDesktop();
+            return;
+        }
+        if (!active) refreshBadgesInPlace();
     }
 
     private void updateMultiSelectBar() {
@@ -1318,7 +1336,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                 prefs.getColumns(), targetPage == 0 && prefs.isHomeBottomAligned()
         );
         desktop.save();
-        exitMultiSelectMode();
+        exitMultiSelectMode(true);
         Toast.makeText(this, "Собрано в папку: " + formatRussianAppsCount(keys.size()), Toast.LENGTH_SHORT).show();
         if (created != null) {
             showFolderModal(targetPage, created);
@@ -1378,7 +1396,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         }
         desktop.save();
         currentPage = Math.max(0, Math.min(targetPage, desktop.pages.size() - 1));
-        exitMultiSelectMode();
+        exitMultiSelectMode(true);
         if (pagerView != null) pagerView.goToPage(currentPage);
         rebuildPageDots();
         Toast.makeText(this, "Перенесено: " + formatRussianAppsCount(moved), Toast.LENGTH_SHORT).show();
@@ -2751,6 +2769,9 @@ public class MainActivity extends Activity implements AppRepository.Listener {
      */
     private final Map<String, List<AppTileRef>> appTiles = new HashMap<>();
 
+    /** Реестр плиток папок для обновления подписи и описания без rebuild всех страниц. */
+    private final Map<String, List<FolderTileRef>> folderTiles = new HashMap<>();
+
     /**
      * Сколько раз рабочий стол пересобирался и сколько плиток при этом создано.
      *
@@ -2817,8 +2838,10 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         // нельзя оправдать ни одним кадром.
         if (appsByKey.isEmpty()) desktopBuildsBeforeApps++;
         cancelDragCleanup();
+        clearPendingFolderContentRefresh();
         desktopBadgeSlots.clear();
         appTiles.clear();
+        folderTiles.clear();
         int cols = prefs.getColumns();
         desktop.normalizeAllPages(cols, prefs.isHomeBottomAligned());
         if (currentPage >= desktop.pages.size()) {
@@ -2929,7 +2952,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
     private void registerBadgeSlot(List<BadgeSlot> slots, FrameLayout container,
                                    String singlePkg, DesktopItem folder) {
-        int mode = prefs.getNotifBadgeMode();
+        int mode = multiSelectMode ? Prefs.NOTIF_BADGE_NONE : prefs.getNotifBadgeMode();
         boolean show = (folder != null) ? hasFolderNotifDot(folder) : hasNotifDot(singlePkg);
         int count = show ? (folder != null ? getFolderUnreadCount(folder)
                 : DoxaizNotificationService.getUnreadCount(singlePkg)) : 0;
@@ -3062,19 +3085,16 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
         ));
         repository.bindIcon(entry, icon);
-        final FrameLayout checkBadgeRef;
+        FrameLayout checkBadge = null;
         if (multiSelectMode) {
             boolean picked = selectedAppKeys.contains(entry.key);
-            FrameLayout checkBadge = new FrameLayout(this);
+            checkBadge = new FrameLayout(this);
             applyMultiSelectTileVisual(iconWrap, checkBadge, picked, false);
             FrameLayout.LayoutParams cbLp = new FrameLayout.LayoutParams(dp(22), dp(22));
             cbLp.gravity = Gravity.TOP | Gravity.END;
             iconWrap.addView(checkBadge, cbLp);
-            checkBadgeRef = checkBadge;
-        } else {
-            checkBadgeRef = null;
-            registerBadgeSlot(desktopBadgeSlots, iconWrap, entry.packageName, null);
         }
+        registerBadgeSlot(desktopBadgeSlots, iconWrap, entry.packageName, null);
         cell.addView(iconWrap);
 
         TextView label = null;
@@ -3082,9 +3102,8 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             label = makeDesktopLabel(formatAppLabel(entry));
             cell.addView(label);
         }
-        // Запоминаем плитку, чтобы потом менять подпись и метку «новое» без
-        // пересборки страницы (F-05).
-        registerAppTile(entry.key, cell, label);
+        // Запоминаем плитку и selection chrome для обновления без пересборки страниц (F-05).
+        final AppTileRef tileRef = registerAppTile(entry.key, cell, label, iconWrap, checkBadge);
 
         cell.setOnTouchListener((v, event) -> {
             if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
@@ -3107,8 +3126,8 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                     nowPicked = true;
                 }
                 updateMultiSelectBar();
-                if (checkBadgeRef != null) {
-                    applyMultiSelectTileVisual(iconWrap, checkBadgeRef, nowPicked, true);
+                if (tileRef != null && tileRef.checkBadge != null) {
+                    applyMultiSelectTileVisual(iconWrap, tileRef.checkBadge, nowPicked, true);
                 } else {
                     rebuildDesktop();
                 }
@@ -3127,8 +3146,8 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                     nowPicked = true;
                 }
                 updateMultiSelectBar();
-                if (checkBadgeRef != null) {
-                    applyMultiSelectTileVisual(iconWrap, checkBadgeRef, nowPicked, true);
+                if (tileRef != null && tileRef.checkBadge != null) {
+                    applyMultiSelectTileVisual(iconWrap, tileRef.checkBadge, nowPicked, true);
                 } else {
                     rebuildDesktop();
                 }
@@ -3145,36 +3164,43 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     }
 
     /**
-     * Одна плитка приложения на рабочем столе: контейнер и его подпись.
+     * Ссылки на изменяемые части плитки приложения: подпись и selection chrome.
      *
-     * Хранится только то, что действительно меняется на месте: текст подписи и её
-     * оформление (точка «новое», цвет). Позиция и иконка без структурных изменений
-     * не меняются, поэтому пересоздавать их незачем.
+     * Позиция и иконка сохраняются; чек-маркер мультивыбора добавляется/удаляется
+     * поверх существующего iconWrap без пересборки страницы.
      */
     private static final class AppTileRef {
         final View container;
         final TextView label;
+        final FrameLayout iconWrap;
+        FrameLayout checkBadge;
 
-        AppTileRef(View container, TextView label) {
+        AppTileRef(View container, TextView label, FrameLayout iconWrap, FrameLayout checkBadge) {
             this.container = container;
             this.label = label;
+            this.iconWrap = iconWrap;
+            this.checkBadge = checkBadge;
         }
     }
 
-    private void registerAppTile(String appKey, View container, TextView label) {
-        if (appKey == null || container == null) return;
+    private AppTileRef registerAppTile(String appKey, View container, TextView label,
+                                       FrameLayout iconWrap, FrameLayout checkBadge) {
+        if (appKey == null || container == null) return null;
         List<AppTileRef> list = appTiles.get(appKey);
         if (list == null) {
             list = new ArrayList<>(1);
             appTiles.put(appKey, list);
         }
-        list.add(new AppTileRef(container, label));
+        AppTileRef ref = new AppTileRef(container, label, iconWrap, checkBadge);
+        list.add(ref);
+        return ref;
     }
 
     /**
      * Точечное обновление подписи и метки «новое» для одного приложения.
      *
-     * @return false, если плитка не найдена и без пересборки не обойтись
+     * @return false, если точечное обновление не удалось; вызывающий код проверяет,
+     *         нужна ли пересборка по модели (нет отдельной плитки — обновлять нечего)
      */
     private boolean refreshAppTileInPlace(String appKey) {
         if (appKey == null || appTiles.isEmpty() || multiSelectMode) return false;
@@ -3199,6 +3225,83 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         // Плитка найдена: даже если текст не изменился, пересобирать страницу
         // незачем — вызывающий код именно это и спрашивает.
         return true;
+    }
+
+    private static final class FolderTileRef {
+        final View container;
+        final TextView label;
+        final FrameLayout previewContainer;
+        final int iconDp;
+        View preview;
+
+        FolderTileRef(View container, TextView label, FrameLayout previewContainer,
+                      View preview, int iconDp) {
+            this.container = container;
+            this.label = label;
+            this.previewContainer = previewContainer;
+            this.preview = preview;
+            this.iconDp = iconDp;
+        }
+    }
+
+    private void registerFolderTile(String folderId, View container, TextView label,
+                                    FrameLayout previewContainer, View preview, int iconDp) {
+        if (folderId == null || container == null) return;
+        List<FolderTileRef> list = folderTiles.get(folderId);
+        if (list == null) {
+            list = new ArrayList<>(1);
+            folderTiles.put(folderId, list);
+        }
+        list.add(new FolderTileRef(container, label, previewContainer, preview, iconDp));
+    }
+
+    /** Updates a renamed folder's visible label and accessibility text without rebuilding pages. */
+    private boolean refreshFolderTileInPlace(DesktopItem folder) {
+        return refreshFolderTileInPlace(folder, false);
+    }
+
+    /** Refreshes the preview, count description, and badge after folder membership/order changes. */
+    private boolean refreshFolderContentsInPlace(DesktopItem folder) {
+        boolean updated = refreshFolderTileInPlace(folder, true);
+        if (updated) refreshBadgesInPlace();
+        return updated;
+    }
+
+    private boolean refreshFolderTileInPlace(DesktopItem folder, boolean refreshPreview) {
+        if (folder == null || folder.folderId == null || folderTiles.isEmpty()) return false;
+        List<FolderTileRef> refs = folderTiles.get(folder.folderId);
+        if (refs == null || refs.isEmpty()) return false;
+
+        String name = FolderTileLabels.displayName(folder.folderName);
+        String description = FolderTileLabels.contentDescription(name, folder.folderApps.size());
+        boolean updated = false;
+        boolean complete = true;
+        for (FolderTileRef ref : refs) {
+            if (ref == null || ref.container == null) {
+                complete = false;
+                continue;
+            }
+            if (refreshPreview) {
+                if (ref.previewContainer == null || ref.preview == null) {
+                    complete = false;
+                    continue;
+                }
+                View preview = buildFolderPreviewBox(folder, ref.iconDp);
+                ref.previewContainer.removeView(ref.preview);
+                ref.previewContainer.addView(preview, 0, new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+                ));
+                ref.preview = preview;
+            }
+            updated = true;
+            if (!TileLabels.sameText(ref.container.getContentDescription(), description)) {
+                ref.container.setContentDescription(description);
+            }
+            if (ref.label != null && !TileLabels.sameText(ref.label.getText(), name)) {
+                ref.label.setText(name);
+            }
+        }
+        return updated && complete;
     }
 
     private void applyMultiSelectTileVisual(FrameLayout iconWrap, FrameLayout checkBadge,
@@ -3226,6 +3329,50 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         }
     }
 
+    private boolean refreshMultiSelectTileVisuals(boolean active) {
+        boolean complete = true;
+        for (Map.Entry<String, List<AppTileRef>> entry : appTiles.entrySet()) {
+            List<AppTileRef> refs = entry.getValue();
+            if (refs == null) {
+                complete = false;
+                continue;
+            }
+            for (AppTileRef ref : refs) {
+                if (ref == null || ref.iconWrap == null) {
+                    complete = false;
+                    continue;
+                }
+                if (active) {
+                    if (ref.checkBadge == null) {
+                        ref.checkBadge = new FrameLayout(this);
+                    }
+                    if (ref.checkBadge.getParent() != ref.iconWrap) {
+                        if (ref.checkBadge.getParent() instanceof ViewGroup) {
+                            ((ViewGroup) ref.checkBadge.getParent()).removeView(ref.checkBadge);
+                        }
+                        FrameLayout.LayoutParams cbLp = new FrameLayout.LayoutParams(dp(22), dp(22));
+                        cbLp.gravity = Gravity.TOP | Gravity.END;
+                        ref.iconWrap.addView(ref.checkBadge, cbLp);
+                    }
+                    applyMultiSelectTileVisual(ref.iconWrap, ref.checkBadge,
+                            selectedAppKeys.contains(entry.getKey()), false);
+                    ref.checkBadge.setVisibility(View.VISIBLE);
+                } else {
+                    if (ref.checkBadge != null) {
+                        if (ref.checkBadge.getParent() instanceof ViewGroup) {
+                            ((ViewGroup) ref.checkBadge.getParent()).removeView(ref.checkBadge);
+                        }
+                        ref.checkBadge = null;
+                    }
+                    ref.iconWrap.animate().cancel();
+                    ref.iconWrap.setScaleX(1f);
+                    ref.iconWrap.setScaleY(1f);
+                }
+            }
+        }
+        return complete;
+    }
+
     private View createFolderTile(
             final int pageIndex,
             final int itemIndex,
@@ -3240,9 +3387,8 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
         // Папка тоже должна быть одним именованным элементом: иначе TalkBack
         // читает превью как набор картинок, а поиск по интерфейсу не видит её.
-        int folderCount = folder.folderApps.size();
-        cell.setContentDescription(folder.folderName
-                + (folderCount > 0 ? ", приложений: " + folderCount : ""));
+        cell.setContentDescription(FolderTileLabels.contentDescription(
+                folder.folderName, folder.folderApps.size()));
 
         // AMOLED-стеклянная плитка папки: крупная 2x2 сетка оригинальных иконок (видно с главного экрана!)
         FrameLayout boxWrap = new FrameLayout(this);
@@ -3251,17 +3397,23 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         boxWrap.addView(box, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
         ));
-        if (!multiSelectMode) {
-            registerBadgeSlot(desktopBadgeSlots, boxWrap, null, folder);
-        }
+        registerBadgeSlot(desktopBadgeSlots, boxWrap, null, folder);
         cell.addView(boxWrap);
 
-        if (showLabel) {
-            cell.addView(makeDesktopLabel(folder.folderName));
+        TextView label = showLabel
+                ? makeDesktopLabel(FolderTileLabels.displayName(folder.folderName))
+                : null;
+        if (label != null) {
+            cell.addView(label);
         }
+        registerFolderTile(folder.folderId, cell, label, boxWrap, box, iconDp);
 
         cell.setOnClickListener(v -> openFolderFromAnchor(pageIndex, folder, boxWrap));
         cell.setOnLongClickListener(v -> {
+            if (multiSelectMode) {
+                Toast.makeText(this, "Завершите мультивыбор, чтобы перемещать папку", Toast.LENGTH_SHORT).show();
+                return true;
+            }
             if (prefs.isDesktopLocked()) {
                 showFolderActionModal(pageIndex, itemIndex, folder);
             } else {
@@ -3272,13 +3424,18 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         return cell;
     }
 
+    private boolean isNotificationBadgeEnabled() {
+        return NotificationBadgePolicy.isEnabled(
+                prefs.isShowNotificationDots(), prefs.getNotifBadgeMode());
+    }
+
     private boolean hasNotifDot(String packageName) {
-        return prefs.getNotifBadgeMode() != Prefs.NOTIF_BADGE_NONE
+        return isNotificationBadgeEnabled()
                 && DoxaizNotificationService.hasUnread(packageName);
     }
 
     private boolean hasFolderNotifDot(DesktopItem folder) {
-        if (prefs.getNotifBadgeMode() == Prefs.NOTIF_BADGE_NONE || folder == null) return false;
+        if (folder == null || !isNotificationBadgeEnabled()) return false;
         for (String key : folder.folderApps) {
             AppEntry e = appsByKey.get(key);
             if (e != null && DoxaizNotificationService.hasUnread(e.packageName)) return true;
@@ -4402,24 +4559,32 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         return n + " приложений";
     }
 
+    private void moveAppInFolderAndRefresh(int pageIndex, DesktopItem folder,
+                                           String appKey, int delta) {
+        desktop.moveAppInFolder(pageIndex, folder.folderId, appKey, delta);
+        DesktopItem updatedFolder = desktop.findFolder(pageIndex, folder.folderId);
+        if (updatedFolder == null || !refreshFolderContentsInPlace(updatedFolder)) {
+            rebuildDesktop();
+        }
+        if (updatedFolder != null) {
+            showFolderModal(pageIndex, updatedFolder);
+        } else {
+            dismissModal();
+        }
+    }
+
     private void showFolderAppItemMenu(final int pageIndex, final DesktopItem folder, final AppEntry entry) {
         LinearLayout box = createModalBox();
         addModalAppHeader(box, entry);
 
         int idx = folder.folderApps.indexOf(entry.key);
         if (idx > 0) {
-            addModalAction(box, "Переместить левее", theme.textPrimary, () -> {
-                desktop.moveAppInFolder(pageIndex, folder.folderId, entry.key, -1);
-                rebuildDesktop();
-                showFolderModal(pageIndex, folder);
-            });
+            addModalAction(box, "Переместить левее", theme.textPrimary,
+                    () -> moveAppInFolderAndRefresh(pageIndex, folder, entry.key, -1));
         }
         if (idx >= 0 && idx < folder.folderApps.size() - 1) {
-            addModalAction(box, "Переместить правее", theme.textPrimary, () -> {
-                desktop.moveAppInFolder(pageIndex, folder.folderId, entry.key, +1);
-                rebuildDesktop();
-                showFolderModal(pageIndex, folder);
-            });
+            addModalAction(box, "Переместить правее", theme.textPrimary,
+                    () -> moveAppInFolderAndRefresh(pageIndex, folder, entry.key, +1));
         }
         addModalAction(box, "Вынести на страницу", theme.textPrimary, () -> {
             desktop.removeAppFromFolder(pageIndex, folder.folderId, entry.key, true,
@@ -4428,10 +4593,20 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             showFolderModal(pageIndex, folder);
         });
         addModalAction(box, "Убрать из папки", theme.textPrimary, () -> {
+            boolean wasInFolder = folder.folderApps.contains(entry.key);
             desktop.removeAppFromFolder(pageIndex, folder.folderId, entry.key, false,
                     prefs.getColumns(), false);
-            rebuildDesktop();
-            showFolderModal(pageIndex, folder);
+            DesktopItem updatedFolder = desktop.findFolder(pageIndex, folder.folderId);
+            boolean needsRebuild = updatedFolder == null;
+            if (!needsRebuild && wasInFolder) {
+                needsRebuild = !refreshFolderContentsInPlace(updatedFolder);
+            }
+            if (needsRebuild) rebuildDesktop();
+            if (updatedFolder == null) {
+                dismissModal();
+            } else {
+                showFolderModal(pageIndex, updatedFolder);
+            }
         });
         addModalAction(box, "О приложении", theme.textPrimary, () -> repository.openAppInfo(entry));
         if (!entry.isSystemApp && entry.isMainProfile) {
@@ -4496,7 +4671,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                     desktop.addAppToFolder(pageIndex, folder.folderId, app.key);
                 }
                 updateFolderPickChip(mark, folder.folderApps.contains(app.key));
-                pendingDesktopRebuildOnModalDismiss = true;
+                markFolderContentRefreshPending(pageIndex, folder.folderId);
             });
             list.addView(row);
         }
@@ -4514,15 +4689,43 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         bLp.topMargin = dp(10);
         btns.setLayoutParams(bLp);
         addDialogButton(btns, "Готово", theme.accentColor, () -> {
-            if (pendingDesktopRebuildOnModalDismiss) {
-                pendingDesktopRebuildOnModalDismiss = false;
-                rebuildDesktop();
+            applyPendingFolderContentRefresh();
+            DesktopItem updatedFolder = desktop.findFolder(pageIndex, folder.folderId);
+            if (updatedFolder != null) {
+                showFolderModal(pageIndex, updatedFolder);
+            } else {
+                dismissModal();
             }
-            showFolderModal(pageIndex, folder);
         });
         box.addView(btns);
 
         showModalCard(box, Gravity.CENTER, false);
+    }
+
+    private void markFolderContentRefreshPending(int pageIndex, String folderId) {
+        pendingFolderContentRefresh = true;
+        pendingFolderRefreshPage = pageIndex;
+        pendingFolderRefreshId = folderId;
+    }
+
+    private void clearPendingFolderContentRefresh() {
+        pendingFolderContentRefresh = false;
+        pendingFolderRefreshPage = -1;
+        pendingFolderRefreshId = null;
+    }
+
+    /** Applies deferred picker changes, rebuilding only if the folder tile cannot be refreshed. */
+    private void applyPendingFolderContentRefresh() {
+        if (!pendingFolderContentRefresh) return;
+        int pageIndex = pendingFolderRefreshPage;
+        String folderId = pendingFolderRefreshId;
+        clearPendingFolderContentRefresh();
+        if (desktop == null) return;
+
+        DesktopItem folder = desktop.findFolder(pageIndex, folderId);
+        if (folder == null || !refreshFolderContentsInPlace(folder)) {
+            rebuildDesktop();
+        }
     }
 
     private void updateFolderPickChip(TextView tv, boolean inFolder) {
@@ -5166,13 +5369,13 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         invalidateDrawerSort();
         if (wasNew) {
             lastDrawerRecentSig = "";
-            // F-05: первый запуск приложения меняет только его подпись (метка
-            // «новое» гаснет). Состав и порядок рабочего стола те же, поэтому
-            // пересоздавать все страницы (~240 View) при каждом возврате домой
-            // незачем — обновляем конкретную плитку. Пересборка остаётся
-            // запасным путём: если плитки нет в реестре (мультивыбор, страница
-            // ещё не построена), раньше выглядело как «ничего не произошло».
-            if (!refreshAppTileInPlace(entry.key)) {
+            // F-05: первый запуск гасит только метку «новое». Обновляем
+            // зарегистрированную плитку на месте. Если модель содержит отдельную
+            // плитку, но View ещё не зарегистрирован (например, мультивыбор),
+            // оставляем пересборку как защитный путь. Запуск из каталога или из
+            // папки не должен пересоздавать стол, если отдельной плитки на нём нет.
+            if (!refreshAppTileInPlace(entry.key)
+                    && desktop != null && desktop.containsPageApp(entry.key)) {
                 rebuildDesktop();
             }
             if (drawerAdapter != null) drawerAdapter.notifyDataSetChanged();
@@ -5477,7 +5680,10 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     private final int[] dragTmpCell = new int[2];
     private int dragGhostW = 0;
     private int dragGhostH = 0;
-    private boolean pendingDesktopRebuildOnModalDismiss = false;
+    /** One folder's picker edits are coalesced until its modal closes. */
+    private boolean pendingFolderContentRefresh = false;
+    private int pendingFolderRefreshPage = -1;
+    private String pendingFolderRefreshId;
 
     private void updateDragRemoveBarStyle(boolean active) {
         int bg = active ? Color.argb(230, 185, 28, 28) : theme.dialogBgColor;
@@ -5593,6 +5799,15 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         uiHandler.removeCallbacks(edgePageSwitchRunnable);
     }
 
+    private void rebuildDesktopAfterDragIfNeeded(int dropResult, boolean hadAutoPage) {
+        // cancelDragCleanup() уже возвращает исходную View и очищает подсветку.
+        // При DROP_NONE модель не менялась; полный rebuild нужен только если
+        // drag успел создать страницу, либо DesktopModel принял drop.
+        if (dropResult != DesktopModel.DROP_NONE || hadAutoPage) {
+            rebuildDesktop();
+        }
+    }
+
     private void finishActiveDrag() {
         AppEntry drawerEntry = dragFromDrawerEntry;
         int fromPage = dragFromPage;
@@ -5626,7 +5841,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             if (hadAutoPage && desktop.pruneTrailingEmptyPage()) {
                 currentPage = Math.max(0, Math.min(currentPage, desktop.pages.size() - 1));
             }
-            rebuildDesktop();
+            rebuildDesktopAfterDragIfNeeded(res, hadAutoPage);
             if (res == DesktopModel.DROP_FOLDER_CREATED) {
                 Toast.makeText(this, "Создана папка", Toast.LENGTH_SHORT).show();
             } else if (res == DesktopModel.DROP_ADDED_TO_FOLDER) {
@@ -5651,7 +5866,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             if (hadAutoPage && desktop.pruneTrailingEmptyPage()) {
                 currentPage = Math.max(0, Math.min(currentPage, desktop.pages.size() - 1));
             }
-            rebuildDesktop();
+            rebuildDesktopAfterDragIfNeeded(res, hadAutoPage);
             if (res == DesktopModel.DROP_FOLDER_CREATED) {
                 Toast.makeText(this, "Создана папка", Toast.LENGTH_SHORT).show();
             } else if (res == DesktopModel.DROP_ADDED_TO_FOLDER) {
@@ -5661,7 +5876,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             if (hadAutoPage && desktop.pruneTrailingEmptyPage()) {
                 currentPage = Math.max(0, Math.min(currentPage, desktop.pages.size() - 1));
             }
-            rebuildDesktop();
+            rebuildDesktopAfterDragIfNeeded(DesktopModel.DROP_NONE, hadAutoPage);
         }
     }
 
@@ -6183,7 +6398,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         addToggleRow(list, "Белые точки уведомлений", "На иконках и папках",
                 prefs.isShowNotificationDots(), v -> {
                     prefs.setShowNotificationDots(v);
-                    rebuildDesktop();
+                    refreshBadgesInPlace();
                     showElementsVisibilityModal();
                 });
 
@@ -6302,10 +6517,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         uiHandler.removeCallbacks(autoHideVolumeRunnable);
         if (!keepFolderOpen) {
             modalOverlay.setBackgroundColor(Color.argb(165, 0, 0, 0));
-            if (pendingDesktopRebuildOnModalDismiss) {
-                pendingDesktopRebuildOnModalDismiss = false;
-                rebuildDesktop();
-            }
+            applyPendingFolderContentRefresh();
             activeFolderCard = null;
             openFolderId = null;
             openFolderPage = -1;
@@ -6373,10 +6585,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                             modalOverlay.removeAllViews();
                             modalOverlay.setVisibility(View.GONE);
                             syncDynamicBarOverlaySuppression();
-                            if (pendingDesktopRebuildOnModalDismiss) {
-                                pendingDesktopRebuildOnModalDismiss = false;
-                                rebuildDesktop();
-                            }
+                            applyPendingFolderContentRefresh();
                         }
                     })
                     .start();
@@ -6386,10 +6595,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         modalOverlay.removeAllViews();
         modalOverlay.setVisibility(View.GONE);
         syncDynamicBarOverlaySuppression();
-        if (pendingDesktopRebuildOnModalDismiss) {
-            pendingDesktopRebuildOnModalDismiss = false;
-            rebuildDesktop();
-        }
+        applyPendingFolderContentRefresh();
     }
 
     private void syncAmbientParticles() { /* Decorative particle effects removed. */ }
@@ -6563,7 +6769,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             if (!desktop.dock.contains(entry.key) && desktop.dock.size() < getMaxDockApps()) {
                 addModalAction(box, "Закрепить в нижнем доке", theme.textPrimary, () -> {
                     desktop.addToDock(entry.key, getMaxDockApps());
-                    rebuildDesktop();
+                    rebuildDock();
                 });
             }
 
@@ -7845,11 +8051,18 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             for (final DesktopItem f : folders) {
                 String label = f.folderName + " • стр. " + (p + 1) + " (" + resolveFolderApps(f).size() + ")";
                 addModalAction(box, label, theme.textPrimary, () -> {
+                    boolean alreadyInFolder = f.folderApps.contains(entry.key);
                     desktop.addAppToFolder(targetPage, f.folderId, entry.key);
+                    boolean needsRebuild;
                     if (removeItemIndex >= 0) {
                         desktop.removeItem(pageIndex, removeItemIndex);
+                        needsRebuild = true;
+                    } else {
+                        DesktopItem updatedFolder = desktop.findFolder(targetPage, f.folderId);
+                        needsRebuild = updatedFolder == null
+                                || (!alreadyInFolder && !refreshFolderContentsInPlace(updatedFolder));
                     }
-                    rebuildDesktop();
+                    if (needsRebuild) rebuildDesktop();
                     Toast.makeText(this, "Добавлено в «" + f.folderName + "»", Toast.LENGTH_SHORT).show();
                 });
             }
@@ -7961,8 +8174,15 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         addDialogButton(btns, "Отмена", theme.textSecondary, () -> showFolderModal(pageIndex, folder));
         addDialogButton(btns, "Сохранить", theme.accentColor, () -> {
             desktop.renameFolder(pageIndex, folder.folderId, input.getText().toString());
-            rebuildDesktop();
-            showFolderModal(pageIndex, folder);
+            DesktopItem renamedFolder = desktop.findFolder(pageIndex, folder.folderId);
+            if (renamedFolder == null || !refreshFolderTileInPlace(renamedFolder)) {
+                rebuildDesktop();
+            }
+            if (renamedFolder != null) {
+                showFolderModal(pageIndex, renamedFolder);
+            } else {
+                dismissModal();
+            }
         });
         box.addView(btns);
 
@@ -8964,7 +9184,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                 prefs.isShowNotificationDots(),
                 checked -> {
                     prefs.setShowNotificationDots(checked);
-                    rebuildDesktop();
+                    refreshBadgesInPlace();
                     rebuildSettingsContent();
                 });
 
@@ -9833,7 +10053,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
             row.setOnClickListener(v -> {
                 prefs.setNotifBadgeMode(modeVal);
-                rebuildDesktop();
+                refreshBadgesInPlace();
                 if (currentScreen == SCREEN_SETTINGS) rebuildSettingsContent();
                 showNotifStatusSettingsModal();
             });
