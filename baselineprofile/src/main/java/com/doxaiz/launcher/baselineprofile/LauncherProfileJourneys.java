@@ -106,6 +106,20 @@ final class LauncherProfileJourneys {
         return end < 0 ? "" : node.substring(start, end);
     }
 
+    private static int[] parseBounds(String bounds) {
+        if (bounds == null || bounds.isEmpty()) return null;
+        String[] coordinates = bounds.replaceAll("[^0-9]+", " ").trim().split(" +");
+        if (coordinates.length != 4) return null;
+        try {
+            return new int[]{
+                    Integer.parseInt(coordinates[0]), Integer.parseInt(coordinates[1]),
+                    Integer.parseInt(coordinates[2]), Integer.parseInt(coordinates[3])
+            };
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
     /** Ищет кнопку в полном UI dump, если BySelector не видит её напрямую. */
     private static Point findDrawerButtonCenter(UiDevice device) {
         File hierarchy = new File(
@@ -122,14 +136,10 @@ final class LauncherProfileJourneys {
                             || !"Все приложения".equals(xmlAttribute(line, "content-desc"))) {
                         continue;
                     }
-                    String[] coordinates = xmlAttribute(line, "bounds")
-                            .replaceAll("[^0-9]+", " ").trim().split(" +");
-                    if (coordinates.length == 4) {
-                        int left = Integer.parseInt(coordinates[0]);
-                        int top = Integer.parseInt(coordinates[1]);
-                        int right = Integer.parseInt(coordinates[2]);
-                        int bottom = Integer.parseInt(coordinates[3]);
-                        return new Point((left + right) / 2, (top + bottom) / 2);
+                    int[] bounds = parseBounds(xmlAttribute(line, "bounds"));
+                    if (bounds != null) {
+                        return new Point((bounds[0] + bounds[2]) / 2,
+                                (bounds[1] + bounds[3]) / 2);
                     }
                 }
             }
@@ -137,6 +147,68 @@ final class LauncherProfileJourneys {
             // The caller emits the complete, bounded UI diagnostic on failure.
         }
         return null;
+    }
+
+    /**
+     * Путь свайпа вверх внутри корневой области лаунчера. Кнопка каталога
+     * опциональна и по умолчанию скрыта; свайп с пустой точки домашнего экрана
+     * использует стандартное действие лаунчера «Все приложения».
+     */
+    private static Point[] findHomeSwipePath(UiDevice device) {
+        File hierarchy = new File(
+                InstrumentationRegistry.getInstrumentation().getContext().getCacheDir(),
+                "baseline-profile-ui.xml");
+        int[] rootBounds = null;
+        long largestArea = 0L;
+        try {
+            device.dumpWindowHierarchy(hierarchy);
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(
+                    new FileInputStream(hierarchy), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (!line.trim().startsWith("<node ")
+                            || !"com.doxaiz.launcher".equals(xmlAttribute(line, "package"))) {
+                        continue;
+                    }
+                    int[] bounds = parseBounds(xmlAttribute(line, "bounds"));
+                    if (bounds == null) continue;
+                    long area = (long) (bounds[2] - bounds[0]) * (bounds[3] - bounds[1]);
+                    if (area > largestArea) {
+                        largestArea = area;
+                        rootBounds = bounds;
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+            // Fall back to the display bounds below.
+        }
+
+        int left;
+        int top;
+        int right;
+        int bottom;
+        if (rootBounds != null && rootBounds[2] > rootBounds[0]
+                && rootBounds[3] > rootBounds[1]) {
+            left = rootBounds[0];
+            top = rootBounds[1];
+            right = rootBounds[2];
+            bottom = rootBounds[3];
+        } else {
+            int width = device.getDisplayWidth();
+            int height = device.getDisplayHeight();
+            if (width <= 0 || height <= 0) return null;
+            left = 0;
+            top = 0;
+            right = width;
+            bottom = (int) (height * 0.78f);
+        }
+
+        int height = bottom - top;
+        if (height < 100) return null;
+        int x = left + (right - left) / 2;
+        int startY = top + (int) (height * 0.90f);
+        int endY = top + (int) (height * 0.30f);
+        return new Point[]{new Point(x, startY), new Point(x, endY)};
     }
 
     /** Закрывает каталог, если он остался открытым после предыдущей итерации. */
@@ -147,12 +219,12 @@ final class LauncherProfileJourneys {
         }
     }
 
-    /** Открывает каталог кнопкой в доке, проверяет экран и прокручивает список. */
+    /** Открывает каталог кнопкой, если она включена, иначе штатным свайпом вверх. */
     static void openDrawerAndScroll(UiDevice device) {
         ensureDrawerClosed(device);
         boolean clicked = false;
         BySelector drawerButtonSelector = By.desc("Все приложения").clickable(true);
-        if (device.wait(Until.hasObject(drawerButtonSelector), UI_TIMEOUT_MS)) {
+        if (device.wait(Until.hasObject(drawerButtonSelector), 750L)) {
             UiObject2 openButton = device.findObject(drawerButtonSelector);
             if (openButton != null) {
                 try {
@@ -167,13 +239,26 @@ final class LauncherProfileJourneys {
             Point center = findDrawerButtonCenter(device);
             clicked = center != null && device.click(center.x, center.y);
         }
-        if (!clicked) {
-            throw new AssertionError("Не найдена/не нажата кнопка «Все приложения»; "
-                    + describeCurrentUi(device));
-        }
 
-        if (!device.wait(Until.hasObject(By.text("Все приложения")), UI_TIMEOUT_MS)) {
-            throw new AssertionError("После нажатия не открылся каталог приложений; "
+        boolean drawerOpen = clicked
+                && device.wait(Until.hasObject(By.text("Все приложения")), 1_500L);
+        if (!drawerOpen) {
+            Point[] swipePath = findHomeSwipePath(device);
+            if (swipePath != null) {
+                try {
+                    device.swipe(swipePath[0].x, swipePath[0].y,
+                            swipePath[1].x, swipePath[1].y, 20);
+                } catch (RuntimeException e) {
+                    throw new AssertionError("Сбой свайпа вверх для открытия каталога; "
+                            + describeCurrentUi(device), e);
+                }
+                drawerOpen = device.wait(
+                        Until.hasObject(By.text("Все приложения")), UI_TIMEOUT_MS);
+            }
+        }
+        if (!drawerOpen) {
+            throw new AssertionError("Не удалось открыть каталог: кнопка «Все приложения» "
+                    + "отсутствует/не сработала, а свайп вверх не открыл экран; "
                     + describeCurrentUi(device));
         }
         device.waitForIdle(2_000L);
