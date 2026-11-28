@@ -4502,16 +4502,22 @@ Google называет другим рычагом **startup-профили**: 
 
 | Что | Где | Зачем |
 |---|---|---|
-| Модуль-генератор | `baselineprofile/` (`com.android.test`) | прогон настоящих действий на устройстве, из которого получается профиль |
-| Сценарий | `BaselineProfileGenerator.startupAndDrawer()` | холодный старт **и** открытие каталога: каталог — второй по частоте экран |
-| `includeInStartupProfile = true` | там же | без него нет startup-профиля, а именно он даёт заявленные 15–30 % |
-| Плагин и зависимость | `:app` | `androidx.baselineprofile`, `profileinstaller:1.3.1`, `baselineProfile project(':baselineprofile')` |
-| `android.useAndroidX=true` | `gradle.properties` | без этого флага AGP не собирает проект с `profileinstaller` |
+| Модуль-генератор | `baselineprofile/` (`com.android.test`) | прогон настоящих действий на подключённом устройстве и сбор правил ART |
+| Startup-путь | `BaselineProfileGenerator.startup()` | только запуск до первого экрана; `includeInStartupProfile=true` добавляет этот путь в startup-профиль |
+| Каталог | `BaselineProfileGenerator.drawerJourney()` + `LauncherProfileJourneys` | открыть «Все приложения» и прокрутить сетку; путь попадает в baseline, но не в startup-профиль |
+| Плагин и доставка | `:app` | `androidx.baselineprofile`, `profileinstaller:1.4.1`, `baselineProfile project(':baselineprofile')` |
+| DEX-layout | `app/build.gradle` | `dexLayoutOptimization` включается только если существует `startup-prof.txt`; без него R8 не падает на обычной release-сборке |
+| Macrobenchmark | `StartupBenchmarks` | 4 теста: холодный старт (`StartupTimingMetric`) и прокрутка (`FrameTimingMetric`), каждый с `None` и `Partial(Require)` |
+| Компиляция в CI | `.github/workflows/ci.yml` | `:baselineprofile:compileBenchmarkReleaseJavaWithJavac` компилирует исходники тестового варианта без connected-задач на каждом коммите |
+| Ручной workflow | `.github/workflows/baseline-profile.yml` | API 34: генерация, R8-release и Macrobenchmark; артефакты сохраняются, коммит профилей — только по отдельному флагу в текущую ветку |
+| AndroidX | `gradle.properties` | `android.useAndroidX=true` нужен для `profileinstaller` |
 
-Профиль **не сгенерирован**: для этого нужен прогон на устройстве
-(`:app:generateReleaseBaselineProfile`), а генерация при обычной сборке
-намеренно выключена — она занимает минуты и не должна быть условием CI на
-каждый коммит.
+Профили **пока не сгенерированы**. Ручной workflow запускает
+`:app:generateBaselineProfile`, проверяет непустые baseline/startup-файлы,
+затем отдельным вызовом Gradle собирает R8-release и проверяет наличие
+`assets/dexopt/baseline.prof`. Отдельный вызов нужен, чтобы конфигурация
+`:app` увидела только что записанный startup-профиль. Генерация не включена в
+обычную сборку.
 
 ### 54.3 Три падения, каждое названо по причине
 
@@ -4521,9 +4527,9 @@ Google называет другим рычагом **startup-профили**: 
 1. **`unknown property automaticGenerationDuringBuild`** (`45684652064`).
    Свойства потребителя профиля (`saveInSrc`, `mergeIntoMain`,
    `dexLayoutOptimization`, `automaticGenerationDuringBuild`) относятся к
-   расширению `BaselineProfileConsumerExtension` в `:app`. У модуля-генератора
-   расширение другое — `...ProducerExtension`. Блок `baselineProfile {}` в
-   `baselineprofile/build.gradle` убран.
+   расширению consumer в `:app`. У модуля-генератора — отдельный producer DSL;
+   сейчас в нём настроено только `useConnectedDevices = true`, а свойства
+   сохранения/слияния профиля остаются в `:app`.
 2. **`android.useAndroidX property is not enabled`** (`45685554102`).
    Проект был написан на чистом Android API, AndroidX в нём не использовался
    вовсе. `profileinstaller` — AndroidX-зависимость, поэтому флаг обязателен.
@@ -4540,22 +4546,36 @@ Google называет другим рычагом **startup-профили**: 
 
 ### 54.4 Что нужно, чтобы получить выигрыш
 
-1. Прогнать `:app:generateReleaseBaselineProfile` на эмуляторе API 34 с KVM
-   (образ уже используется в CI).
-2. Положить `baseline-prof.txt` и `startup-prof.txt` в репозиторий
-   (`saveInSrc = true` кладёт их в `src/<variant>/generated/baselineProfiles`).
-3. Включить `dexLayoutOptimization = true`.
-4. Измерить: тот же замер холодного старта (§50) **до** и **после**. Порог
-   нельзя брать из документации — 15–30 % там про приложения с сотнями методов
-   в горячем пути, а у нас 121–543 мс `onCreate` с тремя равными фазами.
+1. После публикации workflow запустить вручную «Генерация и замер профилей»
+   на ветке с изменениями. Он использует эмулятор API 34 с KVM, генерирует оба
+   файла, собирает R8-release и запускает Macrobenchmark.
+2. Проверить артефакт workflow: `baseline-prof.txt`, `startup-prof.txt`, APK,
+   JSON и Perfetto-выводы. Опциональная кнопка `commit_profile` сохраняет
+   только обновлённые профили коммитом в текущую рабочую ветку; `main` не
+   изменяется этим workflow.
+3. Для оценки пользовательского эффекта повторить сравнение на физическом
+   устройстве. CI-эмулятор со SwiftShader годится для функциональной проверки,
+   а не для цифр телефона. Порог нельзя брать из документации.
+4. Сравнивать распределения `None` и `Partial(Require)`: `StartupTimingMetric`
+   даёт время до первого отображения, не TTFD (в `MainActivity` нет
+   `reportFullyDrawn()`); `FrameTimingMetric` измеряет кадры каталога отдельно.
 
-Шаг 1 — единственное, чего я не могу сделать из песочницы: генерация требует
-устройства и занимает минуты. Всё остальное подготовлено.
+Генерация профиля и Macrobenchmark пока не выполнялись. Локально в песочнице
+нет Java, Android SDK и adb; обычная Gradle-сборка и компиляция тестового
+модуля проверены в CI, а ручной workflow ещё нужно запустить после публикации.
 
 ### 54.5 Границы
 
-* **Ускорения пока нет.** Есть инфраструктура; выигрыш появится только после
-  генерации профиля, и его размер неизвестен.
+* **Ускорения пока нет.** В репозитории нет сгенерированных профилей; без
+  `startup-prof.txt` DEX-layout остаётся выключен. Размер возможного эффекта
+  неизвестен, и проценты из документации не являются результатом проекта.
+* YAML обоих workflow и встроенные shell/Python-фрагменты проверены парсерами.
+  CI `45700203477` прошёл: JVM-тесты 96/96, lint (0 ошибок), debug-APK,
+  R8-release, прямую компиляцию `:baselineprofile:compileBenchmarkReleaseJavaWithJavac`
+  и эмуляторную проверку приложения. Предыдущий прогон `45699616434` показал,
+  что aggregate-задача `:baselineprofile:assemble` запускает connected-тесты и
+  требует устройство; в обычном CI она заменена прямой компиляцией. Генератор
+  профиля и Macrobenchmark на устройстве ещё не запускались.
 * Профиль устаревает: если добавить экран и не добавить его в сценарий
   генератора, он останется без оптимизации. Это записано в самом генераторе.
 * `profileinstaller` добавляет в APK зависимость — впервые за всю историю
@@ -4572,5 +4592,10 @@ Google называет другим рычагом **startup-профили**: 
 [2] «Create Baseline Profiles»: генератор — модуль `com.android.test` с
 `targetProjectPath = ':app'`; профиль пишется в `src/<variant>/generated/baselineProfiles`.
 [3] «Automated Performance Hygiene: Baseline Profiles and Macrobenchmarks in
-CI/CD»: в CI профиль генерируется на Gradle Managed Device, файл
-`baseline-prof.txt` коммитится как запасной вариант.
+CI/CD»: в CI профиль генерируется на устройстве; файл
+`baseline-prof.txt` сохраняется как артефакт/исходник.
+[4] «Benchmark release notes» (developer.android.com): `BaselineProfileRule.collect`
+стабилен с 1.2.0; в 1.2.4 исправлена настройка source set для профиля в
+benchmark-вариантах. Версия проекта закреплена на 1.2.4.
+[5] AndroidX API reference: `BaselineProfileRule.collect` и
+`CompilationMode.Partial` с `BaselineProfileMode.Require`.

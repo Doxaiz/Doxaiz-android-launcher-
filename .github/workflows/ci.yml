@@ -219,6 +219,18 @@ jobs:
         if: failure()
         run: bash .github/scripts/gradle-failure.sh gradle-release.log
 
+      # Компилируем исходники тестового варианта напрямую. Aggregate assemble
+      # у com.android.test может включить connected-задачи генерации профиля;
+      # проверка в обычном CI не должна требовать подключённого устройства.
+      - name: Скомпилировать генератор и Macrobenchmark без устройства
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon --stacktrace :baselineprofile:compileBenchmarkReleaseJavaWithJavac 2>&1 | tee gradle-baselineprofile.log
+
+      - name: Причина падения сборки профилей
+        if: failure()
+        run: bash .github/scripts/gradle-failure.sh gradle-baselineprofile.log
+
       - uses: actions/upload-artifact@v4
         with:
           name: doxaiz-debug-apk
