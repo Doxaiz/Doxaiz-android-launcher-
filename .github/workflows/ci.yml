@@ -281,20 +281,19 @@ jobs:
           gh release upload "$TAG" doxaiz-1.0.0.apk --clobber \
             || fail "не удалось обновить APK в релизе $TAG"
           gh release upload "$TAG" apk-sha256.txt --clobber || true
-          # Видео-обзор экранов лежит в репозитории (docs/), потому что загрузка
-          # ассетов из рабочей среды недоступна: хост uploads.github.com не в
-          # списке разрешённых. Загружает его CI, у которого доступ есть.
-          if [ -f docs/doxaiz-1.0-overview.mp4 ]; then
-            gh release upload "$TAG" docs/doxaiz-1.0-overview.mp4 --clobber \
-              || fail "не удалось обновить видео в релизе $TAG"
-          fi
-          echo "::notice title=релиз::APK и видео обновлены в $TAG"
+          # Видео лежат в docs/ рядом с исходниками: загрузка ассетов из
+          # рабочей среды недоступна, поэтому оба ролика публикует CI.
+          for VIDEO in docs/doxaiz-1.0-overview.mp4 docs/doxaiz-launcher-demo.mp4; do
+            [ -f "$VIDEO" ] || fail "не найден релизный ролик: $VIDEO"
+            gh release upload "$TAG" "$VIDEO" --clobber \
+              || fail "не удалось загрузить $VIDEO в релиз $TAG"
+          done
+          echo "::notice title=релиз::APK и оба видео обновлены в $TAG"
 
-      # Публикация выше заканчивается успехом и тогда, когда до неё не дошло
-      # (отменённый прогон) или когда загрузился не тот файл. Поэтому релиз не
-      # считается обновлённым, пока скачанный из него APK не совпадёт побайтно
-      # с собранным: расхождение sha256 — ошибка, а не молчание.
-      - name: Проверить, что в релизе лежит именно этот APK
+      # Релиз считается обновлённым только после побайтовой проверки APK и
+      # обоих видео: успешный upload сам по себе ещё не доказывает, что нужный
+      # файл доступен по ссылке.
+      - name: Проверить APK и видео в релизе
         if: >-
           github.ref == 'refs/heads/main' &&
           (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
@@ -314,6 +313,16 @@ jobs:
             exit 1
           fi
           echo "::notice title=релиз::APK в $TAG совпадает с собранным"
+          for VIDEO in docs/doxaiz-1.0-overview.mp4 docs/doxaiz-launcher-demo.mp4; do
+            NAME="$(basename "$VIDEO")"
+            gh release download "$TAG" --pattern "$NAME" --dir /tmp/release-check \
+              || { echo "::error title=релиз::не удалось скачать $NAME из $TAG"; exit 1; }
+            if ! cmp -s "$VIDEO" "/tmp/release-check/$NAME"; then
+              echo "::error title=релиз::в $TAG лежит другой файл $NAME"
+              exit 1
+            fi
+            echo "::notice title=релиз::$NAME в $TAG совпадает с docs/"
+          done
 
       # Тег должен указывать на коммит, из которого собран APK. Иначе скачавший
       # релиз не может понять, какой код внутри: 18.11 тег остался на 4890c04,

@@ -24,23 +24,24 @@ public final class BackupHelper {
     /**
      * Собирает JSON резервной копии.
      *
-     * @param includeHidden включать ли список скрытых приложений, пользовательские
-     *                      категории и переименования. Это приватные данные: если
-     *                      пользователь хочет поделиться только раскладкой
-     *                      (скриншот, перенос на другой телефон), их не должно быть
-     *                      в файле вовсе — раньше они попадали туда всегда (F-06).
+     * @param includePrivateData включать ли сведения, привязанные к приложениям:
+     *                           скрытые приложения, переименования, категории,
+     *                           пользовательские разделы, жесты и закрепления.
+     *                           Даже копия без этих данных содержит ключи видимых
+     *                           приложений на рабочем столе, необходимые для восстановления.
      */
-    public static String exportBackupJson(Prefs prefs, DesktopModel desktop, boolean includeHidden) {
+    public static String exportBackupJson(Prefs prefs, DesktopModel desktop, boolean includePrivateData) {
         try {
-            desktop.save();
             JSONObject root = new JSONObject();
             root.put("app", "Doxaiz");
             root.put("format", 2);
-            // Явный признак для импорта и для человека, открывшего файл:
-            // отсутствие ключа не должно трактоваться как «скрытых приложений нет».
-            root.put("privacyIncluded", includeHidden);
+            // Явный признак для импорта. В старых копиях этого ключа нет;
+            // они сохраняют прежнюю семантику полной совместимой копии.
+            root.put("privacyIncluded", includePrivateData);
 
-            String desktopJson = prefs.getDesktopJson();
+            String desktopJson = desktop != null
+                    ? desktop.snapshotJsonForBackup()
+                    : prefs.getDesktopJson();
             if (desktopJson != null && !desktopJson.isEmpty()) {
                 root.put("desktop", new JSONObject(desktopJson));
             }
@@ -82,7 +83,7 @@ public final class BackupHelper {
             s.put("recentsRamPos", prefs.getRecentsRamPosition());
             s.put("autoNetworkAssist", prefs.isAutoNetworkAssist());
             s.put("autoNetMode", prefs.getAutoNetworkMode());
-            if (includeHidden) s.put("protectHidden", prefs.isProtectHiddenApps());
+            if (includePrivateData) s.put("protectHidden", prefs.isProtectHiddenApps());
             s.put("showDrawerCategories", prefs.isShowDrawerCategories());
             s.put("showNotifDots", prefs.isShowNotificationDots());
             s.put("showRecent", prefs.isShowRecentApps());
@@ -101,16 +102,17 @@ public final class BackupHelper {
             s.put("dbarLowBattery", prefs.isDynamicBarLowBattery());
             s.put("dbarTimer", prefs.isDynamicBarTimer());
             s.put("dbarHotspot", prefs.isDynamicBarHotspot());
-            if (includeHidden) s.put("hiddenStdCats", prefs.getHiddenStdCategoriesRaw());
+            if (includePrivateData) s.put("hiddenStdCats", prefs.getHiddenStdCategoriesRaw());
             s.put("hapticFeedback", prefs.isHapticFeedbackEnabled());
             root.put("settings", s);
 
-            String customSecRaw = prefs.getCustomSectionsRawJson();
-            if (customSecRaw != null && !customSecRaw.isEmpty()) {
-                root.put("customSections", new JSONArray(customSecRaw));
-            }
+            if (includePrivateData) {
+                // Эти списки содержат package names и пользовательские названия
+                // приложений; без явного согласия их нельзя добавлять в копию.
+                String customSecRaw = prefs.getCustomSectionsRawJson();
+                root.put("customSections", new JSONArray(
+                        customSecRaw == null || customSecRaw.trim().isEmpty() ? "[]" : customSecRaw));
 
-            if (includeHidden) {
                 JSONArray hiddenArr = new JSONArray();
                 Set<String> hidden = prefs.getHiddenApps();
                 for (String k : hidden) hiddenArr.put(k);
@@ -121,32 +123,24 @@ public final class BackupHelper {
                     renamesObj.put(e.getKey(), e.getValue());
                 }
                 root.put("renames", renamesObj);
-            }
 
-            JSONObject swipeUpObj = new JSONObject();
-            for (Map.Entry<String, String> e : prefs.getAllIconSwipeUpTargets().entrySet()) {
-                swipeUpObj.put(e.getKey(), e.getValue());
-            }
-            root.put("iconSwipeUp", swipeUpObj);
+                JSONObject swipeUpObj = new JSONObject();
+                for (Map.Entry<String, String> e : prefs.getAllIconSwipeUpTargets().entrySet()) {
+                    swipeUpObj.put(e.getKey(), e.getValue());
+                }
+                root.put("iconSwipeUp", swipeUpObj);
 
-            JSONArray lockedArr = new JSONArray();
-            for (String pkg : prefs.getLockedRecentsPackages()) {
-                if (pkg != null && !pkg.isEmpty()) lockedArr.put(pkg);
-            }
-            root.put("lockedRecents", lockedArr);
+                JSONArray lockedArr = new JSONArray();
+                for (String pkg : prefs.getLockedRecentsPackages()) {
+                    if (pkg != null && !pkg.isEmpty()) lockedArr.put(pkg);
+                }
+                root.put("lockedRecents", lockedArr);
 
-            JSONObject customCatObj = new JSONObject();
-            for (Map.Entry<String, Integer> e : prefs.getAllCustomCategories().entrySet()) {
-                customCatObj.put(e.getKey(), e.getValue());
-            }
-            root.put("customCategories", customCatObj);
-
-            // Таблица переименований и категории собираются по именам пакетов,
-            // то есть тоже являются сведениями о приложениях пользователя.
-            // При экспорте «только раскладки» они не выгружаются.
-            if (!includeHidden) {
-                root.remove("renames");
-                root.remove("customCategories");
+                JSONObject customCatObj = new JSONObject();
+                for (Map.Entry<String, Integer> e : prefs.getAllCustomCategories().entrySet()) {
+                    customCatObj.put(e.getKey(), e.getValue());
+                }
+                root.put("customCategories", customCatObj);
             }
 
             return root.toString(2);
@@ -306,6 +300,12 @@ public final class BackupHelper {
 
             final boolean wasProtected = prefs.isProtectHiddenApps();
             final boolean allowPrivacyChange = !wasProtected || privacyAuthVerified;
+            // Копии, созданные до формата privacyIncluded, всегда содержали
+            // приватные поля. Новая копия с privacyIncluded=false не должна
+            // менять их, даже если в JSON вручную добавили такие ключи.
+            final boolean backupIncludesPrivateData = !root.has("privacyIncluded")
+                    || root.optBoolean("privacyIncluded", true);
+            final boolean allowPrivateDataImport = allowPrivacyChange && backupIncludesPrivateData;
 
             prefs.setDesktopJson(desk.toString());
             // desktop.load() раньше стоял здесь и оставлял раскладку уже подменённой даже
@@ -355,7 +355,7 @@ public final class BackupHelper {
                 if (s.has("recentsRamPos")) prefs.setRecentsRamPosition(clamp(s.optInt("recentsRamPos", Prefs.RECENTS_RAM_POS_DEFAULT), 0, 2));
                 if (s.has("autoNetworkAssist")) prefs.setAutoNetworkAssist(s.optBoolean("autoNetworkAssist", true));
                 if (s.has("autoNetMode")) prefs.setAutoNetworkMode(clamp(s.optInt("autoNetMode", Prefs.NET_MODE_BALANCED), 0, 2));
-                if (s.has("protectHidden")) {
+                if (allowPrivateDataImport && s.has("protectHidden")) {
                     prefs.setProtectHiddenApps(resolveImportedProtectHidden(
                             wasProtected, s.optBoolean("protectHidden", false), privacyAuthVerified));
                 }
@@ -377,83 +377,87 @@ public final class BackupHelper {
                 if (s.has("dbarLowBattery")) prefs.setDynamicBarLowBattery(s.optBoolean("dbarLowBattery", true));
                 if (s.has("dbarTimer")) prefs.setDynamicBarTimer(s.optBoolean("dbarTimer", true));
                 if (s.has("dbarHotspot")) prefs.setDynamicBarHotspot(s.optBoolean("dbarHotspot", true));
-                if (s.has("hiddenStdCats")) prefs.setHiddenStdCatsRawForImport(s.optString("hiddenStdCats", ""));
+                if (allowPrivateDataImport && s.has("hiddenStdCats")) {
+                    prefs.setHiddenStdCatsRawForImport(s.optString("hiddenStdCats", ""));
+                }
                 if (s.has("hapticFeedback")) prefs.setHapticFeedbackEnabled(s.optBoolean("hapticFeedback", true));
             }
 
-            JSONArray customSecArr = root.optJSONArray("customSections");
-            if (customSecArr != null) {
-                // Строгая санитизация лимитов MAX_SECTIONS и MAX_NAME_LEN при импорте произвольного JSON
-                prefs.setCustomSectionsRawJsonForImport(
-                        CustomSection.toJson(CustomSection.fromJson(customSecArr.toString())));
-            }
-
-            JSONArray hiddenArr = root.optJSONArray("hidden");
-            if (hiddenArr != null && allowPrivacyChange) {
-                prefs.clearHiddenApps();
-                int lim = Math.min(hiddenArr.length(), MAX_LIST_ENTRIES);
-                for (int i = 0; i < lim; i++) {
-                    String k = hiddenArr.optString(i, "");
-                    if (!k.isEmpty() && k.length() <= 180) prefs.hideApp(k);
+            if (allowPrivateDataImport) {
+                JSONArray customSecArr = root.optJSONArray("customSections");
+                if (customSecArr != null) {
+                    // Строгая санитизация лимитов MAX_SECTIONS и MAX_NAME_LEN при импорте произвольного JSON.
+                    prefs.setCustomSectionsRawJsonForImport(
+                            CustomSection.toJson(CustomSection.fromJson(customSecArr.toString())));
                 }
-            }
 
-            JSONObject renamesObj = root.optJSONObject("renames");
-            if (renamesObj != null) {
-                prefs.clearAllCustomLabels();
-                int count = 0;
-                Iterator<String> it = renamesObj.keys();
-                while (it.hasNext() && count < MAX_LIST_ENTRIES) {
-                    String k = it.next();
-                    String val = renamesObj.optString(k, "").trim();
-                    if (!k.isEmpty() && k.length() <= 180 && !val.isEmpty()) {
-                        if (val.length() > MAX_LABEL_LEN) val = val.substring(0, MAX_LABEL_LEN);
-                        prefs.setCustomLabel(k, val);
-                        count++;
+                JSONArray hiddenArr = root.optJSONArray("hidden");
+                if (hiddenArr != null) {
+                    prefs.clearHiddenApps();
+                    int lim = Math.min(hiddenArr.length(), MAX_LIST_ENTRIES);
+                    for (int i = 0; i < lim; i++) {
+                        String k = hiddenArr.optString(i, "");
+                        if (!k.isEmpty() && k.length() <= 180) prefs.hideApp(k);
                     }
                 }
-            }
 
-            JSONObject swipeUpObj = root.optJSONObject("iconSwipeUp");
-            if (swipeUpObj != null) {
-                prefs.clearAllIconSwipeUpTargets();
-                int count = 0;
-                Iterator<String> it = swipeUpObj.keys();
-                while (it.hasNext() && count < MAX_LIST_ENTRIES) {
-                    String k = it.next();
-                    String val = swipeUpObj.optString(k, "").trim();
-                    if (!k.isEmpty() && k.length() <= 180 && !val.isEmpty() && val.length() <= 180) {
-                        prefs.setIconSwipeUpTarget(k, val);
-                        count++;
+                JSONObject renamesObj = root.optJSONObject("renames");
+                if (renamesObj != null) {
+                    prefs.clearAllCustomLabels();
+                    int count = 0;
+                    Iterator<String> it = renamesObj.keys();
+                    while (it.hasNext() && count < MAX_LIST_ENTRIES) {
+                        String k = it.next();
+                        String val = renamesObj.optString(k, "").trim();
+                        if (!k.isEmpty() && k.length() <= 180 && !val.isEmpty()) {
+                            if (val.length() > MAX_LABEL_LEN) val = val.substring(0, MAX_LABEL_LEN);
+                            prefs.setCustomLabel(k, val);
+                            count++;
+                        }
                     }
                 }
-            }
 
-            JSONArray lockedArr = root.optJSONArray("lockedRecents");
-            if (lockedArr != null) {
-                Set<String> restoredLocked = new HashSet<>();
-                int lim = Math.min(lockedArr.length(), MAX_LIST_ENTRIES);
-                for (int i = 0; i < lim; i++) {
-                    String pkg = lockedArr.optString(i, "").trim();
-                    if (!pkg.isEmpty() && pkg.length() <= 180) {
-                        restoredLocked.add(pkg);
+                JSONObject swipeUpObj = root.optJSONObject("iconSwipeUp");
+                if (swipeUpObj != null) {
+                    prefs.clearAllIconSwipeUpTargets();
+                    int count = 0;
+                    Iterator<String> it = swipeUpObj.keys();
+                    while (it.hasNext() && count < MAX_LIST_ENTRIES) {
+                        String k = it.next();
+                        String val = swipeUpObj.optString(k, "").trim();
+                        if (!k.isEmpty() && k.length() <= 180 && !val.isEmpty() && val.length() <= 180) {
+                            prefs.setIconSwipeUpTarget(k, val);
+                            count++;
+                        }
                     }
                 }
-                prefs.setLockedRecentsPackages(restoredLocked);
-            }
 
-            JSONObject customCatObj = root.optJSONObject("customCategories");
-            if (customCatObj != null) {
-                prefs.clearAllCustomCategories();
-                int count = 0;
-                Iterator<String> it = customCatObj.keys();
-                while (it.hasNext() && count < MAX_LIST_ENTRIES) {
-                    String pkg = it.next();
-                    int cat = customCatObj.optInt(pkg, -1);
-                    if (pkg != null && !pkg.isEmpty() && pkg.length() <= 180
-                            && cat > AppCategoryHelper.CAT_ALL && cat <= AppCategoryHelper.CAT_SYSTEM) {
-                        prefs.setCustomCategory(pkg, cat);
-                        count++;
+                JSONArray lockedArr = root.optJSONArray("lockedRecents");
+                if (lockedArr != null) {
+                    Set<String> restoredLocked = new HashSet<>();
+                    int lim = Math.min(lockedArr.length(), MAX_LIST_ENTRIES);
+                    for (int i = 0; i < lim; i++) {
+                        String pkg = lockedArr.optString(i, "").trim();
+                        if (!pkg.isEmpty() && pkg.length() <= 180) {
+                            restoredLocked.add(pkg);
+                        }
+                    }
+                    prefs.setLockedRecentsPackages(restoredLocked);
+                }
+
+                JSONObject customCatObj = root.optJSONObject("customCategories");
+                if (customCatObj != null) {
+                    prefs.clearAllCustomCategories();
+                    int count = 0;
+                    Iterator<String> it = customCatObj.keys();
+                    while (it.hasNext() && count < MAX_LIST_ENTRIES) {
+                        String pkg = it.next();
+                        int cat = customCatObj.optInt(pkg, -1);
+                        if (pkg != null && !pkg.isEmpty() && pkg.length() <= 180
+                                && cat > AppCategoryHelper.CAT_ALL && cat <= AppCategoryHelper.CAT_SYSTEM) {
+                            prefs.setCustomCategory(pkg, cat);
+                            count++;
+                        }
                     }
                 }
             }
