@@ -4507,7 +4507,7 @@ Google называет другим рычагом **startup-профили**: 
 | Каталог | `BaselineProfileGenerator.drawerJourney()` + `LauncherProfileJourneys` | открыть «Все приложения» и прокрутить сетку; путь попадает в baseline, но не в startup-профиль |
 | Плагин и доставка | `:app` | `androidx.baselineprofile`, `profileinstaller:1.4.1`, `baselineProfile project(':baselineprofile')` |
 | DEX-layout | `app/build.gradle` | `dexLayoutOptimization` включается только если существует `startup-prof.txt`; без него R8 не падает на обычной release-сборке |
-| Macrobenchmark | `StartupBenchmarks` | 4 теста: холодный старт (`StartupTimingMetric`) и прокрутка (`FrameTimingMetric`), каждый с `None` и `Partial(Require)` |
+| Macrobenchmark | `StartupBenchmarks` | 6 тестов: холодный старт (`StartupTimingMetric`) и прокрутка (`FrameTimingMetric`), каждый с `None`, `Partial(Disable)` (3 JIT warmup) и `Partial(Require)` |
 | Компиляция в CI | `.github/workflows/ci.yml` | `:baselineprofile:compileBenchmarkReleaseJavaWithJavac` компилирует исходники тестового варианта без connected-задач на каждом коммите |
 | Ручной workflow | `.github/workflows/baseline-profile.yml` | API 34: генерация, R8-release и Macrobenchmark; артефакты сохраняются, коммит профилей — только по отдельному флагу в текущую ветку |
 | AndroidX | `gradle.properties` | `android.useAndroidX=true` нужен для `profileinstaller` |
@@ -4556,13 +4556,19 @@ Google называет другим рычагом **startup-профили**: 
 3. Для оценки пользовательского эффекта повторить сравнение на физическом
    устройстве. CI-эмулятор со SwiftShader годится для функциональной проверки,
    а не для цифр телефона. Порог нельзя брать из документации.
-4. Сравнивать распределения `None` и `Partial(Require)`: `StartupTimingMetric`
-   даёт время до первого отображения, не TTFD (в `MainActivity` нет
-   `reportFullyDrawn()`); `FrameTimingMetric` измеряет кадры каталога отдельно.
+4. Сравнивать распределения всех трёх режимов: `None` показывает вариант без
+   компиляции, `Partial(Disable, warmupIterations = 3)` — частичную компиляцию
+   после JIT-прогрева без baseline, а `Partial(Require)` — сборку с профилем.
+   Последнее сравнение с `Disable` отделяет вклад профиля лучше, чем пара
+   `None`/`Require`. `StartupTimingMetric` даёт время до первого отображения,
+   не TTFD (в `MainActivity` нет `reportFullyDrawn()`); `FrameTimingMetric`
+   измеряет кадры каталога отдельно.
 
-Генерация профиля и Macrobenchmark пока не выполнялись. Локально в песочнице
-нет Java, Android SDK и adb; обычная Gradle-сборка и компиляция тестового
-модуля проверены в CI, а ручной workflow ещё нужно запустить после публикации.
+Успешная генерация профиля и Macrobenchmark пока не завершены. Ручные
+workflow доходили до connected instrumentation, но падали при запуске
+сценария каталога; результаты профиля и замеров не созданы. Локально в
+песочнице нет Java, Android SDK и adb; обычная Gradle-сборка и компиляция
+тестового модуля проверены в CI.
 
 ### 54.5 Границы
 
@@ -4574,8 +4580,9 @@ Google называет другим рычагом **startup-профили**: 
   R8-release, прямую компиляцию `:baselineprofile:compileBenchmarkReleaseJavaWithJavac`
   и эмуляторную проверку приложения. Предыдущий прогон `45699616434` показал,
   что aggregate-задача `:baselineprofile:assemble` запускает connected-тесты и
-  требует устройство; в обычном CI она заменена прямой компиляцией. Генератор
-  профиля и Macrobenchmark на устройстве ещё не запускались.
+  требует устройство; в обычном CI она заменена прямой компиляцией. Ручной
+  workflow затем запускал connected instrumentation, но завершался с ошибкой
+  пути каталога; успешной генерации профиля и Macrobenchmark пока нет.
 * Профиль устаревает: если добавить экран и не добавить его в сценарий
   генератора, он останется без оптимизации. Это записано в самом генераторе.
 * `profileinstaller` добавляет в APK зависимость — впервые за всю историю
@@ -4599,6 +4606,18 @@ CI/CD»: в CI профиль генерируется на устройстве
 benchmark-вариантах. Версия проекта закреплена на 1.2.4.
 [5] AndroidX API reference: `BaselineProfileRule.collect` и
 `CompilationMode.Partial` с `BaselineProfileMode.Require`.
+[6] Android [performance-samples, `ScrollBenchmark.kt`](https://github.com/android/performance-samples/blob/main/MacrobenchmarkSample/macrobenchmark/src/main/kotlin/com/example/macrobenchmark/benchmark/scroll/ScrollBenchmark.kt):
+перед прокруткой выбирается scrollable-элемент, затем выполняются повторные
+fling-жесты в обе стороны.
+[7] [Исходник `UiObject2`](https://github.com/androidx/androidx/blob/androidx-main/test/uiautomator/uiautomator/src/main/java/androidx/test/uiautomator/UiObject2.java):
+результат `fling` означает, может ли элемент продолжать прокрутку в заданную
+сторону; `false` не обязательно означает, что жест не выполнился — список мог
+дойти до края.
+[8] Android [performance-samples, `StartupProfileGenerator.kt`](https://github.com/android/performance-samples/blob/main/MacrobenchmarkSample/macrobenchmark/src/main/kotlin/com/example/macrobenchmark/baselineprofile/StartupProfileGenerator.kt):
+отдельный путь запуска добавляется в startup-профиль через
+`includeInStartupProfile = true`.
+[9] Android [performance-samples, `StartupBenchmark.kt`](https://github.com/android/performance-samples/blob/main/MacrobenchmarkSample/macrobenchmark/src/main/kotlin/com/example/macrobenchmark/benchmark/startup/StartupBenchmark.kt):
+сравниваются `None`, `Partial(Disable)` с JIT warmup, `Partial(Require)` и `Full`.
 
 ### 54.7 Ручная проверка (2026-11-28)
 
@@ -4623,3 +4642,28 @@ instrumentation, но `:baselineprofile:connectedNonMinifiedReleaseAndroidTest`
 никакие результаты генерации профиля не подтверждены. R8-проверка с входным
 startup-профилем и Macrobenchmark ещё не дошли до выполнения. Ускорение не
 измерено и не заявляется.
+
+### 54.8 Сценарий прокрутки и состояние проверки
+
+Сверил путь каталога с Android `performance-samples`: для Macrobenchmark там
+выбирается прокручиваемый элемент и выполняются повторные fling-жесты в обе
+стороны. В актуальном исходнике AndroidX `UiObject2.fling()` возвращает, можно
+ли ещё прокручивать в выбранном направлении, а не просто факт отправки жеста.
+Поэтому тест не должен объявлять ошибкой `false` на границе списка.
+
+`LauncherProfileJourneys` переведён с `UiSelector`/`UiScrollable` на `By`,
+`Until` и `UiObject2`: кнопка каталога по-прежнему имеет резервный тап по
+координатам из UI dump; у сетки проверяется `isScrollable()`, затем выполняются
+два fling-жеста вниз и вверх без проверки граничного boolean. В
+`StartupBenchmarks` добавлены два контрольных теста `Partial(Disable, 3)` — для
+старта и прокрутки; теперь сценарии покрывают `None`, `Disable` и `Require`.
+Это изменения тестового контура, а не runtime-оптимизация лаунчера. Они пока не
+подтверждены компиляцией или на API 34 и не доказывают, что предыдущая причина
+невидимости кнопки устранена.
+
+Локально прошли Java syntax parse и `git diff --check`. В песочнице по-прежнему
+нет Java/Android SDK/adb, поэтому Gradle-компиляции и эмуляторного прогона не
+было. Попытки проверить remote GitHub по HTTPS завершились TLS handshake error,
+а `gh pr view 61` — EOF; эти правки пока не отправлены в PR #61. Последний
+известный remote tip — `6a1cb1c`. Профиль, release APK с профилем и результаты
+Macrobenchmark не созданы; ускорение не измерено и не заявляется.

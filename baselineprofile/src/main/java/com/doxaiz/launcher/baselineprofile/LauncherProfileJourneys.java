@@ -3,11 +3,11 @@ package com.doxaiz.launcher.baselineprofile;
 import android.graphics.Point;
 
 import androidx.test.platform.app.InstrumentationRegistry;
+import androidx.test.uiautomator.By;
+import androidx.test.uiautomator.Direction;
 import androidx.test.uiautomator.UiDevice;
-import androidx.test.uiautomator.UiObject;
-import androidx.test.uiautomator.UiObjectNotFoundException;
-import androidx.test.uiautomator.UiScrollable;
-import androidx.test.uiautomator.UiSelector;
+import androidx.test.uiautomator.UiObject2;
+import androidx.test.uiautomator.Until;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -105,7 +105,7 @@ final class LauncherProfileJourneys {
         return end < 0 ? "" : node.substring(start, end);
     }
 
-    /** Ищет кнопку в полном UI dump, если UiSelector не видит её напрямую. */
+    /** Ищет кнопку в полном UI dump, если BySelector не видит её напрямую. */
     private static Point findDrawerButtonCenter(UiDevice device) {
         File hierarchy = new File(
                 InstrumentationRegistry.getInstrumentation().getContext().getCacheDir(),
@@ -140,9 +140,7 @@ final class LauncherProfileJourneys {
 
     /** Закрывает каталог, если он остался открытым после предыдущей итерации. */
     static void ensureDrawerClosed(UiDevice device) {
-        UiObject drawerTitle = device.findObject(
-                new UiSelector().text("Все приложения"));
-        if (drawerTitle.waitForExists(500L)) {
+        if (device.wait(Until.hasObject(By.text("Все приложения")), 500L)) {
             device.pressBack();
             device.waitForIdle(UI_TIMEOUT_MS);
         }
@@ -151,13 +149,17 @@ final class LauncherProfileJourneys {
     /** Открывает каталог кнопкой в доке, проверяет экран и прокручивает список. */
     static void openDrawerAndScroll(UiDevice device) {
         ensureDrawerClosed(device);
-        UiObject openButton = device.findObject(
-                new UiSelector().description("Все приложения"));
         boolean clicked = false;
-        try {
-            clicked = openButton.waitForExists(UI_TIMEOUT_MS) && openButton.click();
-        } catch (UiObjectNotFoundException ignored) {
-            // Try the accessible bounds from the same hierarchy dump below.
+        if (device.wait(Until.hasObject(By.desc("Все приложения")), UI_TIMEOUT_MS)) {
+            UiObject2 openButton = device.findObject(By.desc("Все приложения"));
+            if (openButton != null) {
+                try {
+                    openButton.click();
+                    clicked = true;
+                } catch (RuntimeException ignored) {
+                    // Узел мог устареть между поиском и жестом; ниже есть tap по UI dump.
+                }
+            }
         }
         if (!clicked) {
             Point center = findDrawerButtonCenter(device);
@@ -168,34 +170,39 @@ final class LauncherProfileJourneys {
                     + describeCurrentUi(device));
         }
 
-        UiObject drawerTitle = device.findObject(
-                new UiSelector().text("Все приложения"));
-        if (!drawerTitle.waitForExists(UI_TIMEOUT_MS)) {
+        if (!device.wait(Until.hasObject(By.text("Все приложения")), UI_TIMEOUT_MS)) {
             throw new AssertionError("После нажатия не открылся каталог приложений; "
                     + describeCurrentUi(device));
         }
         device.waitForIdle(2_000L);
 
-        UiScrollable drawerGrid = new UiScrollable(
-                new UiSelector().className("android.widget.GridView"));
-        drawerGrid.setAsVerticalList();
-        if (!drawerGrid.waitForExists(UI_TIMEOUT_MS)) {
+        By gridSelector = By.clazz("android.widget.GridView");
+        if (!device.wait(Until.hasObject(gridSelector), UI_TIMEOUT_MS)) {
             throw new AssertionError("В каталоге не появился список приложений; "
                     + describeCurrentUi(device));
         }
+        UiObject2 drawerGrid = device.findObject(gridSelector);
+        if (drawerGrid == null) {
+            throw new AssertionError("Список приложений исчез после ожидания; "
+                    + describeCurrentUi(device));
+        }
         try {
-            if (!drawerGrid.scrollForward()) {
-                throw new AssertionError("Сетка приложений не прокручивается вниз; "
+            if (!drawerGrid.isScrollable()) {
+                throw new AssertionError("Список приложений не помечен прокручиваемым; "
                         + describeCurrentUi(device));
             }
-            device.waitForIdle(2_000L);
-            if (!drawerGrid.scrollBackward()) {
-                throw new AssertionError("Сетка приложений не прокручивается обратно вверх; "
-                        + describeCurrentUi(device));
+            // Fling возвращает false и при достижении края списка. Поэтому
+            // успешность каждого жеста не трактуем как наличие следующей страницы:
+            // выполняем несколько движений в обе стороны, как в Android perf-samples.
+            for (int i = 0; i < 2; i++) {
+                drawerGrid.fling(Direction.DOWN);
+            }
+            for (int i = 0; i < 2; i++) {
+                drawerGrid.fling(Direction.UP);
             }
             device.waitForIdle(2_000L);
-        } catch (UiObjectNotFoundException e) {
-            throw new AssertionError("Не удалось прокрутить сетку приложений; "
+        } catch (RuntimeException e) {
+            throw new AssertionError("Сбой жеста прокрутки каталога; "
                     + describeCurrentUi(device), e);
         }
     }
