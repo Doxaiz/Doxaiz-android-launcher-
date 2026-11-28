@@ -4,6 +4,7 @@ import android.graphics.Point;
 
 import androidx.test.platform.app.InstrumentationRegistry;
 import androidx.test.uiautomator.By;
+import androidx.test.uiautomator.BySelector;
 import androidx.test.uiautomator.Direction;
 import androidx.test.uiautomator.UiDevice;
 import androidx.test.uiautomator.UiObject2;
@@ -150,7 +151,7 @@ final class LauncherProfileJourneys {
     static void openDrawerAndScroll(UiDevice device) {
         ensureDrawerClosed(device);
         boolean clicked = false;
-        By drawerButtonSelector = By.desc("Все приложения").clickable(true);
+        BySelector drawerButtonSelector = By.desc("Все приложения").clickable(true);
         if (device.wait(Until.hasObject(drawerButtonSelector), UI_TIMEOUT_MS)) {
             UiObject2 openButton = device.findObject(drawerButtonSelector);
             if (openButton != null) {
@@ -177,12 +178,12 @@ final class LauncherProfileJourneys {
         }
         device.waitForIdle(2_000L);
 
-        By gridSelector = By.clazz("android.widget.GridView");
+        BySelector gridSelector = By.clazz("android.widget.GridView");
         if (!device.wait(Until.hasObject(gridSelector), UI_TIMEOUT_MS)) {
             throw new AssertionError("В каталоге не появился список приложений; "
                     + describeCurrentUi(device));
         }
-        By scrollableGridSelector = By.clazz("android.widget.GridView").scrollable(true);
+        BySelector scrollableGridSelector = By.clazz("android.widget.GridView").scrollable(true);
         if (!device.wait(Until.hasObject(scrollableGridSelector), UI_TIMEOUT_MS)) {
             throw new AssertionError("Сетка приложений не стала прокручиваемой; "
                     + describeCurrentUi(device));
