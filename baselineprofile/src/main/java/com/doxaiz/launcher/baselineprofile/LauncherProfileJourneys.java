@@ -171,7 +171,8 @@ final class LauncherProfileJourneys {
         UiObject drawerTitle = device.findObject(
                 new UiSelector().text("Все приложения"));
         if (!drawerTitle.waitForExists(UI_TIMEOUT_MS)) {
-            throw new AssertionError("После нажатия не открылся каталог приложений");
+            throw new AssertionError("После нажатия не открылся каталог приложений; "
+                    + describeCurrentUi(device));
         }
         device.waitForIdle(2_000L);
 
@@ -179,19 +180,23 @@ final class LauncherProfileJourneys {
                 new UiSelector().className("android.widget.GridView"));
         drawerGrid.setAsVerticalList();
         if (!drawerGrid.waitForExists(UI_TIMEOUT_MS)) {
-            throw new AssertionError("В каталоге не появился список приложений");
+            throw new AssertionError("В каталоге не появился список приложений; "
+                    + describeCurrentUi(device));
         }
         try {
             if (!drawerGrid.scrollForward()) {
-                throw new AssertionError("Сетка приложений не прокручивается вниз");
+                throw new AssertionError("Сетка приложений не прокручивается вниз; "
+                        + describeCurrentUi(device));
             }
             device.waitForIdle(2_000L);
             if (!drawerGrid.scrollBackward()) {
-                throw new AssertionError("Сетка приложений не прокручивается обратно вверх");
+                throw new AssertionError("Сетка приложений не прокручивается обратно вверх; "
+                        + describeCurrentUi(device));
             }
             device.waitForIdle(2_000L);
         } catch (UiObjectNotFoundException e) {
-            throw new AssertionError("Не удалось прокрутить сетку приложений", e);
+            throw new AssertionError("Не удалось прокрутить сетку приложений; "
+                    + describeCurrentUi(device), e);
         }
     }
 }
