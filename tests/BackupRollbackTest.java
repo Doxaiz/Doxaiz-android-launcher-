@@ -11,7 +11,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * F-21: откат неудачного импорта резервной копии.
+ * F-06/F-21: приватность экспорта и откат неудачного импорта резервной копии.
  *
  * <h3>Что было не так</h3>
  * В аудите §14.4 записано: «{@code restoreFromRollback} использует {@code commit()}
@@ -29,8 +29,9 @@ import java.util.Set;
  * </ul>
  *
  * <h3>Что проверяется</h3>
- * Поведение отката на поддельных SharedPreferences: значения возвращаются,
- * лишние ключи (появившиеся во время импорта) исчезают, а результат отката
+ * Скоуп приватных полей при экспорте/импорте, чтение актуальной раскладки,
+ * обратная совместимость старых файлов и поведение отката на поддельных
+ * SharedPreferences: значения возвращаются, лишние ключи исчезают, а результат
  * честно сообщается вызывающему. Проверки идут через реальный код {@link Prefs}
  * и {@link BackupHelper}, а не через копию логики в тесте.
  */
@@ -48,6 +49,10 @@ public final class BackupRollbackTest {
         rollbackReportsFailure();
         rejectedFileIsNotConfusedWithBrokenRollback();
         importStillAppliesValidBackup();
+        privateExportIsScopedAndUsesLiveLayout();
+        layoutOnlyImportIgnoresInjectedPrivateFields();
+        protectedImportRequiresPrivacyAuthorization();
+        legacyBackupStillImportsPrivateFields();
 
         System.out.println("BACKUP_ROLLBACK_TESTS=" + n);
     }
@@ -151,6 +156,175 @@ public final class BackupRollbackTest {
         check(ok.outcome == BackupHelper.ImportOutcome.IMPORTED, "исправная копия импортирована");
         check(ok.imported(), "imported() совпадает с исходом");
         check(prefs.getColumns() == 5, "настройка из копии применена");
+    }
+
+    /**
+     * Экспорт по умолчанию исключает чувствительные привязки приложений и берёт
+     * актуальную раскладку из модели, а не из ещё не обновлённой SharedPreferences.
+     */
+    private static void privateExportIsScopedAndUsesLiveLayout() throws Exception {
+        FakePrefs store = new FakePrefs();
+        Prefs prefs = seedPrivatePrefs(store, false);
+        final String staleKey = "com.stale.desktop/com.stale.Main#0";
+        final String liveKey = "com.visible.home/com.visible.Main#0";
+        prefs.setDesktopJson(validDesktopJson(staleKey).toString());
+        DesktopModel desktop = new DesktopModel(prefs);
+        desktop.pages.clear();
+        desktop.pages.add(new java.util.ArrayList<>());
+        desktop.pages.get(0).add(DesktopItem.appAt(liveKey, 1, 2));
+        desktop.markInitialized();
+
+        String compactJson = BackupHelper.exportBackupJson(prefs, desktop, false);
+        check(compactJson != null, "копия без приватных данных сформирована");
+        JSONObject compact = new JSONObject(compactJson);
+        JSONObject settings = compact.getJSONObject("settings");
+        String encoded = compact.toString();
+        check(!compact.optBoolean("privacyIncluded", true), "экспорт отмечен как без приватных данных");
+        check(!compact.has("hidden") && !compact.has("renames"), "нет скрытых приложений и переименований");
+        check(!compact.has("customCategories") && !compact.has("customSections"),
+                "нет пользовательских категорий и разделов с package names");
+        check(!compact.has("iconSwipeUp") && !compact.has("lockedRecents"),
+                "нет per-app жестов и закреплений в Недавних");
+        check(!settings.has("protectHidden") && !settings.has("hiddenStdCats"),
+                "нет настроек защиты/скрытия категорий");
+        check(encoded.contains(liveKey) && !encoded.contains(staleKey),
+                "экспорт берёт текущую раскладку, а не устаревшую строку Prefs");
+        check(!encoded.contains("com.private.secret"), "в компактной копии нет приватных package names");
+
+        String fullJson = BackupHelper.exportBackupJson(prefs, desktop, true);
+        check(fullJson != null, "полная копия сформирована");
+        JSONObject full = new JSONObject(fullJson);
+        JSONObject fullSettings = full.getJSONObject("settings");
+        check(full.optBoolean("privacyIncluded", false), "полная копия отмечена как приватная");
+        check(full.has("hidden") && full.has("renames"), "полная копия содержит список скрытых и имена");
+        check(full.has("customCategories") && full.has("customSections"),
+                "полная копия содержит категории и пользовательские разделы");
+        check(full.has("iconSwipeUp") && full.has("lockedRecents"),
+                "полная копия содержит per-app жесты и закрепления");
+        check(fullSettings.has("protectHidden") && fullSettings.has("hiddenStdCats"),
+                "полная копия сохраняет приватные настройки каталога");
+        check(full.toString().contains("com.private.secret"), "полная копия содержит выбранные private package names");
+    }
+
+    /** Поле privacyIncluded=false нельзя обойти, вручную добавив private JSON-ключи. */
+    private static void layoutOnlyImportIgnoresInjectedPrivateFields() throws Exception {
+        Prefs prefs = seedPrivatePrefs(new FakePrefs(), false);
+        DesktopModel desktop = new DesktopModel(prefs);
+        JSONObject file = privateSourceBackup();
+        file.put("privacyIncluded", false); // Представляет подменённый/старый редактором «безопасный» файл.
+
+        BackupHelper.ImportResult result = BackupHelper.importBackupJsonDetailed(
+                file.toString(), prefs, desktop, false);
+        check(result.outcome == BackupHelper.ImportOutcome.IMPORTED,
+                "раскладка импортируется, даже если private-поля проигнорированы");
+        assertSeedPrivateStateUnchanged(prefs, "layout-only import", false);
+    }
+
+    /** Если приватное пространство защищено, полная копия без auth не меняет private-состояние. */
+    private static void protectedImportRequiresPrivacyAuthorization() throws Exception {
+        Prefs prefs = seedPrivatePrefs(new FakePrefs(), true);
+        DesktopModel desktop = new DesktopModel(prefs);
+        JSONObject file = privateSourceBackup();
+        file.put("privacyIncluded", true);
+        file.put("hidden", new JSONArray().put("com.attacker.hidden/com.attacker.Main#0"));
+        file.put("renames", new JSONObject().put("com.kept.app/com.kept.Main#0", "Подменено"));
+
+        BackupHelper.ImportResult result = BackupHelper.importBackupJsonDetailed(
+                file.toString(), prefs, desktop, false);
+        check(result.outcome == BackupHelper.ImportOutcome.IMPORTED,
+                "обычная раскладка импортируется без права менять защищённые данные");
+        assertSeedPrivateStateUnchanged(prefs, "protected import without auth", true);
+    }
+
+    /** Старые файлы без privacyIncluded по-прежнему трактуются как полные копии. */
+    private static void legacyBackupStillImportsPrivateFields() throws Exception {
+        Prefs sourcePrefs = seedPrivatePrefs(new FakePrefs(), false);
+        DesktopModel sourceDesktop = new DesktopModel(sourcePrefs);
+        sourceDesktop.pages.clear();
+        sourceDesktop.pages.add(new java.util.ArrayList<>());
+        sourceDesktop.pages.get(0).add(DesktopItem.appAt(
+                "com.visible.home/com.visible.Main#0", 0, 0));
+        sourceDesktop.markInitialized();
+        JSONObject legacy = new JSONObject(BackupHelper.exportBackupJson(sourcePrefs, sourceDesktop, true));
+        legacy.remove("privacyIncluded");
+
+        Prefs targetPrefs = new Prefs(new FakePrefs());
+        DesktopModel targetDesktop = new DesktopModel(targetPrefs);
+        BackupHelper.ImportResult result = BackupHelper.importBackupJsonDetailed(
+                legacy.toString(), targetPrefs, targetDesktop, false);
+        check(result.outcome == BackupHelper.ImportOutcome.IMPORTED,
+                "старый формат без privacyIncluded импортирован");
+        check(targetPrefs.getHiddenApps().contains("com.private.secret/com.private.Main#0"),
+                "совместимость: старый hidden импортирован");
+        check("Личное".equals(targetPrefs.getCustomSections().get(0).name),
+                "совместимость: старый customSections импортирован");
+        check("com.private.target/com.private.Main#0".equals(targetPrefs.getIconSwipeUpTarget(
+                "com.private.secret/com.private.Main#0")), "совместимость: старый iconSwipeUp импортирован");
+        check(targetPrefs.getLockedRecentsPackages().contains("com.private.secret"),
+                "совместимость: старые lockedRecents импортированы");
+    }
+
+    private static Prefs seedPrivatePrefs(FakePrefs store, boolean protectedSpace) {
+        Prefs prefs = new Prefs(store);
+        String privateKey = "com.private.secret/com.private.Main#0";
+        prefs.hideApp(privateKey);
+        prefs.setCustomLabel(privateKey, "Личное приложение");
+        prefs.setCustomCategory("com.private.secret", AppCategoryHelper.CAT_FINANCE);
+        prefs.saveCustomSections(java.util.Collections.singletonList(
+                new CustomSection("sec_private", "Личное", java.util.Collections.singletonList("com.private.secret"))));
+        prefs.setIconSwipeUpTarget(privateKey, "com.private.target/com.private.Main#0");
+        prefs.setLockedRecentsPackages(new HashSet<>(java.util.Collections.singletonList("com.private.secret")));
+        prefs.setHiddenStdCategories(java.util.Collections.singleton(AppCategoryHelper.CAT_FINANCE));
+        prefs.setProtectHiddenApps(protectedSpace);
+        return prefs;
+    }
+
+    private static void assertSeedPrivateStateUnchanged(Prefs prefs, String label, boolean expectedProtected) {
+        String privateKey = "com.private.secret/com.private.Main#0";
+        check(prefs.getHiddenApps().contains(privateKey), label + ": hidden сохранён");
+        check("Личное приложение".equals(prefs.getCustomLabels().get(privateKey)), label + ": rename сохранён");
+        check(prefs.getCustomCategory("com.private.secret") == AppCategoryHelper.CAT_FINANCE,
+                label + ": custom category сохранена");
+        check(!prefs.getCustomSections().isEmpty()
+                        && "Личное".equals(prefs.getCustomSections().get(0).name),
+                label + ": custom section сохранён");
+        check("com.private.target/com.private.Main#0".equals(prefs.getIconSwipeUpTarget(privateKey)),
+                label + ": iconSwipeUp сохранён");
+        check(prefs.getLockedRecentsPackages().contains("com.private.secret"),
+                label + ": lockedRecents сохранён");
+        check(prefs.getHiddenStdCategories().contains(AppCategoryHelper.CAT_FINANCE),
+                label + ": hiddenStdCats сохранён");
+        check(prefs.isProtectHiddenApps() == expectedProtected, label + ": состояние защиты сохранено");
+    }
+
+    private static JSONObject privateSourceBackup() throws Exception {
+        JSONObject root = new JSONObject();
+        root.put("desktop", validDesktopJson("com.imported.app/com.imported.Main#0"));
+        root.put("privacyIncluded", true);
+        root.put("settings", new JSONObject()
+                .put("protectHidden", false)
+                .put("hiddenStdCats", ""));
+        root.put("hidden", new JSONArray().put("com.attacker.hidden/com.attacker.Main#0"));
+        root.put("renames", new JSONObject().put("com.kept.app/com.kept.Main#0", "Импортировано"));
+        root.put("customSections", new JSONArray().put(new JSONObject()
+                .put("id", "sec_new").put("name", "Новый раздел")
+                .put("pkgs", new JSONArray().put("com.new.app"))));
+        root.put("iconSwipeUp", new JSONObject().put("com.kept.app", "com.other.app"));
+        root.put("lockedRecents", new JSONArray().put("com.other.app"));
+        root.put("customCategories", new JSONObject().put("com.other.app", AppCategoryHelper.CAT_FINANCE));
+        return root;
+    }
+
+    private static JSONObject validDesktopJson(String appKey) throws Exception {
+        JSONObject item = new JSONObject();
+        item.put("type", "app");
+        item.put("key", appKey);
+        item.put("col", 0);
+        item.put("row", 0);
+        JSONArray page = new JSONArray().put(item);
+        return new JSONObject()
+                .put("pages", new JSONArray().put(page))
+                .put("dock", new JSONArray());
     }
 
     // ---------------------------------------------------------- инфраструктура

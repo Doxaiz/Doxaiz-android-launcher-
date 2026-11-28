@@ -2204,6 +2204,9 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     private void updateDrawerModeUi() {
         boolean isList = prefs.getDrawerMode() == Prefs.DRAWER_LIST;
         drawerModeIcon.setImageResource(isList ? R.drawable.ic_apps : R.drawable.ic_view_list);
+        drawerModeBtn.setContentDescription(isList
+                ? "Переключить на сетку приложений"
+                : "Переключить на список приложений");
         tintIcon(drawerModeIcon, theme.textPrimary);
         drawerGrid.setNumColumns(isList ? 1 : prefs.getColumns());
         drawerGrid.setVerticalSpacing(isList ? dp(6) : dp(10));
@@ -9034,7 +9037,7 @@ public class MainActivity extends Activity implements AppRepository.Listener {
 
         addDivider(layoutSafeCard);
         addActionRow(layoutSafeCard, "Сохранить раскладку в файл (.json)",
-                "JSON без шифрования. Можно сохранить только раскладку или копию со скрытыми приложениями.",
+                "JSON без шифрования. Перед экспортом можно исключить приватные списки приложений.",
                 this::startExportBackup);
 
         addDivider(layoutSafeCard);
@@ -11065,8 +11068,8 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         box.addView(title);
 
         TextView msg = new TextView(this);
-        msg.setText("Раскладка — это сетка иконок, док и папки. Скрытые приложения, "
-                + "переименования и категории — отдельные данные о ваших программах.");
+        msg.setText("JSON-файл не шифруется. Обе копии содержат идентификаторы приложений "
+                + "и названия папок на рабочем столе. Приватные списки можно исключить.");
         msg.setTextColor(theme.textSecondary);
         msg.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f);
         msg.setLineSpacing(dp(2), 1.0f);
@@ -11076,14 +11079,14 @@ public class MainActivity extends Activity implements AppRepository.Listener {
         mLp.bottomMargin = dp(12);
         box.addView(msg, mLp);
 
-        addActionRow(box, "Только раскладка",
-                "Без скрытых приложений, переименований и категорий — файл можно передавать",
+        addActionRow(box, "Копия без приватных списков",
+                "Без скрытых приложений, переименований, категорий, разделов, жестов и закреплений",
                 () -> {
                     dismissModal();
                     beginExportFlow(false);
                 });
         addActionRow(box, "Полная копия",
-                "Включая скрытые приложения, переименования и категории",
+                "Добавит скрытые приложения и все пользовательские привязки к приложениям",
                 () -> {
                     dismissModal();
                     beginExportFlow(true);
@@ -11235,14 +11238,14 @@ public class MainActivity extends Activity implements AppRepository.Listener {
             return;
         }
         if (!BiometricHelper.isDeviceSecure(this)) {
-            Toast.makeText(this, "Для сохранения защищённой копии сначала установите PIN или пароль экрана", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "Для полной копии сначала установите PIN или пароль экрана", Toast.LENGTH_LONG).show();
             pendingExportIncludesPrivate = false;
             return;
         }
         // При подтверждении через системный экран PIN результат приходит в
         // onActivityResult; действие для этого случая хранит BiometricHelper.
         BiometricHelper.authenticate(this, "Сохранение копии",
-                "Файл содержит список скрытых приложений. Подтвердите отпечатком или PIN.",
+                "JSON без шифрования содержит скрытые приложения и другие данные о приложениях. Подтвердите отпечатком или PIN.",
                 this::launchExportBackupPicker,
                 () -> pendingExportIncludesPrivate = false);
     }
@@ -11377,8 +11380,8 @@ public class MainActivity extends Activity implements AppRepository.Listener {
                     runOnUiThread(() -> {
                         if (!isFinishing() && !isDestroyed()) Toast.makeText(this,
                                 result ? (includePrivate
-                                        ? "Копия сохранена (включая скрытые приложения)"
-                                        : "Раскладка сохранена в файл")
+                                        ? "Полная копия сохранена (с данными приложений)"
+                                        : "Копия без приватных списков сохранена")
                                         : "Не удалось записать файл",
                                 Toast.LENGTH_SHORT).show();
                     });

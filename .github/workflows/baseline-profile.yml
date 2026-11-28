@@ -56,40 +56,20 @@ jobs:
           emulator-options: >-
             -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect
             -camera-back none -camera-front none
-          script: |
-            set -euo pipefail
+          # The action runs each script line in a separate /usr/bin/sh. Keep
+          # the Bash program in a file and invoke it as one command.
+          script: bash .github/scripts/baseline-profile-ci.sh
 
-            # mergeIntoMain=true: одна задача, источник — app/src/main/generated/.
-            ./gradlew --no-daemon --stacktrace \
-              :app:generateBaselineProfile \
-              -Pandroid.testInstrumentationRunnerArguments.androidx.benchmark.enabledRules=BaselineProfile
-
-            PROFILE_DIR="app/src/main/generated/baselineProfiles"
-            BASELINE="$PROFILE_DIR/baseline-prof.txt"
-            STARTUP="$PROFILE_DIR/startup-prof.txt"
-            test -s "$BASELINE" || { echo "::error title=профиль::не создан $BASELINE"; exit 1; }
-            test -s "$STARTUP" || { echo "::error title=профиль::не создан $STARTUP"; exit 1; }
-            BASELINE_RULES="$(grep -cvE '^[[:space:]]*(#|$)' "$BASELINE" || true)"
-            STARTUP_RULES="$(grep -cvE '^[[:space:]]*(#|$)' "$STARTUP" || true)"
-            [ "$BASELINE_RULES" -gt 0 ] || { echo "::error title=профиль::baseline-prof.txt пуст"; exit 1; }
-            [ "$STARTUP_RULES" -gt 0 ] || { echo "::error title=профиль::startup-prof.txt пуст"; exit 1; }
-            echo "::notice title=профили::baseline: $BASELINE_RULES правил; startup: $STARTUP_RULES правил"
-
-            # Отдельный запуск Gradle перечитывает только что созданный файл;
-            # тогда AGP 8.2.2 включает dexLayoutOptimization и R8 проверяет его.
-            ./gradlew --no-daemon --stacktrace :app:assembleRelease
-            APK="$(find app/build/outputs/apk/release -name '*.apk' | head -1)"
-            test -n "$APK" && test -f "$APK" || { echo "::error title=R8::release APK не найден"; exit 1; }
-            unzip -l "$APK" | grep -q 'assets/dexopt/baseline.prof' \
-              || { echo "::error title=R8::в release APK нет assets/dexopt/baseline.prof"; exit 1; }
-            echo "::notice title=R8::release APK собран с входным baseline/startup-профилем"
-
-            # EMULATOR переводит ограничение в предупреждение. Числа со
-            # SwiftShader не принимаются за производительность на телефоне.
-            ./gradlew --no-daemon --stacktrace \
-              :baselineprofile:connectedBenchmarkReleaseAndroidTest \
-              -Pandroid.testInstrumentationRunnerArguments.androidx.benchmark.enabledRules=Macrobenchmark \
-              -Pandroid.testInstrumentationRunnerArguments.androidx.benchmark.suppressErrors=EMULATOR
+      - name: Хвост Gradle-лога при ошибке
+        if: failure()
+        run: |
+          LOG="baselineprofile/build/baseline-profile-ci.log"
+          if [ -s "$LOG" ]; then
+            echo "Последние 100 строк $LOG:"
+            tail -n 100 "$LOG"
+          else
+            echo "::warning title=Gradle::лог $LOG не создан"
+          fi
 
       - name: Сводка Macrobenchmark
         if: always()
@@ -157,6 +137,7 @@ jobs:
             app/build/outputs/apk/release/*.apk
             baselineprofile/build/outputs/connected_android_test_additional_output/
             baselineprofile/build/reports/androidTests/connected/
+            baselineprofile/build/baseline-profile-ci.log
           if-no-files-found: warn
           retention-days: 14
 

@@ -37,6 +37,11 @@ public class StartupBenchmarks {
     }
 
     @Test
+    public void coldStartupWithJitButWithoutBaselineProfile() {
+        benchmarkStartup(new CompilationMode.Partial(BaselineProfileMode.Disable, 3));
+    }
+
+    @Test
     public void coldStartupWithBaselineProfile() {
         benchmarkStartup(new CompilationMode.Partial(BaselineProfileMode.Require, 0));
     }
@@ -44,6 +49,11 @@ public class StartupBenchmarks {
     @Test
     public void drawerScrollWithoutCompilation() {
         benchmarkDrawer(new CompilationMode.None());
+    }
+
+    @Test
+    public void drawerScrollWithJitButWithoutBaselineProfile() {
+        benchmarkDrawer(new CompilationMode.Partial(BaselineProfileMode.Disable, 3));
     }
 
     @Test
@@ -78,7 +88,7 @@ public class StartupBenchmarks {
                 scope -> {
                     scope.pressHome();
                     scope.startActivityAndWait();
-                    LauncherProfileJourneys.ensureDrawerClosed(
+                    LauncherProfileJourneys.prepareScrollableDrawer(
                             LauncherProfileJourneys.device());
                     return kotlin.Unit.INSTANCE;
                 },

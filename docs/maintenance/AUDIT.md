@@ -67,7 +67,7 @@ lint-прогон (0 предупреждений), прогон `V52Tests` / `A
 | F-03 | P2 | Целостность данных | `BackupHelper.java:236` (+221–390) | Импорт бэкапа не транзакционный: Prefs мутируются до разбора `settings`, любая ошибка → `return false` при частично применённом состоянии | ✅ исправлено |
 | F-04 | P2 | Логика настроек | `Prefs.java:184–190, 198–203, 249–253, 745–750`; `DesktopPagerView.java:92–130, 217–220` | Семейство «замороженных» настроек: сеттеры игнорируют аргумент, геттеры возвращают константу, стили переходов — мёртвый код | ✅ исправлено |
 | F-05 | P2 | Производительность | `MainActivity.java:2323–2339, 4000–4004` (47 вызовов) | Полная пересборка рабочего стола после запуска любого приложения/изменения бейджа | 🟡 частично (§11.4, §11.9) |
-| F-06 | P2 | Приватность/политика | `BackupHelper.java:109`; `AndroidManifest.xml:12` | Экспорт бэкапа содержит скрытые приложения в открытом виде; `QUERY_ALL_PACKAGES` без обоснования для стора | 🟡 закрыт по существу в §14.1 (выбор состава копии, `privacyIncluded`, биометрия перед «Полной копией»); открыт вопрос формулировок в интерфейсе и `QUERY_ALL_PACKAGES` для стора |
+| F-06 | P2 | Приватность/политика | `BackupHelper.java`; `AndroidManifest.xml:12` | Экспорт бэкапа и `QUERY_ALL_PACKAGES` требуют явного scope/обоснования | 🟡 экспорт закрыт в §55: приватные per-app поля только по выбору, импорт уважает `privacyIncluded`; остаётся декларация `QUERY_ALL_PACKAGES` при возможной публикации в Play |
 | F-07 | P2 | Обработка ошибок | 247 × `catch (Throwable ignored)`; напр. `DesktopModel.java:150–155`, `AppRepository.java:437–445` | Массовое проглатывание исключений скрывает деградацию (иконки, импорт, бэкап) без диагностики | 🟡 частично: журнал в критичных точках (§14.2), храповик с бюджетом 268 на общий рост и отдельные проверки «сбой обязан быть записан» (§38.4, `SilentCatchBudgetTest`); массовая замена отвергнута с обоснованием |
 | F-08 | P3 | Логика | `DoxaizNotificationService.java:305–314` | Проверка доступа к уведомлениям по подстроке в `enabled_notification_listeners` → ложноположительный результат | ✅ исправлено |
 | F-09 | P3 | Сборка | `AndroidManifest.xml:3–9`; `app/build.gradle:13–14`; `build.sh:39–40` | Версия/`package`/`uses-sdk` заданы в трёх местах и расходятся | ✅ исправлено |
@@ -4507,7 +4507,7 @@ Google называет другим рычагом **startup-профили**: 
 | Каталог | `BaselineProfileGenerator.drawerJourney()` + `LauncherProfileJourneys` | открыть «Все приложения» и прокрутить сетку; путь попадает в baseline, но не в startup-профиль |
 | Плагин и доставка | `:app` | `androidx.baselineprofile`, `profileinstaller:1.4.1`, `baselineProfile project(':baselineprofile')` |
 | DEX-layout | `app/build.gradle` | `dexLayoutOptimization` включается только если существует `startup-prof.txt`; без него R8 не падает на обычной release-сборке |
-| Macrobenchmark | `StartupBenchmarks` | 4 теста: холодный старт (`StartupTimingMetric`) и прокрутка (`FrameTimingMetric`), каждый с `None` и `Partial(Require)` |
+| Macrobenchmark | `StartupBenchmarks` | 6 тестов: холодный старт (`StartupTimingMetric`) и прокрутка (`FrameTimingMetric`), каждый с `None`, `Partial(Disable)` (3 JIT warmup) и `Partial(Require)` |
 | Компиляция в CI | `.github/workflows/ci.yml` | `:baselineprofile:compileBenchmarkReleaseJavaWithJavac` компилирует исходники тестового варианта без connected-задач на каждом коммите |
 | Ручной workflow | `.github/workflows/baseline-profile.yml` | API 34: генерация, R8-release и Macrobenchmark; артефакты сохраняются, коммит профилей — только по отдельному флагу в текущую ветку |
 | AndroidX | `gradle.properties` | `android.useAndroidX=true` нужен для `profileinstaller` |
@@ -4556,13 +4556,19 @@ Google называет другим рычагом **startup-профили**: 
 3. Для оценки пользовательского эффекта повторить сравнение на физическом
    устройстве. CI-эмулятор со SwiftShader годится для функциональной проверки,
    а не для цифр телефона. Порог нельзя брать из документации.
-4. Сравнивать распределения `None` и `Partial(Require)`: `StartupTimingMetric`
-   даёт время до первого отображения, не TTFD (в `MainActivity` нет
-   `reportFullyDrawn()`); `FrameTimingMetric` измеряет кадры каталога отдельно.
+4. Сравнивать распределения всех трёх режимов: `None` показывает вариант без
+   компиляции, `Partial(Disable, warmupIterations = 3)` — частичную компиляцию
+   после JIT-прогрева без baseline, а `Partial(Require)` — сборку с профилем.
+   Последнее сравнение с `Disable` отделяет вклад профиля лучше, чем пара
+   `None`/`Require`. `StartupTimingMetric` даёт время до первого отображения,
+   не TTFD (в `MainActivity` нет `reportFullyDrawn()`); `FrameTimingMetric`
+   измеряет кадры каталога отдельно.
 
-Генерация профиля и Macrobenchmark пока не выполнялись. Локально в песочнице
-нет Java, Android SDK и adb; обычная Gradle-сборка и компиляция тестового
-модуля проверены в CI, а ручной workflow ещё нужно запустить после публикации.
+Успешная генерация профиля и Macrobenchmark пока не завершены. Ручные
+workflow доходили до connected instrumentation, но падали при запуске
+сценария каталога; результаты профиля и замеров не созданы. Локально в
+песочнице нет Java, Android SDK и adb; обычная Gradle-сборка и компиляция
+тестового модуля проверены в CI.
 
 ### 54.5 Границы
 
@@ -4574,8 +4580,9 @@ Google называет другим рычагом **startup-профили**: 
   R8-release, прямую компиляцию `:baselineprofile:compileBenchmarkReleaseJavaWithJavac`
   и эмуляторную проверку приложения. Предыдущий прогон `45699616434` показал,
   что aggregate-задача `:baselineprofile:assemble` запускает connected-тесты и
-  требует устройство; в обычном CI она заменена прямой компиляцией. Генератор
-  профиля и Macrobenchmark на устройстве ещё не запускались.
+  требует устройство; в обычном CI она заменена прямой компиляцией. Ручной
+  workflow затем запускал connected instrumentation, но завершался с ошибкой
+  пути каталога; успешной генерации профиля и Macrobenchmark пока нет.
 * Профиль устаревает: если добавить экран и не добавить его в сценарий
   генератора, он останется без оптимизации. Это записано в самом генераторе.
 * `profileinstaller` добавляет в APK зависимость — впервые за всю историю
@@ -4599,3 +4606,99 @@ CI/CD»: в CI профиль генерируется на устройстве
 benchmark-вариантах. Версия проекта закреплена на 1.2.4.
 [5] AndroidX API reference: `BaselineProfileRule.collect` и
 `CompilationMode.Partial` с `BaselineProfileMode.Require`.
+[6] Android [performance-samples, `ScrollBenchmark.kt`](https://github.com/android/performance-samples/blob/main/MacrobenchmarkSample/macrobenchmark/src/main/kotlin/com/example/macrobenchmark/benchmark/scroll/ScrollBenchmark.kt):
+перед прокруткой выбирается scrollable-элемент, затем выполняются повторные
+fling-жесты в обе стороны.
+[7] [Исходник `UiObject2`](https://github.com/androidx/androidx/blob/androidx-main/test/uiautomator/uiautomator/src/main/java/androidx/test/uiautomator/UiObject2.java):
+результат `fling` означает, может ли элемент продолжать прокрутку в заданную
+сторону; `false` не обязательно означает, что жест не выполнился — список мог
+дойти до края.
+[8] Android [performance-samples, `StartupProfileGenerator.kt`](https://github.com/android/performance-samples/blob/main/MacrobenchmarkSample/macrobenchmark/src/main/kotlin/com/example/macrobenchmark/baselineprofile/StartupProfileGenerator.kt):
+отдельный путь запуска добавляется в startup-профиль через
+`includeInStartupProfile = true`.
+[9] Android [performance-samples, `StartupBenchmark.kt`](https://github.com/android/performance-samples/blob/main/MacrobenchmarkSample/macrobenchmark/src/main/kotlin/com/example/macrobenchmark/benchmark/startup/StartupBenchmark.kt):
+сравниваются `None`, `Partial(Disable)` с JIT warmup, `Partial(Require)` и `Full`.
+[10] AndroidX [`BySelector.java`](https://github.com/androidx/androidx/blob/androidx-main/test/uiautomator/uiautomator/src/main/java/androidx/test/uiautomator/BySelector.java): у селектора есть критерии `clickable(boolean)` и `scrollable(boolean)`, использованные в новом сценарии.
+
+### 54.7 Ручная проверка (2026-11-28)
+
+После слияния PR #60 первый workflow на `main` (`46140325132`) падал внутри
+`android-emulator-runner`: action запускает строки `script` отдельными
+`/usr/bin/sh`, а многострочный блок начинался с `set -euo pipefail`. Локально
+подтверждено, что `sh` (dash) отвергает `pipefail`. В PR #61 сценарий вынесен в
+`.github/scripts/baseline-profile-ci.sh` и передаётся runner одной командой
+`bash ...`; CI PR прошёл JVM-тесты (96/96), lint, сборки и emulator smoke test.
+
+Ручные прогоны `46141847232` и `46142384368` после исправления shell дошли до
+instrumentation, но `:baselineprofile:connectedNonMinifiedReleaseAndroidTest`
+упал: `LauncherProfileJourneys.openDrawerAndScroll()` не нашёл кнопку
+`«Все приложения»` за 5 секунд. Запуск `46143111776` подтвердил то же; в
+аннотации было `foreground=com.doxaiz.launcher`, но первый фрагмент UI hierarchy
+показывал только status bar, поэтому причина отсутствия кнопки пока не установлена.
+
+В коммитах `6c831cb` и `468d30f` добавлена компактная выборка package/UI узлов
+и GitHub-аннотация с причиной Gradle-сбоя. В `7114ec9` добавлен резервный тап
+по bounds из UI dump, если `UiSelector` не видит кнопку. Эти изменения ещё надо
+проверить новым ручным прогоном. Все dispatch запущены с `commit_profile=false`;
+никакие результаты генерации профиля не подтверждены. R8-проверка с входным
+startup-профилем и Macrobenchmark ещё не дошли до выполнения. Ускорение не
+измерено и не заявляется.
+
+### 54.8 Сценарий прокрутки и состояние проверки
+
+Сверил путь каталога с Android `performance-samples`: для Macrobenchmark там
+выбирается прокручиваемый элемент и выполняются повторные fling-жесты в обе
+стороны. В актуальном исходнике AndroidX `UiObject2.fling()` возвращает, можно
+ли ещё прокручивать в выбранном направлении, а не просто факт отправки жеста.
+Поэтому тест не должен объявлять ошибкой `false` на границе списка.
+
+`LauncherProfileJourneys` переведён с `UiSelector`/`UiScrollable` на `By`,
+`Until` и `UiObject2`: кнопка каталога по-прежнему имеет резервный тап по
+координатам из UI dump; тест дожидается `GridView` с критерием `scrollable(true)`,
+затем выполняет два fling-жеста вниз и вверх без проверки граничного boolean. В
+`StartupBenchmarks` добавлены два контрольных теста `Partial(Disable, 3)` — для
+старта и прокрутки; теперь сценарии покрывают `None`, `Disable` и `Require`.
+Это изменения тестового контура, а не runtime-оптимизация лаунчера.
+
+Исправление типов `BySelector` отправлено в коммите `81033df`. На этом SHA
+успешно прошли push CI `46146983500` и PR CI `46146987324`: 96/96 JVM-тестов,
+lint, debug APK/R8, компиляция генератора и Macrobenchmark, emulator smoke test.
+Это подтверждает сборку тестового кода, но не генерацию Baseline Profile.
+
+Ручной запуск `46147844951` с `commit_profile=false` прошёл компиляцию и дошёл
+до `:baselineprofile:connectedNonMinifiedReleaseAndroidTest`, но упал до
+генерации профиля: тест не нашёл кнопку `«Все приложения»`, хотя foreground и
+package указывали на `com.doxaiz.launcher`. Причина установлена в настройках:
+`Prefs.isShowDockDrawerBtn()` по умолчанию возвращает `false`, а `applyTheme()`
+скрывает кнопку дока; при этом стандартный `getSwipeUpAction()` —
+`SWIPE_UP_DRAWER`. Сценарий ошибочно считал необязательную кнопку обязательной.
+
+Коммит `da1395a` добавил fallback на штатный свайп вверх по границам домашнего
+экрана, если опциональная кнопка и coordinate tap недоступны. Push CI
+`46148674465` и PR CI `46148678881` на этом SHA прошли: 96/96 JVM-тестов,
+lint, сборки и emulator API 34. Ручной запуск `46148678871` подтвердил, что
+каталог открылся и заголовок найден, но затем завершился на проверке
+`GridView.scrollable(true)`: GridView присутствовал, но не сообщал
+`scrollable=true` в режиме сетки. На эмуляторе малого числа установленных
+приложений хватает, чтобы вся сетка поместилась на экране.
+
+Коммит `a88f693` добавил доступное имя действия переключателя списка/сетки.
+Профильный сценарий переводит каталог в одноколоночный список только когда
+текущая сетка фактически не прокручивается; `benchmarkDrawer` подготавливает
+режим в setup-блоке до снятия `FrameTimingMetric`, поэтому метрика не включает
+само переключение вида.
+
+На `a88f693` PR CI `46149809548` прошёл целиком, включая эмулятор API 34;
+`gh pr checks 61` также показал pass. Push CI `46149805520` сначала упал на
+проверке контраста текста в светлых настройках (тёмный текст не был обнаружен),
+но повтор только упавших jobs завершился успехом; итоговый push run зелёный.
+
+Ручной workflow `46149807494` (`commit_profile=false`, 17 мин 20 с) завершился
+успешно. Workflow-скрипт подтвердил непустые baseline/startup-профили с
+правилами, R8-release с `assets/dexopt/baseline.prof` и успешный connected
+Macrobenchmark для заданных режимов. Артефакт `baseline-profile-8` сохранён
+(28 131 126 байт); профиль не коммитился в ветку. Отчётный шаг Macrobenchmark
+тоже завершился, но скачать job log и сам артефакт в этой среде не удалось
+(EOF от Actions result service), поэтому отдельные JSON-медианы и их сравнение
+здесь не перепроверены. CI-эмулятор использует SwiftShader; ускорение на
+устройстве не измерено и не заявляется.

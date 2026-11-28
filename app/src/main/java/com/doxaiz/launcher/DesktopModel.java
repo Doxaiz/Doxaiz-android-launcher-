@@ -290,6 +290,19 @@ public final class DesktopModel {
         return snapshotLocked();
     }
 
+    /**
+     * Точная раскладка из текущего состояния в памяти для пользовательского экспорта.
+     *
+     * {@link #save()} сохраняет асинхронно, поэтому читать сразу после него
+     * {@link Prefs#getDesktopJson()} может вернуть предыдущую раскладку. Экспорт
+     * не должен зависеть от гонки фоновой записи: сериализуем согласованный
+     * снимок прямо из модели. Это редкая операция по явному действию пользователя,
+     * а не горячий путь кадра.
+     */
+    synchronized String snapshotJsonForBackup() {
+        return snapshotLocked().toJson();
+    }
+
     private LayoutSnapshot snapshotLocked() {
         return new LayoutSnapshot(nextFolderSeq, initialized || hasContent(), dock, pages);
     }
