@@ -4599,3 +4599,25 @@ CI/CD»: в CI профиль генерируется на устройстве
 benchmark-вариантах. Версия проекта закреплена на 1.2.4.
 [5] AndroidX API reference: `BaselineProfileRule.collect` и
 `CompilationMode.Partial` с `BaselineProfileMode.Require`.
+
+### 54.7 Ручная проверка (2026-11-28)
+
+После слияния PR #60 первый workflow на `main` (`46140325132`) падал внутри
+`android-emulator-runner`: action запускает строки `script` отдельными
+`/usr/bin/sh`, а многострочный блок начинался с `set -euo pipefail`. Локально
+подтверждено, что `sh` (dash) отвергает `pipefail`. В PR #61 сценарий вынесен в
+`.github/scripts/baseline-profile-ci.sh` и передаётся runner одной командой
+`bash ...`; CI PR прошёл JVM-тесты (96/96), lint, сборки и emulator smoke test.
+
+Ручные прогоны `46141847232` и `46142384368` после исправления shell дошли до
+instrumentation, но `:baselineprofile:connectedNonMinifiedReleaseAndroidTest`
+упал: `LauncherProfileJourneys.openDrawerAndScroll()` не нашёл кнопку
+`«Все приложения»` за 5 секунд. Запуск `46143111776` подтвердил то же; в
+аннотации было `foreground=com.doxaiz.launcher`, но первый фрагмент UI hierarchy
+показывал только status bar, поэтому причина отсутствия кнопки пока не установлена.
+
+В коммитах `6c831cb` и `468d30f` добавлена компактная выборка package/UI узлов
+и GitHub-аннотация с причиной Gradle-сбоя. Её ещё надо проверить новым ручным
+прогоном. Все эти dispatch запущены с `commit_profile=false`; никакие результаты
+генерации профиля не подтверждены. R8-проверка с входным startup-профилем и
+Macrobenchmark ещё не дошли до выполнения. Ускорение не измерено и не заявляется.
