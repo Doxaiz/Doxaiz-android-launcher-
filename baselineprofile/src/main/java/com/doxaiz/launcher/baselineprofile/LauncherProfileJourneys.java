@@ -1,5 +1,7 @@
 package com.doxaiz.launcher.baselineprofile;
 
+import android.graphics.Point;
+
 import androidx.test.platform.app.InstrumentationRegistry;
 import androidx.test.uiautomator.UiDevice;
 import androidx.test.uiautomator.UiObject;
@@ -103,6 +105,39 @@ final class LauncherProfileJourneys {
         return end < 0 ? "" : node.substring(start, end);
     }
 
+    /** Ищет кнопку в полном UI dump, если UiSelector не видит её напрямую. */
+    private static Point findDrawerButtonCenter(UiDevice device) {
+        File hierarchy = new File(
+                InstrumentationRegistry.getInstrumentation().getContext().getCacheDir(),
+                "baseline-profile-ui.xml");
+        try {
+            device.dumpWindowHierarchy(hierarchy);
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(
+                    new FileInputStream(hierarchy), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (!line.trim().startsWith("<node ")
+                            || !"com.doxaiz.launcher".equals(xmlAttribute(line, "package"))
+                            || !"Все приложения".equals(xmlAttribute(line, "content-desc"))) {
+                        continue;
+                    }
+                    String[] coordinates = xmlAttribute(line, "bounds")
+                            .replaceAll("[^0-9]+", " ").trim().split(" +");
+                    if (coordinates.length == 4) {
+                        int left = Integer.parseInt(coordinates[0]);
+                        int top = Integer.parseInt(coordinates[1]);
+                        int right = Integer.parseInt(coordinates[2]);
+                        int bottom = Integer.parseInt(coordinates[3]);
+                        return new Point((left + right) / 2, (top + bottom) / 2);
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+            // The caller emits the complete, bounded UI diagnostic on failure.
+        }
+        return null;
+    }
+
     /** Закрывает каталог, если он остался открытым после предыдущей итерации. */
     static void ensureDrawerClosed(UiDevice device) {
         UiObject drawerTitle = device.findObject(
@@ -118,16 +153,19 @@ final class LauncherProfileJourneys {
         ensureDrawerClosed(device);
         UiObject openButton = device.findObject(
                 new UiSelector().description("Все приложения"));
-        if (!openButton.waitForExists(UI_TIMEOUT_MS)) {
-            throw new AssertionError("На рабочем столе не найдена кнопка «Все приложения»; "
-                    + describeCurrentUi(device));
-        }
+        boolean clicked = false;
         try {
-            if (!openButton.click()) {
-                throw new AssertionError("Не удалось нажать кнопку «Все приложения»");
-            }
-        } catch (UiObjectNotFoundException e) {
-            throw new AssertionError("Кнопка каталога исчезла до нажатия", e);
+            clicked = openButton.waitForExists(UI_TIMEOUT_MS) && openButton.click();
+        } catch (UiObjectNotFoundException ignored) {
+            // Try the accessible bounds from the same hierarchy dump below.
+        }
+        if (!clicked) {
+            Point center = findDrawerButtonCenter(device);
+            clicked = center != null && device.click(center.x, center.y);
+        }
+        if (!clicked) {
+            throw new AssertionError("Не найдена/не нажата кнопка «Все приложения»; "
+                    + describeCurrentUi(device));
         }
 
         UiObject drawerTitle = device.findObject(
