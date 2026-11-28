@@ -2204,6 +2204,9 @@ public class MainActivity extends Activity implements AppRepository.Listener {
     private void updateDrawerModeUi() {
         boolean isList = prefs.getDrawerMode() == Prefs.DRAWER_LIST;
         drawerModeIcon.setImageResource(isList ? R.drawable.ic_apps : R.drawable.ic_view_list);
+        drawerModeBtn.setContentDescription(isList
+                ? "Переключить на сетку приложений"
+                : "Переключить на список приложений");
         tintIcon(drawerModeIcon, theme.textPrimary);
         drawerGrid.setNumColumns(isList ? 1 : prefs.getColumns());
         drawerGrid.setVerticalSpacing(isList ? dp(6) : dp(10));

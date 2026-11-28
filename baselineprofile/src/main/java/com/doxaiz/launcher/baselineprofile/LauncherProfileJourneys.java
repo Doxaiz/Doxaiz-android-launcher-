@@ -22,6 +22,7 @@ import java.util.Set;
 final class LauncherProfileJourneys {
 
     private static final long UI_TIMEOUT_MS = 5_000L;
+    private static final String SWITCH_TO_LIST_DESCRIPTION = "Переключить на список приложений";
 
     private LauncherProfileJourneys() {}
 
@@ -220,7 +221,7 @@ final class LauncherProfileJourneys {
     }
 
     /** Открывает каталог кнопкой, если она включена, иначе штатным свайпом вверх. */
-    static void openDrawerAndScroll(UiDevice device) {
+    private static void openDrawerScreen(UiDevice device) {
         ensureDrawerClosed(device);
         boolean clicked = false;
         BySelector drawerButtonSelector = By.desc("Все приложения").clickable(true);
@@ -262,22 +263,59 @@ final class LauncherProfileJourneys {
                     + describeCurrentUi(device));
         }
         device.waitForIdle(2_000L);
+    }
 
+    /** Требует реального overflow; если сетка помещается, переводит каталог в список. */
+    private static UiObject2 requireScrollableDrawerGrid(UiDevice device) {
         BySelector gridSelector = By.clazz("android.widget.GridView");
         if (!device.wait(Until.hasObject(gridSelector), UI_TIMEOUT_MS)) {
             throw new AssertionError("В каталоге не появился список приложений; "
                     + describeCurrentUi(device));
         }
         BySelector scrollableGridSelector = By.clazz("android.widget.GridView").scrollable(true);
-        if (!device.wait(Until.hasObject(scrollableGridSelector), UI_TIMEOUT_MS)) {
-            throw new AssertionError("Сетка приложений не стала прокручиваемой; "
-                    + describeCurrentUi(device));
+        if (!device.wait(Until.hasObject(scrollableGridSelector), 750L)) {
+            BySelector switchToListSelector = By.desc(SWITCH_TO_LIST_DESCRIPTION).clickable(true);
+            if (!device.wait(Until.hasObject(switchToListSelector), 1_000L)) {
+                throw new AssertionError("Каталог не прокручивается в текущем режиме, "
+                        + "переключатель на список не найден; " + describeCurrentUi(device));
+            }
+            UiObject2 switchToList = device.findObject(switchToListSelector);
+            if (switchToList == null) {
+                throw new AssertionError("Переключатель на список исчез после ожидания; "
+                        + describeCurrentUi(device));
+            }
+            try {
+                switchToList.click();
+            } catch (RuntimeException e) {
+                throw new AssertionError("Не удалось переключить каталог в режим списка; "
+                        + describeCurrentUi(device), e);
+            }
+            if (!device.wait(Until.hasObject(scrollableGridSelector), UI_TIMEOUT_MS)) {
+                throw new AssertionError("После переключения на список каталог всё ещё "
+                        + "не прокручивается; " + describeCurrentUi(device));
+            }
         }
+
         UiObject2 drawerGrid = device.findObject(scrollableGridSelector);
         if (drawerGrid == null) {
             throw new AssertionError("Прокручиваемая сетка исчезла после ожидания; "
                     + describeCurrentUi(device));
         }
+        return drawerGrid;
+    }
+
+    /** Подготавливает список к замеру, чтобы переключение режима не вошло в метрику кадров. */
+    static void prepareScrollableDrawer(UiDevice device) {
+        openDrawerScreen(device);
+        requireScrollableDrawerGrid(device);
+        device.pressBack();
+        device.waitForIdle(UI_TIMEOUT_MS);
+    }
+
+    /** Открывает каталог, гарантирует прокручиваемый список и выполняет fling в обе стороны. */
+    static void openDrawerAndScroll(UiDevice device) {
+        openDrawerScreen(device);
+        UiObject2 drawerGrid = requireScrollableDrawerGrid(device);
         try {
             // Fling возвращает false и при достижении края списка. Поэтому
             // успешность каждого жеста не трактуем как наличие следующей страницы:

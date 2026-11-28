@@ -88,7 +88,7 @@ public class StartupBenchmarks {
                 scope -> {
                     scope.pressHome();
                     scope.startActivityAndWait();
-                    LauncherProfileJourneys.ensureDrawerClosed(
+                    LauncherProfileJourneys.prepareScrollableDrawer(
                             LauncherProfileJourneys.device());
                     return kotlin.Unit.INSTANCE;
                 },
