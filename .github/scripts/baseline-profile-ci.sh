@@ -14,7 +14,34 @@ run_gradle() {
     ./gradlew --no-daemon --stacktrace "$@" 2>&1 | tee -a "$GRADLE_LOG" || status=$?
     echo "::endgroup::"
     if (( status != 0 )); then
+        local diagnostics
+        diagnostics="$(python3 - "$GRADLE_LOG" <<'PY'
+import sys
+
+with open(sys.argv[1], encoding='utf-8', errors='replace') as log:
+    lines = log.readlines()
+markers = (
+    'FAILURE:', 'What went wrong:', 'Execution failed for task',
+    'A failure occurred while executing', 'Caused by:',
+    'INSTRUMENTATION_RESULT: shortMsg=', 'INSTRUMENTATION_STATUS: shortMsg=',
+    'FAILURES!!!', 'Tests run:', 'No tests found', 'No tests were found',
+    'No tests executed', 'AssertionError:', 'Exception:',
+)
+selected = []
+for line in lines:
+    line = line.strip()
+    if line and any(marker in line for marker in markers) and line not in selected:
+        selected.append(line)
+if not selected:
+    selected = [line.strip() for line in lines[-15:] if line.strip()]
+message = ' | '.join(selected[-12:])[:1800]
+print(message.replace('%', '%25').replace('\r', ' ').replace('\n', ' '))
+PY
+)"
         echo "::error title=Gradle::команда завершилась с кодом $status: $*"
+        if [[ -n "$diagnostics" ]]; then
+            printf '::error title=Gradle failure::%s\n' "$diagnostics"
+        fi
         tail -n 80 "$GRADLE_LOG" || true
         return "$status"
     fi
